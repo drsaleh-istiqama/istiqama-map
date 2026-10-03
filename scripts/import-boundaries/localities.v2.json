@@ -1,0 +1,967 @@
+{
+  "$comment": [
+    "Towns and villages of the v2 location tree (reference/v2/src/locations.js), imported as",
+    "approved localities so that nothing a v2 user could pick is lost (docs/V2_PARITY.md).",
+    "name_ar is the v2 spelling; name_latin is the usual Latin spelling of the place.",
+    "match: the administrative area the v2 region corresponds to, best candidate first (level +",
+    "English or Swahili name as imported). The first one that exists is used; when none exists",
+    "the locality is attached to the country only.",
+    "lon/lat: approximate town centre (WGS 84, +-2 km), null when not known reliably. When the",
+    "point lies inside an imported boundary the database attaches the locality to the deepest",
+    "area containing it instead of the matched region.",
+    "id = ref_uuid('locality:v2:<ISO2>:<region key>:<locality key>'): never change the keys."
+  ],
+  "countries": {
+    "TZ": [
+      {
+        "key": "north-pemba",
+        "region_ar": "بيمبا الشمالية",
+        "match": [
+          { "level": 1, "name": "North Pemba" },
+          { "level": 1, "name": "Kaskazini Pemba" },
+          { "level": 1, "name": "Pemba North" }
+        ],
+        "localities": [
+          { "key": "wete", "name_ar": "ويتي", "name_latin": "Wete", "lon": 39.728, "lat": -5.057 },
+          {
+            "key": "micheweni",
+            "name_ar": "ميشيوني",
+            "name_latin": "Micheweni",
+            "lon": 39.833,
+            "lat": -4.967
+          },
+          { "key": "konde", "name_ar": "كوندي", "name_latin": "Konde", "lon": 39.75, "lat": -4.95 },
+          { "key": "wingwi", "name_ar": "وينغوي", "name_latin": "Wingwi", "lon": null, "lat": null }
+        ]
+      },
+      {
+        "key": "south-pemba",
+        "region_ar": "بيمبا الجنوبية",
+        "match": [
+          { "level": 1, "name": "South Pemba" },
+          { "level": 1, "name": "Kusini Pemba" },
+          { "level": 1, "name": "Pemba South" }
+        ],
+        "localities": [
+          {
+            "key": "chake-chake",
+            "name_ar": "تشاكي تشاكي",
+            "name_latin": "Chake Chake",
+            "lon": 39.767,
+            "lat": -5.246
+          },
+          {
+            "key": "mkoani",
+            "name_ar": "مكواني",
+            "name_latin": "Mkoani",
+            "lon": 39.648,
+            "lat": -5.357
+          },
+          { "key": "wambaa", "name_ar": "وامبا", "name_latin": "Wambaa", "lon": null, "lat": null }
+        ]
+      },
+      {
+        "key": "zanzibar-north",
+        "region_ar": "زنجبار الشمالية",
+        "match": [
+          { "level": 1, "name": "Zanzibar North" },
+          { "level": 1, "name": "Kaskazini Unguja" }
+        ],
+        "localities": [
+          {
+            "key": "mkokotoni",
+            "name_ar": "مكوكوتوني",
+            "name_latin": "Mkokotoni",
+            "lon": 39.255,
+            "lat": -5.875
+          },
+          {
+            "key": "nungwi",
+            "name_ar": "نونغوي",
+            "name_latin": "Nungwi",
+            "lon": 39.299,
+            "lat": -5.726
+          },
+          {
+            "key": "kiwengwa",
+            "name_ar": "كيوينغوا",
+            "name_latin": "Kiwengwa",
+            "lon": 39.38,
+            "lat": -5.995
+          }
+        ]
+      },
+      {
+        "key": "zanzibar-south-central",
+        "region_ar": "زنجبار الجنوبية والوسطى",
+        "match": [
+          { "level": 1, "name": "Zanzibar South & Central" },
+          { "level": 1, "name": "Kusini Unguja" },
+          { "level": 1, "name": "Zanzibar South" }
+        ],
+        "localities": [
+          {
+            "key": "koani",
+            "name_ar": "كواني",
+            "name_latin": "Koani",
+            "lon": 39.283,
+            "lat": -6.133
+          },
+          {
+            "key": "chwaka",
+            "name_ar": "تشواكا",
+            "name_latin": "Chwaka",
+            "lon": 39.433,
+            "lat": -6.167
+          },
+          {
+            "key": "makunduchi",
+            "name_ar": "ماكوندوتشي",
+            "name_latin": "Makunduchi",
+            "lon": 39.55,
+            "lat": -6.417
+          },
+          {
+            "key": "kizimkazi",
+            "name_ar": "كيزيمكازي",
+            "name_latin": "Kizimkazi",
+            "lon": 39.467,
+            "lat": -6.433
+          }
+        ]
+      },
+      {
+        "key": "zanzibar-urban-west",
+        "region_ar": "زنجبار الحضرية والغربية",
+        "match": [
+          { "level": 1, "name": "Zanzibar Urban/West" },
+          { "level": 1, "name": "Mjini Magharibi" },
+          { "level": 1, "name": "Zanzibar West" }
+        ],
+        "localities": [
+          {
+            "key": "zanzibar-city",
+            "name_ar": "مدينة زنجبار",
+            "name_latin": "Zanzibar City",
+            "lon": 39.203,
+            "lat": -6.166
+          },
+          {
+            "key": "stone-town",
+            "name_ar": "ستون تاون",
+            "name_latin": "Stone Town",
+            "lon": 39.192,
+            "lat": -6.162
+          }
+        ]
+      },
+      {
+        "key": "dar-es-salaam",
+        "region_ar": "دار السلام",
+        "match": [{ "level": 1, "name": "Dar es Salaam" }],
+        "localities": [
+          {
+            "key": "ilala",
+            "name_ar": "إيلالا",
+            "name_latin": "Ilala",
+            "lon": 39.26,
+            "lat": -6.823
+          },
+          {
+            "key": "kinondoni",
+            "name_ar": "كينوندوني",
+            "name_latin": "Kinondoni",
+            "lon": 39.267,
+            "lat": -6.783
+          },
+          {
+            "key": "temeke",
+            "name_ar": "تيميكي",
+            "name_latin": "Temeke",
+            "lon": 39.25,
+            "lat": -6.867
+          },
+          {
+            "key": "ubungo",
+            "name_ar": "أوبونغو",
+            "name_latin": "Ubungo",
+            "lon": 39.208,
+            "lat": -6.783
+          },
+          {
+            "key": "kigamboni",
+            "name_ar": "كيغامبوني",
+            "name_latin": "Kigamboni",
+            "lon": 39.317,
+            "lat": -6.833
+          }
+        ]
+      },
+      {
+        "key": "tanga",
+        "region_ar": "تانغا",
+        "match": [{ "level": 1, "name": "Tanga" }],
+        "localities": [
+          {
+            "key": "tanga",
+            "name_ar": "تانغا",
+            "name_latin": "Tanga",
+            "lon": 39.099,
+            "lat": -5.069
+          },
+          {
+            "key": "muheza",
+            "name_ar": "موهيزا",
+            "name_latin": "Muheza",
+            "lon": 38.783,
+            "lat": -5.167
+          },
+          {
+            "key": "korogwe",
+            "name_ar": "كوروجوي",
+            "name_latin": "Korogwe",
+            "lon": 38.483,
+            "lat": -5.156
+          }
+        ]
+      },
+      {
+        "key": "arusha",
+        "region_ar": "أروشا",
+        "match": [{ "level": 1, "name": "Arusha" }],
+        "localities": [
+          {
+            "key": "arusha",
+            "name_ar": "أروشا",
+            "name_latin": "Arusha",
+            "lon": 36.683,
+            "lat": -3.367
+          }
+        ]
+      },
+      {
+        "key": "dodoma",
+        "region_ar": "دودوما",
+        "match": [{ "level": 1, "name": "Dodoma" }],
+        "localities": [
+          {
+            "key": "dodoma",
+            "name_ar": "دودوما",
+            "name_latin": "Dodoma",
+            "lon": 35.742,
+            "lat": -6.173
+          }
+        ]
+      },
+      {
+        "key": "mwanza",
+        "region_ar": "موانزا",
+        "match": [{ "level": 1, "name": "Mwanza" }],
+        "localities": [
+          {
+            "key": "mwanza",
+            "name_ar": "موانزا",
+            "name_latin": "Mwanza",
+            "lon": 32.9,
+            "lat": -2.517
+          }
+        ]
+      }
+    ],
+    "UG": [
+      {
+        "key": "kampala",
+        "region_ar": "كمبالا",
+        "match": [
+          { "level": 3, "name": "Kampala" },
+          { "level": 2, "name": "Kampala" },
+          { "level": 1, "name": "Central Region" }
+        ],
+        "localities": [
+          {
+            "key": "kampala",
+            "name_ar": "كمبالا",
+            "name_latin": "Kampala",
+            "lon": 32.583,
+            "lat": 0.348
+          }
+        ]
+      },
+      {
+        "key": "wakiso",
+        "region_ar": "واكيسو",
+        "match": [
+          { "level": 3, "name": "Wakiso" },
+          { "level": 1, "name": "Central Region" }
+        ],
+        "localities": [
+          {
+            "key": "entebbe",
+            "name_ar": "إنتيبي",
+            "name_latin": "Entebbe",
+            "lon": 32.464,
+            "lat": 0.051
+          },
+          { "key": "kira", "name_ar": "كيرا", "name_latin": "Kira", "lon": 32.639, "lat": 0.397 },
+          {
+            "key": "nansana",
+            "name_ar": "ناسانا",
+            "name_latin": "Nansana",
+            "lon": 32.529,
+            "lat": 0.364
+          }
+        ]
+      },
+      {
+        "key": "mukono",
+        "region_ar": "موكونو",
+        "match": [
+          { "level": 3, "name": "Mukono" },
+          { "level": 1, "name": "Central Region" }
+        ],
+        "localities": [
+          {
+            "key": "mukono",
+            "name_ar": "موكونو",
+            "name_latin": "Mukono",
+            "lon": 32.755,
+            "lat": 0.353
+          }
+        ]
+      },
+      {
+        "key": "jinja",
+        "region_ar": "جينجا",
+        "match": [
+          { "level": 3, "name": "Jinja" },
+          { "level": 1, "name": "Eastern Region" }
+        ],
+        "localities": [
+          { "key": "jinja", "name_ar": "جينجا", "name_latin": "Jinja", "lon": 33.204, "lat": 0.424 }
+        ]
+      },
+      {
+        "key": "mbale",
+        "region_ar": "مبالي",
+        "match": [
+          { "level": 3, "name": "Mbale" },
+          { "level": 1, "name": "Eastern Region" }
+        ],
+        "localities": [
+          { "key": "mbale", "name_ar": "مبالي", "name_latin": "Mbale", "lon": 34.175, "lat": 1.081 }
+        ]
+      },
+      {
+        "key": "mbarara",
+        "region_ar": "مبارارا",
+        "match": [
+          { "level": 3, "name": "Mbarara" },
+          { "level": 1, "name": "Western Region" }
+        ],
+        "localities": [
+          {
+            "key": "mbarara",
+            "name_ar": "مبارارا",
+            "name_latin": "Mbarara",
+            "lon": 30.655,
+            "lat": -0.607
+          }
+        ]
+      }
+    ],
+    "KE": [
+      {
+        "key": "nairobi",
+        "region_ar": "نيروبي",
+        "match": [{ "level": 1, "name": "Nairobi" }],
+        "localities": [
+          {
+            "key": "nairobi",
+            "name_ar": "نيروبي",
+            "name_latin": "Nairobi",
+            "lon": 36.817,
+            "lat": -1.286
+          }
+        ]
+      },
+      {
+        "key": "mombasa",
+        "region_ar": "مومباسا",
+        "match": [{ "level": 1, "name": "Mombasa" }],
+        "localities": [
+          {
+            "key": "mombasa",
+            "name_ar": "مومباسا",
+            "name_latin": "Mombasa",
+            "lon": 39.668,
+            "lat": -4.044
+          }
+        ]
+      },
+      {
+        "key": "kwale",
+        "region_ar": "كوالى",
+        "match": [{ "level": 1, "name": "Kwale" }],
+        "localities": [
+          {
+            "key": "kwale",
+            "name_ar": "كوالى",
+            "name_latin": "Kwale",
+            "lon": 39.452,
+            "lat": -4.174
+          },
+          {
+            "key": "ukunda",
+            "name_ar": "أوكوندا",
+            "name_latin": "Ukunda",
+            "lon": 39.566,
+            "lat": -4.288
+          }
+        ]
+      },
+      {
+        "key": "kilifi",
+        "region_ar": "كيليفي",
+        "match": [{ "level": 1, "name": "Kilifi" }],
+        "localities": [
+          {
+            "key": "kilifi",
+            "name_ar": "كيليفي",
+            "name_latin": "Kilifi",
+            "lon": 39.85,
+            "lat": -3.631
+          },
+          {
+            "key": "malindi",
+            "name_ar": "ماليندي",
+            "name_latin": "Malindi",
+            "lon": 40.117,
+            "lat": -3.219
+          }
+        ]
+      },
+      {
+        "key": "lamu",
+        "region_ar": "لامو",
+        "match": [{ "level": 1, "name": "Lamu" }],
+        "localities": [
+          { "key": "lamu", "name_ar": "لامو", "name_latin": "Lamu", "lon": 40.902, "lat": -2.272 }
+        ]
+      }
+    ],
+    "OM": [
+      {
+        "key": "muscat",
+        "region_ar": "مسقط",
+        "match": [{ "level": 1, "name": "Muscat" }],
+        "localities": [
+          {
+            "key": "muscat",
+            "name_ar": "مسقط",
+            "name_latin": "Muscat",
+            "lon": 58.593,
+            "lat": 23.61
+          },
+          {
+            "key": "muttrah",
+            "name_ar": "مطرح",
+            "name_latin": "Muttrah",
+            "lon": 58.567,
+            "lat": 23.62
+          },
+          {
+            "key": "bawshar",
+            "name_ar": "بوشر",
+            "name_latin": "Bawshar",
+            "lon": 58.4,
+            "lat": 23.578
+          },
+          {
+            "key": "seeb",
+            "name_ar": "السيب",
+            "name_latin": "As Seeb",
+            "lon": 58.189,
+            "lat": 23.67
+          },
+          {
+            "key": "al-amerat",
+            "name_ar": "العامرات",
+            "name_latin": "Al Amerat",
+            "lon": 58.499,
+            "lat": 23.524
+          },
+          {
+            "key": "qurayyat",
+            "name_ar": "قريات",
+            "name_latin": "Qurayyat",
+            "lon": 58.919,
+            "lat": 23.262
+          }
+        ]
+      },
+      {
+        "key": "dhofar",
+        "region_ar": "ظفار",
+        "match": [{ "level": 1, "name": "Dhofar" }],
+        "localities": [
+          {
+            "key": "salalah",
+            "name_ar": "صلالة",
+            "name_latin": "Salalah",
+            "lon": 54.092,
+            "lat": 17.015
+          },
+          {
+            "key": "taqah",
+            "name_ar": "طاقة",
+            "name_latin": "Taqah",
+            "lon": 54.404,
+            "lat": 17.037
+          },
+          {
+            "key": "mirbat",
+            "name_ar": "مرباط",
+            "name_latin": "Mirbat",
+            "lon": 54.692,
+            "lat": 16.992
+          },
+          {
+            "key": "thumrait",
+            "name_ar": "ثمريت",
+            "name_latin": "Thumrait",
+            "lon": 54.025,
+            "lat": 17.666
+          }
+        ]
+      },
+      {
+        "key": "ad-dakhiliyah",
+        "region_ar": "الداخلية",
+        "match": [{ "level": 1, "name": "Ad Dakhiliyah" }],
+        "localities": [
+          {
+            "key": "nizwa",
+            "name_ar": "نزوى",
+            "name_latin": "Nizwa",
+            "lon": 57.533,
+            "lat": 22.933
+          },
+          {
+            "key": "bahla",
+            "name_ar": "بهلاء",
+            "name_latin": "Bahla",
+            "lon": 57.305,
+            "lat": 22.979
+          },
+          {
+            "key": "samail",
+            "name_ar": "سمائل",
+            "name_latin": "Samail",
+            "lon": 57.983,
+            "lat": 23.3
+          },
+          { "key": "izki", "name_ar": "إزكي", "name_latin": "Izki", "lon": 57.767, "lat": 22.933 }
+        ]
+      },
+      {
+        "key": "al-batinah-north",
+        "region_ar": "شمال الباطنة",
+        "match": [
+          { "level": 1, "name": "Al Batinah North" },
+          { "level": 1, "name": "Shamal al Batinah" },
+          { "level": 1, "name": "Al Batinah" }
+        ],
+        "localities": [
+          { "key": "sohar", "name_ar": "صحار", "name_latin": "Sohar", "lon": 56.73, "lat": 24.342 },
+          {
+            "key": "shinas",
+            "name_ar": "شناص",
+            "name_latin": "Shinas",
+            "lon": 56.467,
+            "lat": 24.743
+          },
+          { "key": "liwa", "name_ar": "لوى", "name_latin": "Liwa", "lon": 56.563, "lat": 24.531 },
+          { "key": "saham", "name_ar": "صحم", "name_latin": "Saham", "lon": 56.889, "lat": 24.172 },
+          {
+            "key": "al-khaburah",
+            "name_ar": "الخابورة",
+            "name_latin": "Al Khaburah",
+            "lon": 57.093,
+            "lat": 23.972
+          },
+          {
+            "key": "as-suwayq",
+            "name_ar": "السويق",
+            "name_latin": "As Suwayq",
+            "lon": 57.439,
+            "lat": 23.849
+          }
+        ]
+      },
+      {
+        "key": "al-batinah-south",
+        "region_ar": "جنوب الباطنة",
+        "match": [
+          { "level": 1, "name": "Al Batinah South" },
+          { "level": 1, "name": "Janub al Batinah" },
+          { "level": 1, "name": "Al Batinah" }
+        ],
+        "localities": [
+          {
+            "key": "rustaq",
+            "name_ar": "الرستاق",
+            "name_latin": "Ar Rustaq",
+            "lon": 57.424,
+            "lat": 23.391
+          },
+          {
+            "key": "barka",
+            "name_ar": "بركاء",
+            "name_latin": "Barka",
+            "lon": 57.887,
+            "lat": 23.679
+          },
+          {
+            "key": "al-musannah",
+            "name_ar": "المصنعة",
+            "name_latin": "Al Musannah",
+            "lon": 57.63,
+            "lat": 23.75
+          },
+          {
+            "key": "nakhal",
+            "name_ar": "نخل",
+            "name_latin": "Nakhal",
+            "lon": 57.829,
+            "lat": 23.395
+          }
+        ]
+      },
+      {
+        "key": "ash-sharqiyah-north",
+        "region_ar": "شمال الشرقية",
+        "match": [
+          { "level": 1, "name": "Ash Sharqiyah North" },
+          { "level": 1, "name": "Shamal ash Sharqiyah" },
+          { "level": 1, "name": "Ash Sharqiyah" }
+        ],
+        "localities": [
+          { "key": "ibra", "name_ar": "إبراء", "name_latin": "Ibra", "lon": 58.533, "lat": 22.691 },
+          {
+            "key": "bidiyah",
+            "name_ar": "بدية",
+            "name_latin": "Bidiyah",
+            "lon": 58.8,
+            "lat": 22.45
+          },
+          {
+            "key": "al-mudhaibi",
+            "name_ar": "المضيبي",
+            "name_latin": "Al Mudhaibi",
+            "lon": 58.117,
+            "lat": 22.567
+          }
+        ]
+      },
+      {
+        "key": "ash-sharqiyah-south",
+        "region_ar": "جنوب الشرقية",
+        "match": [
+          { "level": 1, "name": "Ash Sharqiyah South" },
+          { "level": 1, "name": "Janub ash Sharqiyah" },
+          { "level": 1, "name": "Ash Sharqiyah" }
+        ],
+        "localities": [
+          { "key": "sur", "name_ar": "صور", "name_latin": "Sur", "lon": 59.529, "lat": 22.567 },
+          {
+            "key": "jalan-bani-bu-hassan",
+            "name_ar": "جعلان بني بو حسن",
+            "name_latin": "Jalan Bani Bu Hassan",
+            "lon": 59.278,
+            "lat": 22.089
+          },
+          {
+            "key": "jalan-bani-bu-ali",
+            "name_ar": "جعلان بني بو علي",
+            "name_latin": "Jalan Bani Bu Ali",
+            "lon": 59.333,
+            "lat": 22.017
+          }
+        ]
+      },
+      {
+        "key": "al-buraimi",
+        "region_ar": "البريمي",
+        "match": [
+          { "level": 1, "name": "Al Buraimi" },
+          { "level": 1, "name": "Al Buraymi" },
+          { "level": 1, "name": "Az Zahirah" },
+          { "level": 1, "name": "Ad Dhahirah" }
+        ],
+        "localities": [
+          {
+            "key": "al-buraimi",
+            "name_ar": "البريمي",
+            "name_latin": "Al Buraimi",
+            "lon": 55.793,
+            "lat": 24.25
+          },
+          { "key": "mahdah", "name_ar": "محضة", "name_latin": "Mahdah", "lon": 55.967, "lat": 24.4 }
+        ]
+      },
+      {
+        "key": "al-wusta",
+        "region_ar": "الوسطى",
+        "match": [{ "level": 1, "name": "Al Wusta" }],
+        "localities": [
+          {
+            "key": "haima",
+            "name_ar": "هيماء",
+            "name_latin": "Haima",
+            "lon": 56.276,
+            "lat": 19.959
+          },
+          {
+            "key": "duqm",
+            "name_ar": "الدقم",
+            "name_latin": "Ad Duqm",
+            "lon": 57.704,
+            "lat": 19.662
+          }
+        ]
+      },
+      {
+        "key": "musandam",
+        "region_ar": "مسندم",
+        "match": [{ "level": 1, "name": "Musandam" }],
+        "localities": [
+          {
+            "key": "khasab",
+            "name_ar": "خصب",
+            "name_latin": "Khasab",
+            "lon": 56.248,
+            "lat": 26.18
+          },
+          { "key": "dibba", "name_ar": "دبا", "name_latin": "Dibba", "lon": 56.266, "lat": 25.646 }
+        ]
+      },
+      {
+        "key": "ad-dhahirah",
+        "region_ar": "الظاهرة",
+        "match": [
+          { "level": 1, "name": "Ad Dhahirah" },
+          { "level": 1, "name": "Az Zahirah" }
+        ],
+        "localities": [
+          { "key": "ibri", "name_ar": "عبري", "name_latin": "Ibri", "lon": 56.516, "lat": 23.226 },
+          {
+            "key": "yanqul",
+            "name_ar": "ينقل",
+            "name_latin": "Yanqul",
+            "lon": 56.54,
+            "lat": 23.586
+          },
+          { "key": "dhank", "name_ar": "ضنك", "name_latin": "Dhank", "lon": 56.26, "lat": 23.55 }
+        ]
+      }
+    ],
+    "RW": [
+      {
+        "key": "kigali",
+        "region_ar": "مدينة كيغالي",
+        "match": [
+          { "level": 1, "name": "City of Kigali" },
+          { "level": 1, "name": "Kigali" }
+        ],
+        "localities": [
+          {
+            "key": "kigali",
+            "name_ar": "كيغالي",
+            "name_latin": "Kigali",
+            "lon": 30.062,
+            "lat": -1.944
+          }
+        ]
+      },
+      {
+        "key": "eastern",
+        "region_ar": "المقاطعة الشرقية",
+        "match": [{ "level": 1, "name": "Eastern Province" }],
+        "localities": [
+          {
+            "key": "rwamagana",
+            "name_ar": "رواماغانا",
+            "name_latin": "Rwamagana",
+            "lon": 30.435,
+            "lat": -1.949
+          },
+          {
+            "key": "nyagatare",
+            "name_ar": "نياغاتاري",
+            "name_latin": "Nyagatare",
+            "lon": 30.327,
+            "lat": -1.298
+          }
+        ]
+      },
+      {
+        "key": "western",
+        "region_ar": "المقاطعة الغربية",
+        "match": [{ "level": 1, "name": "Western Province" }],
+        "localities": [
+          {
+            "key": "rubavu",
+            "name_ar": "روباڤو",
+            "name_latin": "Rubavu",
+            "lon": 29.257,
+            "lat": -1.703
+          },
+          {
+            "key": "rusizi",
+            "name_ar": "روسيتسي",
+            "name_latin": "Rusizi",
+            "lon": 28.908,
+            "lat": -2.485
+          }
+        ]
+      },
+      {
+        "key": "northern",
+        "region_ar": "المقاطعة الشمالية",
+        "match": [{ "level": 1, "name": "Northern Province" }],
+        "localities": [
+          {
+            "key": "musanze",
+            "name_ar": "موسانزي",
+            "name_latin": "Musanze",
+            "lon": 29.635,
+            "lat": -1.5
+          }
+        ]
+      },
+      {
+        "key": "southern",
+        "region_ar": "المقاطعة الجنوبية",
+        "match": [{ "level": 1, "name": "Southern Province" }],
+        "localities": [
+          { "key": "huye", "name_ar": "هويي", "name_latin": "Huye", "lon": 29.739, "lat": -2.597 }
+        ]
+      }
+    ],
+    "BI": [
+      {
+        "key": "bujumbura",
+        "region_ar": "بوجمبورا",
+        "match": [
+          { "level": 1, "name": "Bujumbura Mairie" },
+          { "level": 1, "name": "Bujumbura" }
+        ],
+        "localities": [
+          {
+            "key": "bujumbura",
+            "name_ar": "بوجمبورا",
+            "name_latin": "Bujumbura",
+            "lon": 29.364,
+            "lat": -3.382
+          }
+        ]
+      },
+      {
+        "key": "gitega",
+        "region_ar": "غيتيغا",
+        "match": [{ "level": 1, "name": "Gitega" }],
+        "localities": [
+          {
+            "key": "gitega",
+            "name_ar": "غيتيغا",
+            "name_latin": "Gitega",
+            "lon": 29.931,
+            "lat": -3.426
+          }
+        ]
+      },
+      {
+        "key": "ngozi",
+        "region_ar": "نغوزي",
+        "match": [{ "level": 1, "name": "Ngozi" }],
+        "localities": [
+          {
+            "key": "ngozi",
+            "name_ar": "نغوزي",
+            "name_latin": "Ngozi",
+            "lon": 29.831,
+            "lat": -2.908
+          }
+        ]
+      }
+    ],
+    "MZ": [
+      {
+        "key": "maputo",
+        "region_ar": "مابوتو",
+        "match": [
+          { "level": 1, "name": "Maputo City" },
+          { "level": 1, "name": "Maputo" }
+        ],
+        "localities": [
+          {
+            "key": "maputo",
+            "name_ar": "مابوتو",
+            "name_latin": "Maputo",
+            "lon": 32.573,
+            "lat": -25.969
+          },
+          {
+            "key": "matola",
+            "name_ar": "ماتولا",
+            "name_latin": "Matola",
+            "lon": 32.459,
+            "lat": -25.962
+          }
+        ]
+      },
+      {
+        "key": "nampula",
+        "region_ar": "نامبولا",
+        "match": [{ "level": 1, "name": "Nampula" }],
+        "localities": [
+          {
+            "key": "nampula",
+            "name_ar": "نامبولا",
+            "name_latin": "Nampula",
+            "lon": 39.267,
+            "lat": -15.117
+          },
+          {
+            "key": "nacala",
+            "name_ar": "ناكالا",
+            "name_latin": "Nacala",
+            "lon": 40.685,
+            "lat": -14.563
+          }
+        ]
+      },
+      {
+        "key": "cabo-delgado",
+        "region_ar": "كابو ديلغادو",
+        "match": [{ "level": 1, "name": "Cabo Delgado" }],
+        "localities": [
+          {
+            "key": "pemba",
+            "name_ar": "بيمبا",
+            "name_latin": "Pemba",
+            "lon": 40.518,
+            "lat": -12.974
+          },
+          {
+            "key": "montepuez",
+            "name_ar": "مونتيبويز",
+            "name_latin": "Montepuez",
+            "lon": 39.0,
+            "lat": -13.126
+          }
+        ]
+      }
+    ]
+  }
+}

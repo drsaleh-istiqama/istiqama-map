@@ -1,0 +1,949 @@
+{
+  "$comment": [
+    "Arabic and Swahili names plus short codes for well-known administrative areas.",
+    "Keyed by ISO2 country code. An entry applies to level 1 unless it says otherwise.",
+    "An area is recognised by its ISO 3166-2 code (iso, level 1 of geoBoundaries only) or by any",
+    "spelling listed in match (case, accents, punctuation and spaces are ignored).",
+    "short_code: 2-3 characters [A-Z0-9], unique per country, used in project codes (TZ-PN-000123).",
+    "Arabic names of the areas that exist in v2 (reference/v2/src/locations.js) are the v2 spellings.",
+    "Areas missing here keep the name of the source (name_en) and get a derived short code."
+  ],
+  "countries": {
+    "TZ": [
+      {
+        "iso": "TZ-01",
+        "match": ["Arusha"],
+        "name_ar": "أروشا",
+        "name_sw": "Arusha",
+        "short_code": "AR"
+      },
+      {
+        "iso": "TZ-02",
+        "match": ["Dar es Salaam", "Dar-es-Salaam"],
+        "name_ar": "دار السلام",
+        "name_sw": "Dar es Salaam",
+        "short_code": "DS"
+      },
+      {
+        "iso": "TZ-03",
+        "match": ["Dodoma"],
+        "name_ar": "دودوما",
+        "name_sw": "Dodoma",
+        "short_code": "DO"
+      },
+      {
+        "iso": "TZ-04",
+        "match": ["Iringa"],
+        "name_ar": "إيرينغا",
+        "name_sw": "Iringa",
+        "short_code": "IR"
+      },
+      {
+        "iso": "TZ-05",
+        "match": ["Kagera"],
+        "name_ar": "كاغيرا",
+        "name_sw": "Kagera",
+        "short_code": "KR"
+      },
+      {
+        "iso": "TZ-06",
+        "match": ["North Pemba", "Pemba North", "Kaskazini Pemba"],
+        "name_ar": "بيمبا الشمالية",
+        "name_sw": "Kaskazini Pemba",
+        "short_code": "PN"
+      },
+      {
+        "iso": "TZ-07",
+        "match": ["Zanzibar North", "North Zanzibar", "Unguja North", "Kaskazini Unguja"],
+        "name_ar": "زنجبار الشمالية",
+        "name_sw": "Kaskazini Unguja",
+        "short_code": "ZN"
+      },
+      {
+        "iso": "TZ-08",
+        "match": ["Kigoma"],
+        "name_ar": "كيغوما",
+        "name_sw": "Kigoma",
+        "short_code": "KG"
+      },
+      {
+        "iso": "TZ-09",
+        "match": ["Kilimanjaro"],
+        "name_ar": "كليمنجارو",
+        "name_sw": "Kilimanjaro",
+        "short_code": "KL"
+      },
+      {
+        "iso": "TZ-10",
+        "match": ["South Pemba", "Pemba South", "Kusini Pemba"],
+        "name_ar": "بيمبا الجنوبية",
+        "name_sw": "Kusini Pemba",
+        "short_code": "PS"
+      },
+      {
+        "iso": "TZ-11",
+        "match": [
+          "Zanzibar South & Central",
+          "Zanzibar South and Central",
+          "Zanzibar Central/South",
+          "Zanzibar South",
+          "Unguja South",
+          "Kusini Unguja"
+        ],
+        "name_ar": "زنجبار الجنوبية والوسطى",
+        "name_sw": "Kusini Unguja",
+        "short_code": "ZS"
+      },
+      {
+        "iso": "TZ-12",
+        "match": ["Lindi"],
+        "name_ar": "ليندي",
+        "name_sw": "Lindi",
+        "short_code": "LI"
+      },
+      {
+        "iso": "TZ-13",
+        "match": ["Mara"],
+        "name_ar": "مارا",
+        "name_sw": "Mara",
+        "short_code": "MR"
+      },
+      {
+        "iso": "TZ-14",
+        "match": ["Mbeya"],
+        "name_ar": "مبيا",
+        "name_sw": "Mbeya",
+        "short_code": "MB"
+      },
+      {
+        "iso": "TZ-15",
+        "match": [
+          "Zanzibar Urban/West",
+          "Zanzibar Urban West",
+          "Zanzibar West",
+          "Zanzibar Urban and West",
+          "Mjini Magharibi"
+        ],
+        "name_ar": "زنجبار الحضرية والغربية",
+        "name_sw": "Mjini Magharibi",
+        "short_code": "ZW"
+      },
+      {
+        "iso": "TZ-16",
+        "match": ["Morogoro"],
+        "name_ar": "موروغورو",
+        "name_sw": "Morogoro",
+        "short_code": "MO"
+      },
+      {
+        "iso": "TZ-17",
+        "match": ["Mtwara"],
+        "name_ar": "متوارا",
+        "name_sw": "Mtwara",
+        "short_code": "MT"
+      },
+      {
+        "iso": "TZ-18",
+        "match": ["Mwanza"],
+        "name_ar": "موانزا",
+        "name_sw": "Mwanza",
+        "short_code": "MW"
+      },
+      {
+        "iso": "TZ-19",
+        "match": ["Pwani", "Coast"],
+        "name_ar": "بواني",
+        "name_sw": "Pwani",
+        "short_code": "PW"
+      },
+      {
+        "iso": "TZ-20",
+        "match": ["Rukwa"],
+        "name_ar": "روكوا",
+        "name_sw": "Rukwa",
+        "short_code": "RK"
+      },
+      {
+        "iso": "TZ-21",
+        "match": ["Ruvuma"],
+        "name_ar": "روفوما",
+        "name_sw": "Ruvuma",
+        "short_code": "RV"
+      },
+      {
+        "iso": "TZ-22",
+        "match": ["Shinyanga"],
+        "name_ar": "شينيانغا",
+        "name_sw": "Shinyanga",
+        "short_code": "SH"
+      },
+      {
+        "iso": "TZ-23",
+        "match": ["Singida"],
+        "name_ar": "سينغيدا",
+        "name_sw": "Singida",
+        "short_code": "SG"
+      },
+      {
+        "iso": "TZ-24",
+        "match": ["Tabora"],
+        "name_ar": "تابورا",
+        "name_sw": "Tabora",
+        "short_code": "TB"
+      },
+      {
+        "iso": "TZ-25",
+        "match": ["Tanga"],
+        "name_ar": "تانغا",
+        "name_sw": "Tanga",
+        "short_code": "TG"
+      },
+      {
+        "iso": "TZ-26",
+        "match": ["Manyara"],
+        "name_ar": "مانيارا",
+        "name_sw": "Manyara",
+        "short_code": "MY"
+      },
+      {
+        "iso": "TZ-27",
+        "match": ["Geita"],
+        "name_ar": "غيتا",
+        "name_sw": "Geita",
+        "short_code": "GE"
+      },
+      {
+        "iso": "TZ-28",
+        "match": ["Katavi"],
+        "name_ar": "كاتافي",
+        "name_sw": "Katavi",
+        "short_code": "KT"
+      },
+      {
+        "iso": "TZ-29",
+        "match": ["Njombe"],
+        "name_ar": "نجومبي",
+        "name_sw": "Njombe",
+        "short_code": "NJ"
+      },
+      {
+        "iso": "TZ-30",
+        "match": ["Simiyu"],
+        "name_ar": "سيميو",
+        "name_sw": "Simiyu",
+        "short_code": "SI"
+      },
+      {
+        "iso": "TZ-31",
+        "match": ["Songwe"],
+        "name_ar": "سونغوي",
+        "name_sw": "Songwe",
+        "short_code": "SO"
+      }
+    ],
+    "KE": [
+      {
+        "iso": "KE-01",
+        "match": ["Baringo"],
+        "name_ar": "بارينغو",
+        "name_sw": "Baringo",
+        "short_code": "BA"
+      },
+      {
+        "iso": "KE-02",
+        "match": ["Bomet"],
+        "name_ar": "بوميت",
+        "name_sw": "Bomet",
+        "short_code": "BO"
+      },
+      {
+        "iso": "KE-03",
+        "match": ["Bungoma"],
+        "name_ar": "بونغوما",
+        "name_sw": "Bungoma",
+        "short_code": "BG"
+      },
+      {
+        "iso": "KE-04",
+        "match": ["Busia"],
+        "name_ar": "بوسيا",
+        "name_sw": "Busia",
+        "short_code": "BU"
+      },
+      {
+        "iso": "KE-05",
+        "match": ["Elgeyo-Marakwet", "Elgeyo Marakwet", "Elgeyo/Marakwet"],
+        "name_ar": "إلغيو ماراكويت",
+        "name_sw": "Elgeyo-Marakwet",
+        "short_code": "EM"
+      },
+      {
+        "iso": "KE-06",
+        "match": ["Embu"],
+        "name_ar": "إمبو",
+        "name_sw": "Embu",
+        "short_code": "EB"
+      },
+      {
+        "iso": "KE-07",
+        "match": ["Garissa"],
+        "name_ar": "غاريسا",
+        "name_sw": "Garissa",
+        "short_code": "GA"
+      },
+      {
+        "iso": "KE-08",
+        "match": ["Homa Bay"],
+        "name_ar": "هوما باي",
+        "name_sw": "Homa Bay",
+        "short_code": "HB"
+      },
+      {
+        "iso": "KE-09",
+        "match": ["Isiolo"],
+        "name_ar": "إيسيولو",
+        "name_sw": "Isiolo",
+        "short_code": "IS"
+      },
+      {
+        "iso": "KE-10",
+        "match": ["Kajiado"],
+        "name_ar": "كاجيادو",
+        "name_sw": "Kajiado",
+        "short_code": "KJ"
+      },
+      {
+        "iso": "KE-11",
+        "match": ["Kakamega"],
+        "name_ar": "كاكاميغا",
+        "name_sw": "Kakamega",
+        "short_code": "KK"
+      },
+      {
+        "iso": "KE-12",
+        "match": ["Kericho"],
+        "name_ar": "كيريتشو",
+        "name_sw": "Kericho",
+        "short_code": "KC"
+      },
+      {
+        "iso": "KE-13",
+        "match": ["Kiambu"],
+        "name_ar": "كيامبو",
+        "name_sw": "Kiambu",
+        "short_code": "KB"
+      },
+      {
+        "iso": "KE-14",
+        "match": ["Kilifi"],
+        "name_ar": "كيليفي",
+        "name_sw": "Kilifi",
+        "short_code": "KF"
+      },
+      {
+        "iso": "KE-15",
+        "match": ["Kirinyaga"],
+        "name_ar": "كيرينياغا",
+        "name_sw": "Kirinyaga",
+        "short_code": "KY"
+      },
+      {
+        "iso": "KE-16",
+        "match": ["Kisii"],
+        "name_ar": "كيسي",
+        "name_sw": "Kisii",
+        "short_code": "KS"
+      },
+      {
+        "iso": "KE-17",
+        "match": ["Kisumu"],
+        "name_ar": "كيسومو",
+        "name_sw": "Kisumu",
+        "short_code": "KU"
+      },
+      {
+        "iso": "KE-18",
+        "match": ["Kitui"],
+        "name_ar": "كيتوي",
+        "name_sw": "Kitui",
+        "short_code": "KT"
+      },
+      {
+        "iso": "KE-19",
+        "match": ["Kwale"],
+        "name_ar": "كوالى",
+        "name_sw": "Kwale",
+        "short_code": "KW"
+      },
+      {
+        "iso": "KE-20",
+        "match": ["Laikipia"],
+        "name_ar": "لايكيبيا",
+        "name_sw": "Laikipia",
+        "short_code": "LK"
+      },
+      {
+        "iso": "KE-21",
+        "match": ["Lamu"],
+        "name_ar": "لامو",
+        "name_sw": "Lamu",
+        "short_code": "LM"
+      },
+      {
+        "iso": "KE-22",
+        "match": ["Machakos"],
+        "name_ar": "ماتشاكوس",
+        "name_sw": "Machakos",
+        "short_code": "MC"
+      },
+      {
+        "iso": "KE-23",
+        "match": ["Makueni"],
+        "name_ar": "ماكويني",
+        "name_sw": "Makueni",
+        "short_code": "MK"
+      },
+      {
+        "iso": "KE-24",
+        "match": ["Mandera"],
+        "name_ar": "مانديرا",
+        "name_sw": "Mandera",
+        "short_code": "MD"
+      },
+      {
+        "iso": "KE-25",
+        "match": ["Marsabit"],
+        "name_ar": "مارسابيت",
+        "name_sw": "Marsabit",
+        "short_code": "MS"
+      },
+      {
+        "iso": "KE-26",
+        "match": ["Meru"],
+        "name_ar": "ميرو",
+        "name_sw": "Meru",
+        "short_code": "ME"
+      },
+      {
+        "iso": "KE-27",
+        "match": ["Migori"],
+        "name_ar": "ميغوري",
+        "name_sw": "Migori",
+        "short_code": "MG"
+      },
+      {
+        "iso": "KE-28",
+        "match": ["Mombasa"],
+        "name_ar": "مومباسا",
+        "name_sw": "Mombasa",
+        "short_code": "MB"
+      },
+      {
+        "iso": "KE-29",
+        "match": ["Murang'a", "Muranga"],
+        "name_ar": "مورانغا",
+        "name_sw": "Murang'a",
+        "short_code": "MU"
+      },
+      {
+        "iso": "KE-30",
+        "match": ["Nairobi", "Nairobi City"],
+        "name_ar": "نيروبي",
+        "name_sw": "Nairobi",
+        "short_code": "NB"
+      },
+      {
+        "iso": "KE-31",
+        "match": ["Nakuru"],
+        "name_ar": "ناكورو",
+        "name_sw": "Nakuru",
+        "short_code": "NK"
+      },
+      {
+        "iso": "KE-32",
+        "match": ["Nandi"],
+        "name_ar": "ناندي",
+        "name_sw": "Nandi",
+        "short_code": "ND"
+      },
+      {
+        "iso": "KE-33",
+        "match": ["Narok"],
+        "name_ar": "ناروك",
+        "name_sw": "Narok",
+        "short_code": "NR"
+      },
+      {
+        "iso": "KE-34",
+        "match": ["Nyamira"],
+        "name_ar": "نياميرا",
+        "name_sw": "Nyamira",
+        "short_code": "NM"
+      },
+      {
+        "iso": "KE-35",
+        "match": ["Nyandarua"],
+        "name_ar": "نيانداروا",
+        "name_sw": "Nyandarua",
+        "short_code": "NN"
+      },
+      {
+        "iso": "KE-36",
+        "match": ["Nyeri"],
+        "name_ar": "نييري",
+        "name_sw": "Nyeri",
+        "short_code": "NY"
+      },
+      {
+        "iso": "KE-37",
+        "match": ["Samburu"],
+        "name_ar": "سامبورو",
+        "name_sw": "Samburu",
+        "short_code": "SB"
+      },
+      {
+        "iso": "KE-38",
+        "match": ["Siaya"],
+        "name_ar": "سيايا",
+        "name_sw": "Siaya",
+        "short_code": "SY"
+      },
+      {
+        "iso": "KE-39",
+        "match": ["Taita Taveta", "Taita-Taveta", "Taita/Taveta"],
+        "name_ar": "تايتا تافيتا",
+        "name_sw": "Taita Taveta",
+        "short_code": "TT"
+      },
+      {
+        "iso": "KE-40",
+        "match": ["Tana River"],
+        "name_ar": "نهر تانا",
+        "name_sw": "Tana River",
+        "short_code": "TR"
+      },
+      {
+        "iso": "KE-41",
+        "match": ["Tharaka-Nithi", "Tharaka Nithi", "Tharaka"],
+        "name_en": "Tharaka-Nithi",
+        "name_ar": "ثاراكا نيثي",
+        "name_sw": "Tharaka-Nithi",
+        "short_code": "TH"
+      },
+      {
+        "iso": "KE-42",
+        "match": ["Trans Nzoia", "Trans-Nzoia"],
+        "name_ar": "ترانس نزويا",
+        "name_sw": "Trans Nzoia",
+        "short_code": "TN"
+      },
+      {
+        "iso": "KE-43",
+        "match": ["Turkana"],
+        "name_ar": "توركانا",
+        "name_sw": "Turkana",
+        "short_code": "TK"
+      },
+      {
+        "iso": "KE-44",
+        "match": ["Uasin Gishu"],
+        "name_ar": "أواسين غيشو",
+        "name_sw": "Uasin Gishu",
+        "short_code": "UA"
+      },
+      {
+        "iso": "KE-45",
+        "match": ["Vihiga"],
+        "name_ar": "فيهيغا",
+        "name_sw": "Vihiga",
+        "short_code": "VH"
+      },
+      {
+        "iso": "KE-46",
+        "match": ["Wajir"],
+        "name_ar": "واجير",
+        "name_sw": "Wajir",
+        "short_code": "WJ"
+      },
+      {
+        "iso": "KE-47",
+        "match": ["West Pokot"],
+        "name_ar": "بوكوت الغربية",
+        "name_sw": "Pokot Magharibi",
+        "short_code": "WP"
+      }
+    ],
+    "UG": [
+      {
+        "iso": "UG-C",
+        "match": ["Central Region", "Central"],
+        "name_ar": "المنطقة الوسطى",
+        "name_sw": "Mkoa wa Kati",
+        "short_code": "CE"
+      },
+      {
+        "iso": "UG-E",
+        "match": ["Eastern Region", "Eastern"],
+        "name_ar": "المنطقة الشرقية",
+        "name_sw": "Mkoa wa Mashariki",
+        "short_code": "EA"
+      },
+      {
+        "iso": "UG-N",
+        "match": ["Northern Region", "Northern"],
+        "name_ar": "المنطقة الشمالية",
+        "name_sw": "Mkoa wa Kaskazini",
+        "short_code": "NO"
+      },
+      {
+        "iso": "UG-W",
+        "match": ["Western Region", "Western"],
+        "name_ar": "المنطقة الغربية",
+        "name_sw": "Mkoa wa Magharibi",
+        "short_code": "WE"
+      },
+      { "level": 3, "match": ["Kampala"], "name_ar": "كمبالا", "name_sw": "Kampala" },
+      { "level": 3, "match": ["Wakiso"], "name_ar": "واكيسو", "name_sw": "Wakiso" },
+      { "level": 3, "match": ["Mukono"], "name_ar": "موكونو", "name_sw": "Mukono" },
+      { "level": 3, "match": ["Jinja"], "name_ar": "جينجا", "name_sw": "Jinja" },
+      { "level": 3, "match": ["Mbale"], "name_ar": "مبالي", "name_sw": "Mbale" },
+      { "level": 3, "match": ["Mbarara"], "name_ar": "مبارارا", "name_sw": "Mbarara" }
+    ],
+    "RW": [
+      {
+        "iso": "RW-01",
+        "match": ["City of Kigali", "Kigali City", "Kigali", "Umujyi wa Kigali"],
+        "name_ar": "مدينة كيغالي",
+        "name_sw": "Jiji la Kigali",
+        "short_code": "KG"
+      },
+      {
+        "iso": "RW-02",
+        "match": ["Eastern Province", "Eastern", "Iburasirazuba"],
+        "name_ar": "المقاطعة الشرقية",
+        "name_sw": "Mkoa wa Mashariki",
+        "short_code": "EA"
+      },
+      {
+        "iso": "RW-03",
+        "match": ["Northern Province", "Northern", "Amajyaruguru"],
+        "name_ar": "المقاطعة الشمالية",
+        "name_sw": "Mkoa wa Kaskazini",
+        "short_code": "NO"
+      },
+      {
+        "iso": "RW-04",
+        "match": ["Western Province", "Western", "Iburengerazuba"],
+        "name_ar": "المقاطعة الغربية",
+        "name_sw": "Mkoa wa Magharibi",
+        "short_code": "WE"
+      },
+      {
+        "iso": "RW-05",
+        "match": ["Southern Province", "Southern", "Amajyepfo"],
+        "name_ar": "المقاطعة الجنوبية",
+        "name_sw": "Mkoa wa Kusini",
+        "short_code": "SO"
+      }
+    ],
+    "BI": [
+      {
+        "iso": "BI-BB",
+        "match": ["Bubanza"],
+        "name_ar": "بوبانزا",
+        "name_sw": "Bubanza",
+        "short_code": "BB"
+      },
+      {
+        "iso": "BI-BM",
+        "match": ["Bujumbura Mairie", "Bujumbura"],
+        "name_ar": "بوجمبورا",
+        "name_sw": "Bujumbura Mjini",
+        "short_code": "BM"
+      },
+      {
+        "iso": "BI-BL",
+        "match": ["Bujumbura Rural"],
+        "name_ar": "ريف بوجمبورا",
+        "name_sw": "Bujumbura Vijijini",
+        "short_code": "BL"
+      },
+      {
+        "iso": "BI-BR",
+        "match": ["Bururi"],
+        "name_ar": "بوروري",
+        "name_sw": "Bururi",
+        "short_code": "BR"
+      },
+      {
+        "iso": "BI-CA",
+        "match": ["Cankuzo"],
+        "name_ar": "كانكوزو",
+        "name_sw": "Cankuzo",
+        "short_code": "CA"
+      },
+      {
+        "iso": "BI-CI",
+        "match": ["Cibitoke"],
+        "name_ar": "سيبيتوكي",
+        "name_sw": "Cibitoke",
+        "short_code": "CI"
+      },
+      {
+        "iso": "BI-GI",
+        "match": ["Gitega"],
+        "name_ar": "غيتيغا",
+        "name_sw": "Gitega",
+        "short_code": "GI"
+      },
+      {
+        "iso": "BI-KR",
+        "match": ["Karuzi", "Karusi"],
+        "name_ar": "كاروزي",
+        "name_sw": "Karuzi",
+        "short_code": "KR"
+      },
+      {
+        "iso": "BI-KY",
+        "match": ["Kayanza"],
+        "name_ar": "كايانزا",
+        "name_sw": "Kayanza",
+        "short_code": "KY"
+      },
+      {
+        "iso": "BI-KI",
+        "match": ["Kirundo"],
+        "name_ar": "كيروندو",
+        "name_sw": "Kirundo",
+        "short_code": "KI"
+      },
+      {
+        "iso": "BI-MA",
+        "match": ["Makamba"],
+        "name_ar": "ماكامبا",
+        "name_sw": "Makamba",
+        "short_code": "MA"
+      },
+      {
+        "iso": "BI-MU",
+        "match": ["Muramvya"],
+        "name_ar": "مورامفيا",
+        "name_sw": "Muramvya",
+        "short_code": "MU"
+      },
+      {
+        "iso": "BI-MY",
+        "match": ["Muyinga"],
+        "name_ar": "موينغا",
+        "name_sw": "Muyinga",
+        "short_code": "MY"
+      },
+      {
+        "iso": "BI-MW",
+        "match": ["Mwaro"],
+        "name_ar": "موارو",
+        "name_sw": "Mwaro",
+        "short_code": "MW"
+      },
+      {
+        "iso": "BI-NG",
+        "match": ["Ngozi"],
+        "name_ar": "نغوزي",
+        "name_sw": "Ngozi",
+        "short_code": "NG"
+      },
+      {
+        "iso": "BI-RM",
+        "match": ["Rumonge"],
+        "name_ar": "رومونغي",
+        "name_sw": "Rumonge",
+        "short_code": "RM"
+      },
+      {
+        "iso": "BI-RT",
+        "match": ["Rutana"],
+        "name_ar": "روتانا",
+        "name_sw": "Rutana",
+        "short_code": "RT"
+      },
+      {
+        "iso": "BI-RY",
+        "match": ["Ruyigi"],
+        "name_ar": "رويغي",
+        "name_sw": "Ruyigi",
+        "short_code": "RY"
+      }
+    ],
+    "MZ": [
+      {
+        "iso": "MZ-P",
+        "match": ["Cabo Delgado"],
+        "name_ar": "كابو ديلغادو",
+        "name_sw": "Cabo Delgado",
+        "short_code": "CD"
+      },
+      {
+        "iso": "MZ-G",
+        "match": ["Gaza"],
+        "name_ar": "غازا",
+        "name_sw": "Gaza",
+        "short_code": "GZ"
+      },
+      {
+        "iso": "MZ-I",
+        "match": ["Inhambane"],
+        "name_ar": "إنهامبان",
+        "name_sw": "Inhambane",
+        "short_code": "IN"
+      },
+      {
+        "iso": "MZ-B",
+        "match": ["Manica"],
+        "name_ar": "مانيكا",
+        "name_sw": "Manica",
+        "short_code": "MN"
+      },
+      {
+        "iso": "MZ-L",
+        "match": ["Maputo", "Maputo Province", "Maputo Provincia"],
+        "name_ar": "مابوتو",
+        "name_sw": "Maputo",
+        "short_code": "MP"
+      },
+      {
+        "iso": "MZ-MPM",
+        "match": ["Maputo City", "Cidade de Maputo", "Maputo Cidade"],
+        "name_ar": "مدينة مابوتو",
+        "name_sw": "Jiji la Maputo",
+        "short_code": "MC"
+      },
+      {
+        "iso": "MZ-N",
+        "match": ["Nampula"],
+        "name_ar": "نامبولا",
+        "name_sw": "Nampula",
+        "short_code": "NP"
+      },
+      {
+        "iso": "MZ-A",
+        "match": ["Niassa", "Nassa"],
+        "name_ar": "نياسا",
+        "name_sw": "Niassa",
+        "short_code": "NS"
+      },
+      {
+        "iso": "MZ-S",
+        "match": ["Sofala"],
+        "name_ar": "سوفالا",
+        "name_sw": "Sofala",
+        "short_code": "SF"
+      },
+      {
+        "iso": "MZ-T",
+        "match": ["Tete"],
+        "name_ar": "تيتي",
+        "name_sw": "Tete",
+        "short_code": "TT"
+      },
+      {
+        "iso": "MZ-Q",
+        "match": ["Zambézia", "Zambezia"],
+        "name_en": "Zambézia",
+        "name_ar": "زامبيزيا",
+        "name_sw": "Zambezia",
+        "short_code": "ZB"
+      }
+    ],
+    "OM": [
+      {
+        "iso": "OM-MA",
+        "match": ["Muscat", "Masqat"],
+        "name_ar": "مسقط",
+        "name_sw": "Muscat",
+        "short_code": "MA"
+      },
+      {
+        "iso": "OM-ZU",
+        "match": ["Dhofar", "Zufar"],
+        "name_ar": "ظفار",
+        "name_sw": "Dhofar",
+        "short_code": "ZU"
+      },
+      {
+        "iso": "OM-MU",
+        "match": ["Musandam"],
+        "name_ar": "مسندم",
+        "name_sw": "Musandam",
+        "short_code": "MU"
+      },
+      {
+        "iso": "OM-BU",
+        "match": ["Al Buraimi", "Al Buraymi", "Buraimi"],
+        "name_ar": "البريمي",
+        "name_sw": "Al Buraimi",
+        "short_code": "BU"
+      },
+      {
+        "iso": "OM-DA",
+        "match": ["Ad Dakhiliyah", "Ad Dakhliyah", "Al Dakhiliyah", "Dakhiliyah"],
+        "name_ar": "الداخلية",
+        "name_sw": "Ad Dakhiliyah",
+        "short_code": "DA"
+      },
+      {
+        "iso": "OM-BS",
+        "match": ["Al Batinah North", "North Al Batinah", "Shamal al Batinah"],
+        "name_ar": "شمال الباطنة",
+        "name_sw": "Al Batinah Kaskazini",
+        "short_code": "BS"
+      },
+      {
+        "iso": "OM-BJ",
+        "match": ["Al Batinah South", "South Al Batinah", "Janub al Batinah"],
+        "name_ar": "جنوب الباطنة",
+        "name_sw": "Al Batinah Kusini",
+        "short_code": "BJ"
+      },
+      {
+        "iso": "OM-SS",
+        "match": ["Ash Sharqiyah North", "North Ash Sharqiyah", "Shamal ash Sharqiyah"],
+        "name_ar": "شمال الشرقية",
+        "name_sw": "Ash Sharqiyah Kaskazini",
+        "short_code": "SS"
+      },
+      {
+        "iso": "OM-SJ",
+        "match": ["Ash Sharqiyah South", "South Ash Sharqiyah", "Janub ash Sharqiyah"],
+        "name_ar": "جنوب الشرقية",
+        "name_sw": "Ash Sharqiyah Kusini",
+        "short_code": "SJ"
+      },
+      {
+        "iso": "OM-ZA",
+        "match": ["Ad Dhahirah", "Adh Dhahirah", "Az Zahirah", "Al Dhahirah"],
+        "name_ar": "الظاهرة",
+        "name_sw": "Ad Dhahirah",
+        "short_code": "ZA"
+      },
+      {
+        "iso": "OM-WU",
+        "match": ["Al Wusta"],
+        "name_ar": "الوسطى",
+        "name_sw": "Al Wusta",
+        "short_code": "WU"
+      },
+      {
+        "match": ["Al Batinah"],
+        "name_ar": "الباطنة",
+        "name_sw": "Al Batinah",
+        "short_code": "BA"
+      },
+      {
+        "match": ["Ash Sharqiyah"],
+        "name_ar": "الشرقية",
+        "name_sw": "Ash Sharqiyah",
+        "short_code": "SH"
+      }
+    ]
+  }
+}
