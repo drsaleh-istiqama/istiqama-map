@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="ar-OM" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0d5c4b">
+  <meta name="description" content="الخارطة الرقمية لمساجد ومدارس القرآن التابعة لمشاريع الاستقامة">
+  <title>خارطة مشاريع الاستقامة</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="vendor/leaflet.css">
+  <link rel="stylesheet" href="styles.css?v=2.5.0">
+  <script defer src="vendor/leaflet.js"></script>
+  <script type="module" src="src/app.js?v=2.5.0"></script>
+</head>
+<body>
+  <div class="offline-banner" id="offlineBanner" hidden>أنت الآن دون اتصال — يمكنك مواصلة إدخال البيانات وستُحفظ على الجهاز</div>
+  <div class="shell">
+    <aside class="sidebar" aria-label="التنقل الرئيسي">
+      <div class="brand"><img src="assets/icon.svg" alt=""><div><strong>مشاريع الاستقامة</strong><small>الخارطة الرقمية</small></div></div>
+      <nav>
+        <button class="nav-item active" data-view="map"><span aria-hidden="true">⌖</span>الخارطة</button>
+        <button class="nav-item" data-view="projects"><span aria-hidden="true">▤</span>سجل المشاريع</button>
+        <button class="nav-item" data-view="maintenance"><span aria-hidden="true">◇</span>الصيانة <b id="maintenanceBadge">0</b></button>
+        <button class="nav-item" data-view="reports"><span aria-hidden="true">▥</span>التقارير</button>
+      </nav>
+      <div class="side-tools">
+        <button id="exportCsv">تصدير Excel/CSV</button>
+        <button id="exportJson">نسخة احتياطية</button>
+        <label class="import-label">استيراد نسخة<input id="importJson" type="file" accept="application/json"></label>
+      </div>
+      <div class="account"><span>ص</span><div><strong>صالح الزهيمي</strong><small>المشرف العام</small></div></div>
+    </aside>
+
+    <header class="topbar">
+      <div class="mobile-brand"><img src="assets/icon.svg" alt=""><strong>خارطة الاستقامة</strong></div>
+      <div class="title"><h1 id="viewTitle">الخارطة الرقمية للمشاريع</h1><p id="viewSubtitle">المساجد ومدارس القرآن في شاشة واحدة</p></div>
+      <button class="install-btn" id="installBtn" hidden>تثبيت التطبيق</button>
+      <button class="primary" id="addBtn"><span>＋</span><b>إضافة مشروع</b></button>
+    </header>
+
+    <main>
+      <section class="filters" id="filtersBar">
+        <label class="search"><span>⌕</span><input id="search" type="search" placeholder="ابحث بالاسم أو المنطقة أو المسؤول..."></label>
+        <label><span class="sr-only">المنطقة</span><select id="regionFilter"><option value="all">كل المناطق</option></select></label>
+        <label><span class="sr-only">النوع</span><select id="typeFilter"><option value="all">كل الأنواع</option><option value="mosque">مسجد</option><option value="school">مدرسة قرآن</option><option value="combined">مسجد ومدرسة</option></select></label>
+        <label><span class="sr-only">الحالة</span><select id="statusFilter"><option value="all">كل الحالات</option><option value="active">يعمل</option><option value="maintenance">يحتاج صيانة</option><option value="building">قيد الإنشاء</option><option value="inactive">متوقف</option></select></label>
+        <button class="secondary" id="resetFilters">مسح الفلاتر</button>
+      </section>
+
+      <section class="dashboard" id="mapView">
+        <aside class="project-panel">
+          <div class="panel-head"><div><h2>المشاريع الظاهرة</h2><p><span id="visibleCount">0</span> من <span id="totalCount">0</span> مشروعًا</p></div><span class="demo">بيانات تجريبية</span></div>
+          <div class="project-list" id="projectList"></div>
+        </aside>
+        <div class="map-wrap">
+          <div id="map" aria-label="خريطة المشاريع"></div>
+          <div class="map-pick-bar" id="mapPickBar" hidden>
+            <div><strong>تحديد موقع المشروع</strong><span id="mapPickText">اضغط على المكان المطلوب داخل الخريطة</span></div>
+            <div><button type="button" class="secondary" id="cancelMapPick">العودة دون تغيير</button><button type="button" class="primary" id="confirmMapPick" disabled>اعتماد الموقع والعودة</button></div>
+          </div>
+          <div class="map-fallback" id="mapFallback" hidden><strong>الخريطة غير متاحة دون اتصال</strong><span>القائمة والبيانات ما زالت تعمل على جهازك.</span></div>
+          <div class="legend"><span><i class="mosque"></i>مسجد</span><span><i class="school"></i>مدرسة</span><span><i class="combined"></i>مشترك</span><span><i class="maintenance"></i>صيانة</span></div>
+          <button class="locate" id="locateBtn" title="موقعي الحالي">◎</button>
+        </div>
+      </section>
+
+      <section class="report-view" id="reportView" hidden>
+        <div class="stats-grid">
+          <article><span>إجمالي المشاريع</span><strong id="statTotal">0</strong><small>مشروعًا موثقًا</small></article>
+          <article><span>السعة الكلية</span><strong id="statCapacity">0</strong><small>مصلٍ وطالب</small></article>
+          <article class="alert"><span>احتياجات الصيانة</span><strong id="statMaintenance">0</strong><small>تحتاج متابعة</small></article>
+          <article><span>المناطق المغطاة</span><strong id="statRegions">0</strong><small>منطقة</small></article>
+        </div>
+        <div class="ops-grid">
+          <article><span>إجمالي الكادر</span><strong id="opStaff">0</strong></article><article><span>الرواتب الشهرية</span><strong id="opPayroll">0</strong></article><article><span>مواقع قابلة للتوسع</span><strong id="opExpandable">0</strong></article><article><span>الاحتياج من المصاحف</span><strong id="opQuranNeed">0</strong></article><article><span>فجوات السكن</span><strong id="opHousing">0</strong></article><article><span>احتياجات النقل</span><strong id="opTransport">0</strong></article>
+        </div>
+        <div class="report-grid">
+          <article class="chart-card"><div class="card-title"><h2>التوزيع حسب النوع</h2><span>البيانات الحالية</span></div><div class="bars" id="typeBars"></div></article>
+          <article class="chart-card"><div class="card-title"><h2>التوزيع الجغرافي</h2><span>حسب المنطقة</span></div><div class="region-table" id="regionTable"></div></article>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <nav class="mobile-nav"><button class="active" data-view="map">⌖<span>الخارطة</span></button><button data-view="projects">▤<span>المشاريع</span></button><button id="mobileAdd">＋<span>إضافة</span></button><button data-view="reports">▥<span>التقارير</span></button></nav>
+
+  <aside class="details" id="details" aria-label="تفاصيل المشروع" aria-hidden="true">
+    <button class="close" id="closeDetails" aria-label="إغلاق">×</button>
+    <div class="details-photo" id="detailsPhoto"><img id="detailImage" alt="صورة المشروع" hidden><img class="placeholder" src="assets/icon.svg" alt=""></div>
+    <div class="details-body"><div class="details-kicker"><span id="detailType"></span><b id="detailStatus"></b></div><h2 id="detailName"></h2><p class="location" id="detailLocation"></p><div class="detail-grid" id="detailGrid"></div><div id="detailExtended"></div><div class="maintenance-note" id="maintenanceNote" hidden></div><div class="details-actions"><button class="primary" id="directionsBtn">فتح الاتجاهات</button><button class="secondary" id="editBtn">تعديل</button><button class="danger" id="deleteBtn">حذف</button></div></div>
+  </aside>
+
+  <div class="modal-layer" id="modalLayer" hidden>
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="formTitle">
+      <header><div><h2 id="formTitle">إضافة مشروع</h2><p>إدخال سريع: أكمل الأساسيات واحفظ خلال 5 دقائق</p></div><button id="closeModal" aria-label="إغلاق">×</button></header>
+      <form id="projectForm">
+        <input type="hidden" id="projectId">
+        <div class="form-scroll">
+          <div class="quick-entry-note"><strong>الحقول الأساسية فقط</strong><span>النوع، الاسم، الدولة، المنطقة والموقع الجغرافي. بقية البيانات اختيارية ويمكن استكمالها لاحقًا.</span></div>
+          <fieldset><legend>نوع المشروع *</legend><div class="type-options"><label><input type="radio" name="type" value="mosque" checked><span>مسجد</span></label><label><input type="radio" name="type" value="school"><span>مدرسة قرآن</span></label><label><input type="radio" name="type" value="combined"><span>مسجد ومدرسة</span></label></div></fieldset>
+          <div class="form-grid">
+            <label class="full">اسم المشروع *<input id="name" required maxlength="120" placeholder="مثال: مسجد النور"></label>
+            <label>الدولة *<select id="country" required aria-label="الدولة"></select><input id="customCountry" maxlength="80" placeholder="اكتب اسم الدولة" hidden></label>
+            <label>المحافظة أو الإقليم *<select id="region" required aria-label="المحافظة أو الإقليم"></select><input id="customRegion" maxlength="80" placeholder="اكتب اسم المحافظة أو الإقليم" hidden></label>
+            <label>المدينة أو القرية<select id="locality" aria-label="المدينة أو القرية"></select><input id="customLocality" maxlength="100" placeholder="اكتب اسم المدينة أو القرية" hidden></label>
+            <label>السعة<input id="capacity" type="number" min="0" inputmode="numeric" placeholder="350"></label>
+            <details class="full mini-details"><summary>بيانات إدارية إضافية <span>اختياري</span></summary><div class="section-content form-grid">
+              <label>اسم المسؤول<input id="manager" maxlength="100" list="personNames" autocomplete="off"></label>
+              <label>رقم الهاتف<input id="phone" class="ltr-input" type="tel" maxlength="30"></label>
+              <label>الجهة البانية<input id="builder" maxlength="120" value="الاستقامة"></label>
+              <label>اسم المتبرع<input id="donor" maxlength="120"></label>
+              <label>تاريخ البناء<input id="buildDate" type="date"></label>
+              <label>حالة المشروع<select id="status"><option value="active">يعمل بصورة طبيعية</option><option value="maintenance">يحتاج إلى صيانة</option><option value="building">قيد الإنشاء</option><option value="inactive">متوقف</option></select></label>
+              <label class="full" id="maintenanceField" hidden>ملاحظات الصيانة<textarea id="maintenanceNotes" maxlength="500" placeholder="اكتب ملاحظة مختصرة"></textarea></label>
+            </div></details>
+          </div>
+          <div class="extended-sections">
+            <details><summary>الكادر: الأئمة والمعلمون والإدارة <span id="staffCount">0</span></summary><div class="section-content"><div id="staffEditor"></div><button type="button" class="secondary add-row" id="addStaff">＋ إضافة فرد</button><small class="privacy-note">بيانات الميلاد والراتب إدارية ولا تُعرض للعامة.</small></div></details>
+            <details><summary>الأرض والملكية والتوسع</summary><div class="section-content form-grid">
+              <label>نوع ملكية الأرض<select id="landOwnership"><option value="">غير محدد</option><option value="association">ملك الجمعية</option><option value="waqf">وقف</option><option value="person">ملك شخص</option><option value="government">حكومية</option><option value="other">أخرى</option></select></label><label>اسم المالك أو الجهة<input id="landOwner" maxlength="120"></label><label>مساحة الأرض بالمتر²<input id="landArea" type="number" min="0" step="0.01"></label><label>نسبة الاستغلال %<input id="landUtilization" type="number" min="0" max="100"></label><label>إمكانية التوسع<select id="landExpandable"><option value="">غير محدد</option><option value="yes">نعم</option><option value="no">لا</option></select></label><label class="full">ملاحظات الأرض<textarea id="landNotes" maxlength="500"></textarea></label>
+            </div></details>
+            <details><summary>السكن والمرافق والمصاحف والنقل</summary><div class="section-content form-grid">
+              <label>سكن المعلمين<select id="teacherHousing"><option value="">غير محدد</option><option value="yes">متوفر</option><option value="no">غير متوفر</option></select></label><label>سكن الإمام<select id="imamHousing"><option value="">غير محدد</option><option value="yes">متوفر</option><option value="no">غير متوفر</option></select></label><label>سكن الضيوف<select id="guestHousing"><option value="">غير محدد</option><option value="yes">متوفر</option><option value="no">غير متوفر</option></select></label><label>المكتبة<select id="library"><option value="">غير محدد</option><option value="yes">موجودة</option><option value="no">غير موجودة</option></select></label><label>عدد المصاحف<input id="quranCount" type="number" min="0"></label><label>الاحتياج من المصاحف<input id="quranNeed" type="number" min="0"></label><label>قاعة للدورات أو الإدارة<select id="hall"><option value="">غير محدد</option><option value="yes">موجودة</option><option value="no">غير موجودة</option></select></label><label>سعة القاعة<input id="hallCapacity" type="number" min="0"></label><label>نقل الطلاب<select id="studentTransport"><option value="">غير محدد</option><option value="available">حافلة متوفرة</option><option value="needed">توجد حاجة لحافلة</option><option value="not_needed">لا توجد حاجة</option></select></label><label>نطاق سكن الطلاب<select id="studentsLocal"><option value="">غير محدد</option><option value="nearby">من المنطقة القريبة</option><option value="mixed">قريبون ومن مناطق بعيدة</option><option value="distant">غالبهم من مناطق بعيدة</option></select></label>
+            </div></details>
+            <details><summary>بيانات الفرع والمنطقة <span>اختيارات سريعة</span></summary><div class="section-content form-grid">
+              <label>اسم الفرع<input id="branchName" maxlength="120"></label><label>عدد السكان<input id="population" type="number" min="0"></label><label>نسبة المسلمين %<input id="muslimPercentage" type="number" min="0" max="100"></label><label>العوائل الإباضية<input id="ibadiFamilies" type="number" min="0"></label><label>العوائل العمانية<input id="omaniFamilies" type="number" min="0"></label><label>نسبة الطلاب العمانيين %<input id="omaniStudentPercentage" type="number" min="0" max="100"></label><label>نسبة الطلاب الإباضيين %<input id="ibadiStudentPercentage" type="number" min="0" max="100"></label><label>نسبة المعلمين العمانيين %<input id="omaniTeacherPercentage" type="number" min="0" max="100"></label><label>نسبة المعلمين الإباضيين %<input id="ibadiTeacherPercentage" type="number" min="0" max="100"></label><label>القدرة المالية لاستقبال الضيوف<select id="financialCapacity"><option value="">غير محدد</option><option value="good">جيدة</option><option value="limited">محدودة</option><option value="none">غير متوفرة</option></select></label><div class="full quick-fields" id="quickFields"></div>
+            </div></details>
+          </div>
+          <div class="location-box"><div><strong>الموقع الجغرافي *</strong><small id="coordsText">لم يتم تحديد الموقع</small></div><div><button type="button" class="secondary" id="gpsBtn">التقاط موقعي</button><button type="button" class="secondary" id="mapPickBtn">اختيار على الخريطة</button></div><input type="hidden" id="lat"><input type="hidden" id="lng"></div>
+          <section class="project-photos" aria-label="صور المشروع">
+            <strong>صور المشروع <small id="photoCount">0 صور</small></strong>
+            <div class="photo-actions"><button type="button" class="secondary" id="choosePhotos">اختيار صور من الجهاز</button><button type="button" class="secondary" id="takePhoto">التقاط صورة</button></div>
+            <input id="photo" type="file" accept="image/*" multiple hidden>
+            <input id="cameraPhoto" type="file" accept="image/*" capture="environment" hidden>
+            <small>اختر عدة صور معًا، أو التقط صورًا متتابعة. حدّد نوع كل صورة من القائمة. تُحفظ مع المشروع على هذا الجهاز.</small>
+            <div id="captureReview" class="capture-review" hidden><img id="capturePreview" alt="معاينة الصورة الملتقطة"><div class="photo-actions"><button type="button" class="primary" id="acceptCapture">اعتماد الصورة</button><button type="button" class="secondary" id="retakeCapture">إعادة الالتقاط</button><button type="button" class="secondary" id="cancelCapture">إلغاء الصورة</button></div></div>
+            <div id="photoGallery" class="photo-gallery"></div><p id="photoProgress" role="status" aria-live="polite"></p>
+          </section>
+          <p class="form-error" id="formError" role="alert"></p>
+        </div>
+        <footer><button type="button" class="secondary" id="cancelForm">إلغاء</button><button type="submit" class="primary" id="saveBtn">حفظ المشروع</button></footer>
+      </form>
+      <datalist id="personNames"></datalist>
+    </section>
+  </div>
+
+  <div class="toast" id="toast" role="status"></div>
+  <div class="confirm-layer" id="confirmLayer" hidden><div class="confirm"><h3>حذف المشروع؟</h3><p>لا يمكن التراجع عن الحذف إلا من نسخة احتياطية.</p><div><button class="secondary" id="cancelDelete">إلغاء</button><button class="danger" id="confirmDelete">حذف نهائيًا</button></div></div></div>
+</body>
+</html>

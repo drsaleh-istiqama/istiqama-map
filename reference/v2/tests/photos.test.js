@@ -1,0 +1,3 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {validateProject,ProjectRepository,createMemoryStorage} from '../src/domain.js';import {projectPhotos} from '../src/photos.js';
+const valid={name:'مسجد',country:'تنزانيا',region:'بيمبا',type:'mosque',status:'active',lat:-5,lng:39};
+test('reject unsafe image in multiple photo backup without losing existing projects',()=>{const repo=new ProjectRepository(createMemoryStorage());repo.create({...valid,id:'original'});assert.throws(()=>repo.replaceAll([{...valid,id:'bad',photos:[{id:'p',data:'https://example.com/a.png',category:'unspecified'}]}]));assert.equal(repo.list()[0].id,'original')});

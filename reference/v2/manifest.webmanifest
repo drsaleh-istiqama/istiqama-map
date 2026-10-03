@@ -1,0 +1,13 @@
+{
+  "name": "خارطة مشاريع الاستقامة",
+  "short_name": "خارطة الاستقامة",
+  "description": "حصر المساجد ومدارس القرآن وعرضها على خارطة رقمية",
+  "lang": "ar-OM",
+  "dir": "rtl",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f7f5",
+  "theme_color": "#0d5c4b",
+  "icons": [{"src":"assets/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
+}
