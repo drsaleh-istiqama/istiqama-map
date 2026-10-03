@@ -1,0 +1,68 @@
+# Supabase CLI configuration (used by CI and by any developer who has Docker:
+# `supabase start`). The Docker-less local stack in scripts/local-stack mirrors these ports.
+project_id = "istiqama-map"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+major_version = 17
+
+[db.seed]
+enabled = true
+# Staging/demo data only. Production never runs a seed (docs/BRIEF.md §7.8).
+sql_paths = ["./seed.staging.sql"]
+
+[studio]
+enabled = false
+
+# Local mail catcher: OTP e-mails are read from here by the e2e helpers.
+[inbucket]
+enabled = true
+port = 54324
+
+[storage]
+enabled = true
+file_size_limit = "50MiB"
+
+[auth]
+enabled = true
+site_url = "http://localhost:5173"
+additional_redirect_urls = ["http://localhost:4173", "http://127.0.0.1:5173", "http://127.0.0.1:4173"]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+refresh_token_reuse_interval = 10
+# Accounts are provisioned by administrators; nobody can self-register.
+enable_signup = false
+
+[auth.email]
+enable_signup = false
+enable_confirmations = false
+otp_length = 6
+otp_expiry = 600
+
+[auth.sms]
+enable_signup = false
+enable_confirmations = false
+
+# Fixed codes for the staging/test phone numbers (no SMS provider is configured —
+# owner decision #4 in docs/OWNER_DECISIONS.md).
+[auth.sms.test_otp]
+"255700000001" = "123456"
+"254700000001" = "123456"
+
+[auth.mfa]
+max_enrolled_factors = 10
+
+[auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true
+
+[edge_runtime]
+enabled = true
+policy = "per_worker"

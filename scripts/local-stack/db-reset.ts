@@ -54,7 +54,10 @@ const migrations = fs
 const t0 = Date.now();
 sql('postgres', `select pg_terminate_backend(pid) from pg_stat_activity where datname = '${db}' and pid <> pg_backend_pid()`);
 sql('postgres', `drop database if exists ${db}`);
-sql('postgres', `create database ${db} encoding 'UTF8' template template0`);
+// pg_trgm extracts no trigrams from Arabic under LC_CTYPE "C", so the database needs a
+// UTF-8-aware ctype (Supabase uses C.UTF-8 / en_US.UTF-8). Collation stays "C".
+const ctype = process.platform === 'win32' ? 'en-US' : 'en_US.UTF-8';
+sql('postgres', `create database ${db} encoding 'UTF8' lc_collate 'C' lc_ctype '${ctype}' template template0`);
 
 const shim = path.join(ROOT, 'scripts', 'local-stack', 'supabase-shim.sql');
 if (fs.existsSync(shim)) file(db, shim, false);
