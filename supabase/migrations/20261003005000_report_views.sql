@@ -22,6 +22,29 @@ parallel safe
 set search_path = pg_catalog, pg_temp
 as $$ select '00000000-0000-0000-0000-000000000000'::uuid $$;
 
+revoke execute on function private.nil_uuid() from public, anon, authenticated;
+
+-- Guard for functions that only cron jobs and Edge Functions holding the service-role key may
+-- call. API requests always carry a JWT role claim; cron / direct owner sessions carry none.
+-- (EXECUTE is additionally revoked from anon/authenticated on every such function.)
+create or replace function private.require_service_role()
+returns void
+language plpgsql
+stable
+set search_path = public, extensions, private, pg_temp
+as $$
+declare
+  v_role text := auth.jwt() ->> 'role';
+begin
+  if v_role is not null and v_role <> 'service_role' then
+    raise exception 'restricted to the service role' using errcode = 'PT403';
+  end if;
+end;
+$$;
+
+revoke execute on function private.require_service_role() from public, anon, authenticated;
+grant execute on function private.require_service_role() to service_role;
+
 -- Single-row bookkeeping table: when the report views were last refreshed.
 create table if not exists private.report_meta (
   id boolean primary key default true check (id),
@@ -324,16 +347,14 @@ set statement_timeout = '10min'
 as $$
 declare
   v_started timestamptz := clock_timestamp();
-  v_role text := auth.jwt() ->> 'role';
   v_view text;
   v_clusters boolean := false;
+  v_cluster_error text;
+  v_reports_ms integer;
   v_ms integer;
 begin
-  -- API callers must present the service-role key; cron / direct superuser sessions carry no JWT.
-  if v_role is not null and v_role <> 'service_role' then
-    raise exception 'refresh_reports is restricted to the service role'
-      using errcode = 'PT403';
-  end if;
+  -- API callers must present the service-role key; cron / direct owner sessions carry no JWT.
+  perform private.require_service_role();
 
   -- Never run two refreshes at once (a slow run must not pile up behind the next cron tick).
   if not pg_try_advisory_xact_lock(hashtextextended('istiqama.refresh_reports', 0)) then
@@ -347,10 +368,18 @@ begin
     execute format('refresh materialized view concurrently private.%I', v_view);
   end loop;
 
-  -- The map cluster pyramid belongs to the tiles migration; refresh it when it exists.
+  v_reports_ms := (extract(epoch from clock_timestamp() - v_started) * 1000)::integer;
+
+  -- The map cluster pyramid belongs to the tiles migration; refresh it when it exists. A failure
+  -- there must not undo the report refresh, hence the sub-transaction.
   if to_regprocedure('private.refresh_clusters()') is not null then
-    execute 'select private.refresh_clusters()';
-    v_clusters := true;
+    begin
+      execute 'select private.refresh_clusters()';
+      v_clusters := true;
+    exception when others then
+      v_cluster_error := sqlerrm;
+      raise warning 'refresh_reports: private.refresh_clusters() failed: %', sqlerrm;
+    end;
   end if;
 
   v_ms := (extract(epoch from clock_timestamp() - v_started) * 1000)::integer;
@@ -361,12 +390,14 @@ begin
         duration_ms = excluded.duration_ms,
         clusters_refreshed = excluded.clusters_refreshed;
 
-  return jsonb_build_object(
+  return jsonb_strip_nulls(jsonb_build_object(
     'skipped', false,
     'refreshed_at', now(),
     'duration_ms', v_ms,
-    'clusters_refreshed', v_clusters
-  );
+    'reports_ms', v_reports_ms,
+    'clusters_refreshed', v_clusters,
+    'clusters_error', v_cluster_error
+  ));
 end;
 $$;
 
