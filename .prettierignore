@@ -1,0 +1,11 @@
+node_modules
+.local
+dist
+coverage
+reference
+playwright-report
+test-results
+docs/BRIEF.md
+*.sql
+package-lock.json
+apps/web/public

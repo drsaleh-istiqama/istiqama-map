@@ -408,3 +408,114 @@ under a PIN-derived key, immediate session/device revocation.
 | D4 | PDF reports are print-optimised pages rendered by the browser engine | Correct Arabic shaping and RTL without shipping a PDF/shaping engine |
 | D5 | `admin_area_id` is computed from the point when a boundary contains it; a manual value is kept only when no boundary matches | Reconciles brief §2.3 (computed) with §7.1 (correctable) |
 | D6 | Photo `category`/`caption`, `birth_date`, `home_area_text`, `<list>_other` kept | v2 parity (brief rule: no v2 feature removed without replacement) |
+
+---
+
+## Appendix A — Exact names shared between migrations (binding)
+
+### A.1 Supabase default privileges (do not forget)
+
+On Supabase every new table/function/sequence in `public` is automatically granted to `anon`,
+`authenticated` and `service_role` (the local shim reproduces this). Therefore **each
+migration explicitly revokes** what must not be reachable: `revoke all on <table> from anon`
+for every table, `revoke insert, update, delete` on field-data tables from `authenticated`,
+`revoke all` on restricted tables from `authenticated`, and
+`revoke execute on function … from public, anon` for every RPC (then
+`grant execute … to authenticated`). pgTAP verifies that `anon` can read nothing.
+
+### A.2 Migration file names and ownership
+
+`supabase/migrations/20261003<NNNN>00_<name>.sql` where `NNNN` is a 4-digit sequence:
+
+| Range | Area |
+|---|---|
+| 0001–0009 | extensions, `private` helpers (`norm`, `uuid_v7`, `current_xid`…), all tables, indexes, std/audit triggers, derived-column triggers |
+| 0010–0019 | authorisation helpers, RLS policies, grants/revokes, storage buckets + policies |
+| 0020–0029 | sync registry, `sync_push`, `sync_pull`, `resolve_conflict`, `my_context`, `register_device` |
+| 0030–0039 | `locate_point`, `admin_area_shapes`, `project_duplicates`, `search`, `projects_page`, cluster pyramid + `tile_projects` |
+| 0040–0049 | `person_candidates`, merge/revert, `restricted_read`, admin RPCs, `sync_status`, rate limiting |
+| 0050–0059 | report materialized views, `dashboard`, `report_*`, import, export, cron jobs, photo retention |
+| 0060–0069 | reference data (countries, option lists, fx placeholders, app settings) |
+
+pgTAP files: `supabase/tests/<NN>_<name>.test.sql`, each wrapped in `begin; … rollback;`
+except `00_helpers.test.sql`, which installs the persistent `tests` schema.
+
+### A.3 `private` helpers
+
+```sql
+private.current_xid() returns bigint            -- pg_current_xact_id() as bigint
+private.safe_xid()    returns bigint            -- pg_snapshot_xmin(pg_current_snapshot()) as bigint
+private.device_id()   returns text              -- request header x-device-id, else current_setting('app.device_id', true)
+private.norm(text)    returns text  immutable   -- search normalisation (Arabic + Latin)
+private.uuid_v7()     returns uuid
+private.mask_phone(text) returns text immutable -- +255•••••123
+
+-- session / role state (STABLE, SECURITY DEFINER, search_path pinned)
+private.session_ok() returns boolean
+private.aal2()       returns boolean
+private.my_roles()   returns table(role text, scope_type text, scope_id uuid)
+private.is_hq()      returns boolean                         -- hq_admin at aal2
+
+-- scope triples: all_access + country ids + branch ids, per capability
+private.read_all()        returns boolean;  private.read_countries()        returns uuid[];  private.read_branches()   returns uuid[]   -- any role
+private.people_all()      returns boolean;  private.people_countries()      returns uuid[];  private.people_branches() returns uuid[]   -- any role except viewer
+private.write_all()       returns boolean;  private.write_countries()       returns uuid[];  private.write_branches()  returns uuid[]   -- collector, supervisor, manager, hq
+private.review_all()      returns boolean;  private.review_countries()      returns uuid[];  private.review_branches() returns uuid[]   -- supervisor, manager, hq
+private.restricted_all()  returns boolean;  private.restricted_countries()  returns uuid[]                                              -- manager (country), hq
+
+-- row-level convenience wrappers built on the triples
+private.can_read_project(p_country uuid, p_branch uuid)  returns boolean
+private.can_see_people(p_country uuid, p_branch uuid)    returns boolean
+private.can_write_project(p_country uuid, p_branch uuid) returns boolean
+private.can_review(p_country uuid, p_branch uuid)        returns boolean
+private.can_see_restricted(p_country uuid)               returns boolean
+private.project_scope(p_project uuid) returns table(country_id uuid, branch_id uuid, created_by uuid, record_state text)
+private.rate_limit(p_key text, p_max int, p_window interval) returns void   -- raises PT429
+private.log_restricted(p_table text, p_ids uuid[], p_context text) returns void
+```
+
+A branch-scoped role matches rows whose `branch_id` equals the scope; a country-scoped role
+matches rows whose `country_id` equals the scope; a global scope matches everything.
+In RLS policies always call them as `(select private.read_all())` etc. (initplan caching).
+
+### A.4 pgTAP helpers (`tests` schema, installed by `supabase/tests/00_helpers.test.sql`)
+
+```sql
+tests.create_user(p_email text, p_role text, p_scope_type text, p_scope_id uuid) returns uuid
+tests.login_as(p_user uuid, p_aal text default 'aal2', p_device text default 'dev-test') returns void
+       -- set local role authenticated; request.jwt.claims = {sub, role, aud, aal, iat, session_id}; request.headers = {"x-device-id": …}
+tests.login_anon() returns void
+tests.logout() returns void                      -- reset role and claims (back to the superuser running the test)
+tests.fixture() returns void                     -- idempotent base fixture (call inside the test transaction)
+tests.id(p_key text) returns uuid                -- ids of fixture objects
+```
+
+Fixture keys: countries `tz`, `ke`; admin areas `tz_pemba_north`, `tz_tanga`, `ke_mombasa`
+(simple square polygons); branches `br_pemba`, `br_tanga`, `br_mombasa`; users `u_hq`,
+`u_mgr_tz`, `u_mgr_ke`, `u_sup_pemba`, `u_col_pemba`, `u_col_pemba2`, `u_col_tanga`,
+`u_col_ke`, `u_viewer_tz`, `u_viewer_global`; projects `p_pemba_1` (approved, by
+`u_col_pemba`), `p_pemba_2` (draft, by `u_col_pemba`), `p_tanga_1` (approved, by
+`u_col_tanga`), `p_ke_1` (approved, by `u_col_ke`); each project has one staff member with a
+compensation row and a `community_sensitive` row.
+
+### A.5 JWT claims (GoTrue-compatible; issued locally by the gateway)
+
+`{ sub, role: "authenticated", aud: "authenticated", email, phone, aal: "aal1"|"aal2",
+amr: [{method, timestamp}], session_id, iat, exp, app_metadata, user_metadata }`.
+Anonymous/API-key requests carry `role: "anon"`. The service key carries `role: "service_role"`.
+
+### A.6 Local gateway endpoints (subset of the Supabase API that the app uses)
+
+- `POST /auth/v1/otp` (email or phone, `create_user`), `POST /auth/v1/verify`,
+  `POST /auth/v1/token?grant_type=refresh_token|password`, `GET /auth/v1/user`,
+  `PUT /auth/v1/user`, `POST /auth/v1/logout`, MFA TOTP:
+  `POST /auth/v1/factors`, `POST /auth/v1/factors/:id/challenge`,
+  `POST /auth/v1/factors/:id/verify`, `DELETE /auth/v1/factors/:id`; admin (service key):
+  `POST/GET/PUT/DELETE /auth/v1/admin/users[/:id]`, `POST /auth/v1/admin/users/:id/logout`.
+- Development only: `GET /dev/otp?identifier=<email|phone>` returns the last OTP issued by the
+  fake provider (used by Playwright); disabled unless `OTP_PROVIDER=fake`.
+- `/rest/v1/*` → PostgREST. `/storage/v1/object/*` (upload, download, `sign`, `public`,
+  `list`, delete) and TUS `/storage/v1/upload/resumable` backed by `.local/storage`, with
+  access decided by inserting/selecting `storage.objects` under the caller's role (RLS).
+- `/functions/v1/<name>` → `supabase/functions/<name>/index.ts` handler.
+- Timers replacing `pg_cron`: `refresh_reports()` every 15 min, `purge-photos` daily.

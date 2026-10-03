@@ -1,0 +1,49 @@
+{
+  "name": "istiqama-map",
+  "version": "3.0.0",
+  "private": true,
+  "description": "Istiqama Projects Map v3 - offline-first survey system for mosques and Qur'an schools in East Africa",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "stack:setup": "tsx scripts/local-stack/setup.ts",
+    "stack:start": "tsx scripts/local-stack/start.ts",
+    "stack:stop": "tsx scripts/local-stack/stop.ts",
+    "stack:status": "tsx scripts/local-stack/status.ts",
+    "db:reset": "tsx scripts/local-stack/db-reset.ts",
+    "test:db": "tsx scripts/local-stack/run-pgtap.ts",
+    "dev": "npm run dev -w apps/web",
+    "build": "npm run build -w apps/web",
+    "preview": "npm run preview -w apps/web",
+    "test": "vitest run",
+    "e2e": "npm run e2e -w apps/web",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc -p tsconfig.json --noEmit && npm run typecheck -w apps/web",
+    "boundaries:import": "tsx scripts/import-boundaries/index.ts",
+    "pmtiles:build": "tsx scripts/build-pmtiles/index.ts",
+    "load:seed": "tsx scripts/generate-load-data/index.ts",
+    "load:test": "tsx load-tests/run.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^26.6.4",
+    "@types/pg": "^8.23.1",
+    "dotenv": "^18.0.5",
+    "eslint": "^10.12.0",
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.23.1",
+    "prettier": "^3.9.9",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^5.0.3"
+  }
+}
