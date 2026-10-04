@@ -42,7 +42,8 @@ const toSyncOp = (op: OutboxOp): SyncOp => ({
   id: op.row_id,
   kind: op.kind,
   base_version: op.base_version,
-  fields: op.kind === 'delete' ? {} : op.fields,
+  // deletes: `{}`, or the natural key of a blind restricted row (sync.md §4.4)
+  fields: op.fields,
   client_ts: op.created_at,
   attempts: op.attempts,
 });

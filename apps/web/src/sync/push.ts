@@ -9,7 +9,7 @@
  *  - no operation ever disappears: it is either acknowledged or moved to `failed_ops`.
  */
 import { REQUEST_BACKOFF, backoffDelay } from './backoff';
-import { type Clock, sleep, throwIfAborted, yieldToUi } from './clock';
+import { type Clock, paceWait, sleep, throwIfAborted, yieldToUi } from './clock';
 import type { SyncError } from './errors';
 import { toSyncError } from './errors';
 import type { AuthPort, DbPort, OutboxOp, SyncTableInfo } from './ports';
@@ -100,7 +100,8 @@ export function toWireOp(op: OutboxOp): PushOp {
     base_version: op.base_version,
     client_ts: op.client_ts,
   };
-  if (op.kind === 'upsert') wire.fields = op.fields;
+  // A delete has no fields, except the natural key of a blind restricted row (sync.md §4.4).
+  if (op.kind === 'upsert' || Object.keys(op.fields).length > 0) wire.fields = op.fields;
   return wire;
 }
 
@@ -152,7 +153,7 @@ export async function pushOutbox(deps: PushDeps, options: PushOptions = {}): Pro
     for (let attempt = 0; ; attempt++) {
       try {
         throwIfAborted(signal);
-        const wait = lastSendAt + minIntervalMs - clock.now();
+        const wait = paceWait(clock, lastSendAt, minIntervalMs);
         if (wait > 0) await sleep(clock, wait, signal);
         lastSendAt = clock.now();
         outcome.batches++;

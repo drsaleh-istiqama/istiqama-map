@@ -68,7 +68,7 @@ beforeEach(async () => {
 });
 
 describe('reading and claiming the queue', () => {
-  it('toPushOp is the wire shape (id, client_ts; deletes carry no fields)', async () => {
+  it('toPushOp is the wire shape (id, client_ts; deletes carry only a blind row’s natural key)', async () => {
     const id = await newProject();
     const [op] = await outbox();
     expect(toPushOp(op!)).toEqual({
@@ -80,7 +80,13 @@ describe('reading and claiming the queue', () => {
       fields: op!.fields,
       client_ts: op!.created_at,
     });
-    expect(toPushOp({ ...op!, kind: 'delete', fields: { x: 1 } }).fields).toEqual({});
+    // softDelete() queues `{}` for a delete, or the natural key of a blind restricted row
+    // (sync.md §4.4); toPushOp sends what was queued (blindDelete.test.ts).
+    expect(toPushOp({ ...op!, kind: 'delete', fields: {} }).fields).toEqual({});
+    expect(
+      toPushOp({ ...op!, table: 'community_sensitive', kind: 'delete', fields: { project_id: id } })
+        .fields,
+    ).toEqual({ project_id: id });
   });
 
   it('pendingOps keeps creation order and leaves out other users’ operations', async () => {

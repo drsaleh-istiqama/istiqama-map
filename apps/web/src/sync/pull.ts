@@ -12,7 +12,7 @@
  *    requested again in smaller pages from the same cursor, and that smaller size is kept.
  */
 import { REQUEST_BACKOFF, backoffDelay } from './backoff';
-import { type Clock, sleep, throwIfAborted, yieldToUi } from './clock';
+import { type Clock, paceWait, sleep, throwIfAborted, yieldToUi } from './clock';
 import { SyncError, toSyncError } from './errors';
 import type { DbPort } from './ports';
 import type { PullPage, Transport } from './types';
@@ -144,7 +144,7 @@ export async function pullChanges(deps: PullDeps, options: PullOptions = {}): Pr
     for (let attempt = 0; ; attempt++) {
       try {
         throwIfAborted(signal);
-        const wait = lastCallAt + minIntervalMs - clock.now();
+        const wait = paceWait(clock, lastCallAt, minIntervalMs);
         if (wait > 0) await sleep(clock, wait, signal);
         lastCallAt = clock.now();
         return await transport.pull(cursor, limit, { signal });

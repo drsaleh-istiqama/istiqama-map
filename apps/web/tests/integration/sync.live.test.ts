@@ -696,6 +696,27 @@ describe('the real local database (src/db) end to end', () => {
     expect(await realDb.db.restricted_local.count()).toBe(0);
   }, 180_000);
 
+  it('a blind delete of an entry whose insert went out carries its natural key and is accepted', async () => {
+    // the same values re-entered blind under a new id: the server applies the insert to the
+    // existing row of the project (natural key) and answers without row_id
+    const again = realDb.newRow('community_sensitive', {
+      project_id: project.id,
+      ibadi_families: 3,
+    });
+    await realDb.mutate('community_sensitive', again.id, again, { insert: true });
+    // the insert was sent but its answer was lost: the device must assume the server has it
+    const sent = await realDb.markInflight(await realDb.pendingOps());
+    await realDb.requeueInflight(sent.map((o) => o.seq!));
+    await realDb.softDelete('community_sensitive', again.id);
+    const del = (await realDb.db.outbox.toArray()).find((o) => o.kind === 'delete');
+    expect(del).toMatchObject({ row_id: again.id, fields: { project_id: project.id } });
+
+    await syncReal();
+    expect(await realDb.listFailedOps()).toEqual([]);
+    expect(engine.status.value).toMatchObject({ state: 'idle', lastError: null, pendingOps: 0 });
+    expect(await realDb.db.restricted_local.count()).toBe(0);
+  }, 180_000);
+
   it('an edit made here and an edit made by a supervisor elsewhere are merged', async () => {
     await realDb.mutate('projects', project.id, { builder: 'edited on the device' });
     // Another device (the supervisor's) changes a different field of the same project.

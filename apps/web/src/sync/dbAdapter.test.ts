@@ -262,6 +262,28 @@ describe('engine + real local database', () => {
     expect(await db.community_sensitive.count()).toBe(0);
   });
 
+  it('a blind delete made while the insert was on the wire goes out by row id with the natural key', async () => {
+    const project = await createProject();
+    await engine.syncNow();
+    const sensitive = newRow('community_sensitive', { project_id: project, ibadi_families: 4 });
+    await mutate('community_sensitive', sensitive.id, sensitive, { insert: true });
+    let deleted = false;
+    server.onPush = async () => {
+      if (deleted) return;
+      deleted = true;
+      await softDelete('community_sensitive', sensitive.id); // while the insert is on the wire
+    };
+    await engine.syncNow();
+    await engine.syncNow();
+
+    const sent = server.calls.push.flatMap((c) => c.ops).filter((o) => o.id === sensitive.id);
+    expect(sent.map((o) => o.kind)).toEqual(['upsert', 'delete']);
+    expect(sent[1]).toMatchObject({ kind: 'delete', fields: { project_id: project } });
+    expect(server.row('community_sensitive', sensitive.id)?.deleted_at).not.toBeNull();
+    expect(await db.restricted_local.count()).toBe(0);
+    expect(engine.status.value).toMatchObject({ pendingOps: 0, failedOps: 0 });
+  });
+
   it('deletes through the outbox and removes tombstones and their children on pull', async () => {
     const mine = await createProject();
     await engine.syncNow();

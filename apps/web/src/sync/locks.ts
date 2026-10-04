@@ -8,7 +8,7 @@
  * its own when the owning tab crashes. The lease is best-effort; correctness never depends
  * on it because `sync_push` is idempotent and applying a pull page twice is harmless.
  */
-import { type Clock, sleep } from './clock';
+import { type Clock, isDue, sleep } from './clock';
 import type { DbPort, LockPort } from './ports';
 
 export const SYNC_LOCK_NAME = 'istiqama-map-sync';
@@ -73,8 +73,10 @@ export function leaseLock(
   const owner = options.ownerId ?? randomOwner();
 
   async function tryAcquire(): Promise<boolean> {
+    // A lease that expires further ahead than one TTL was written under a wrong (future)
+    // clock by a tab that is gone: it must not lock every tab out until the clock catches up.
     const lease = await db.updateMeta<Lease>(META_LEASE, (cur) =>
-      !cur || cur.owner === owner || cur.expiresAt <= clock.now()
+      !cur || cur.owner === owner || isDue(clock, cur.expiresAt, ttlMs)
         ? { owner, expiresAt: clock.now() + ttlMs }
         : cur,
     );
@@ -87,10 +89,12 @@ export function leaseLock(
 
   return {
     async run<T>(fn: () => Promise<T>, opts: { wait: boolean }): Promise<LockResult<T>> {
-      const deadline = clock.now() + maxWaitMs;
+      // Waiting is counted in polls, not by reading the clock (which may step back).
+      let waited = 0;
       while (!(await tryAcquire())) {
-        if (!opts.wait || clock.now() >= deadline) return { acquired: false };
+        if (!opts.wait || waited >= maxWaitMs) return { acquired: false };
         await sleep(clock, pollMs);
+        waited += pollMs;
       }
       let renewTimer: unknown = null;
       let held = true;

@@ -12,12 +12,16 @@
  *  - first in, first out; the thumbnail goes first (small, makes the photo visible to others);
  *  - nothing is uploaded offline, or on a metered connection when "Wi-Fi only" is on;
  *  - when both objects are stored the row gets `upload_state = 'uploaded'` through the
- *    outbox, the full-size blob is freed and the thumbnail stays for offline display.
+ *    outbox, the full-size blob is freed and the thumbnail stays for offline display;
+ *  - unfinished blobs are never dropped because their row is merely missing (a scope reset
+ *    keeps the blobs and the queue but discards the row until the fresh pull brings it back);
+ *  - a retry deadline further ahead than the longest backoff is not trusted (wrong clock).
  */
-import { type Clock, throwIfAborted, yieldToUi } from './clock';
+import { type Clock, isDue, throwIfAborted, yieldToUi } from './clock';
 import { type SyncErrorKind, toSyncError } from './errors';
 import { photoUploadGate } from './network';
 import type { DbPort, NetworkPort, PhotoKind, PrefsPort, ResumableUploader } from './ports';
+import { META_PULL_STATE, type PullState } from './pull';
 
 export const PHOTO_BUCKET = 'photos';
 export const PHOTO_META_PREFIX = 'photo_upload:';
@@ -100,6 +104,9 @@ function acknowledged(row: Record<string, unknown> | undefined): boolean {
   return !!row && typeof row.version === 'number' && row.version > 0;
 }
 
+/** The longest a failing photo ever waits (also bounds a server's Retry-After). */
+export const MAX_PHOTO_RETRY_MS = 4 * 60 * 60_000;
+
 /** Retry delays of a failing photo: 15 s, 30 s, 1 min … capped at 30 min (4 h when refused). */
 function retryDelay(
   kind: SyncErrorKind,
@@ -109,8 +116,9 @@ function retryDelay(
   const permanent =
     kind === 'forbidden' || kind === 'invalid' || kind === 'not_found' || kind === 'conflict';
   const base = permanent ? 10 * 60_000 : 15_000;
-  const cap = permanent ? 4 * 60 * 60_000 : 30 * 60_000;
-  return Math.max(retryAfterMs ?? 0, Math.min(cap, base * Math.pow(2, Math.max(0, attempts - 1))));
+  const cap = permanent ? MAX_PHOTO_RETRY_MS : 30 * 60_000;
+  const exp = Math.min(cap, base * Math.pow(2, Math.max(0, attempts - 1)));
+  return Math.min(MAX_PHOTO_RETRY_MS, Math.max(retryAfterMs ?? 0, exp));
 }
 
 export function createPhotoQueue(deps: PhotoQueueDeps): PhotoQueue {
@@ -194,6 +202,13 @@ export function createPhotoQueue(deps: PhotoQueueDeps): PhotoQueue {
     return names;
   }
 
+  async function hasUnfinishedBlob(entry: PhotoUploadEntry): Promise<boolean> {
+    for (const kind of PART_ORDER) {
+      if (!entry.parts[kind].done && (await db.photoBlob(entry.photoId, kind))) return true;
+    }
+    return false;
+  }
+
   type OneResult = 'uploaded' | 'waiting' | 'dropped';
 
   async function processOne(
@@ -202,7 +217,22 @@ export function createPhotoQueue(deps: PhotoQueueDeps): PhotoQueue {
   ): Promise<OneResult> {
     const { photoId } = entry;
     const row = await db.getRow('project_photos', photoId);
-    if (!row || (row.deleted_at !== null && row.deleted_at !== undefined)) {
+    if (row && row.deleted_at !== null && row.deleted_at !== undefined) {
+      await drop(photoId, true);
+      return 'dropped';
+    }
+    if (!row) {
+      // Deleting a row (locally, by a tombstone or `gone`) removes its blobs with it. A row
+      // that is missing while its unfinished blobs are still here was discarded by a scope
+      // reset (sign-out, scope_epoch change) and comes back with the fresh pull — which may
+      // need several cycles. Only a COMPLETE copy without the row proves that the photo is
+      // gone (deleted on the server meanwhile, or out of scope: a first round has no tombstones).
+      if (!(await hasUnfinishedBlob(entry))) {
+        await drop(photoId, true);
+        return 'dropped';
+      }
+      const pull = await db.getMeta<PullState>(META_PULL_STATE);
+      if (pull?.complete !== true || pull.wipePending === true) return 'waiting';
       await drop(photoId, true);
       return 'dropped';
     }
@@ -327,7 +357,9 @@ export function createPhotoQueue(deps: PhotoQueueDeps): PhotoQueue {
           outcome.more = true;
           break;
         }
-        if (entry.nextAttemptAt > clock.now()) {
+        // A deadline further ahead than any backoff was written under a wrong (future)
+        // clock: it is due now, or the photo would wait until the clock catches up.
+        if (!isDue(clock, entry.nextAttemptAt, MAX_PHOTO_RETRY_MS)) {
           outcome.failed++;
           continue;
         }

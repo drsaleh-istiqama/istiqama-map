@@ -10,7 +10,7 @@
  */
 import type { Signal } from '@preact/signals';
 import { CYCLE_BACKOFF, backoffDelay } from './backoff';
-import { type Clock, systemClock } from './clock';
+import { type Clock, elapsedSince, systemClock } from './clock';
 import { registerDevice, reportDeviceStatus, revocationOf } from './device';
 import { errorKey, toSyncError } from './errors';
 import { type PhotoQueue, type PhotoRunOptions, createPhotoQueue } from './photoQueue';
@@ -301,7 +301,7 @@ export function createSyncEngine(deps: EngineDeps, options: EngineOptions = {}):
    * also how a device learns that it was revoked.
    */
   async function heartbeat(continuing: boolean, signal: AbortSignal): Promise<void> {
-    if (continuing && clock.now() - lastHeartbeatAt < heartbeatGapMs) return;
+    if (continuing && elapsedSince(clock, lastHeartbeatAt) < heartbeatGapMs) return;
     let answer;
     try {
       const [counts, pendingPhotos] = await Promise.all([db.counts(), photos.pendingCount()]);
@@ -445,7 +445,7 @@ export function createSyncEngine(deps: EngineDeps, options: EngineOptions = {}):
 
   function onVisible(): void {
     if (!net.isOnline()) return;
-    if (clock.now() - lastAttemptAt >= minVisibleGapMs) void launch(false);
+    if (elapsedSince(clock, lastAttemptAt) >= minVisibleGapMs) void launch(false);
   }
 
   async function settle(): Promise<void> {

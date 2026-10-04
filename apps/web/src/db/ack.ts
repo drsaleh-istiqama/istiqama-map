@@ -18,7 +18,9 @@
  *   rejected
  *       the op moves to `failed_ops`; the local row keeps the user's data and is flagged
  *       `_failed`. Nothing is reverted silently: the user retries, edits (which re-queues
- *       the work) or discards.
+ *       the work) or discards. A rejected op only keeps the fields no LATER op of the same
+ *       row changed (`yieldToLaterOps`): the user's newest value wins after a pull, in what
+ *       "retry" re-sends and in what "discard" restores.
  *   restricted rows held in `restricted_local`
  *       deleted from the device as soon as no operation is queued for them any more.
  */
@@ -53,7 +55,8 @@ export function toPushOp(op: OutboxOp): PushOp {
     id: op.row_id,
     kind: op.kind,
     base_version: op.base_version,
-    fields: op.kind === 'delete' ? {} : op.fields,
+    // a delete carries no fields, except the natural key of a blind (restricted) row
+    fields: op.fields,
     client_ts: op.created_at,
   };
 }
@@ -189,19 +192,114 @@ async function refreshDirtyFlags(row: AnyRecord, table: TableName, id: string): 
   else delete row._dirty;
 }
 
+// ---------------------------------------------------------------------------------------
+// Field ownership: a rejected op vs later ops of the same row
+// ---------------------------------------------------------------------------------------
+
+type OpContent = Pick<OutboxOp, 'kind' | 'base_version' | 'fields' | 'before'>;
+
+/**
+ * A rejected operation proves that the server stored nothing of it, so its content may still
+ * change (sync.md §4.1: the same `op_id` may be sent again). Once a LATER operation of the
+ * same row changes a field, the rejected operation no longer owns that field — otherwise a
+ * pull would show, "retry" would re-send and "discard" would restore a value older than the
+ * user's newest one. Returns what the rejected operation keeps, or `null` when nothing is left.
+ *
+ *   - update: superseded fields are removed. The later operation recorded the rejected
+ *     (never stored) value as its `before`; the rejected operation's `before` — what the
+ *     server really has — moves to the first later operation that changes the field, so that
+ *     discarding THAT operation also goes back to the server's value.
+ *   - insert: it must stay a complete row, so a superseded field takes the newest value (a
+ *     cleared one is left out, as when coalescing). An insert whose every field a later
+ *     operation carries (a blind write of a restricted row is always complete) is dropped.
+ *
+ * `later` are the later operations, oldest first. Their `before` is updated in the outbox
+ * (a no-op for an operation that is not queued any more).
+ */
+async function yieldToLaterOps(
+  op: OpContent,
+  later: readonly OutboxOp[],
+): Promise<Pick<OutboxOp, 'fields' | 'before'> | null> {
+  const unchanged = { fields: op.fields, before: op.before };
+  if (op.kind !== 'upsert') return unchanged;
+  const owners = new Map<string, OutboxOp[]>();
+  for (const q of later) {
+    if (q.kind !== 'upsert') continue;
+    for (const k of Object.keys(q.fields)) {
+      const list = owners.get(k);
+      if (list) list.push(q);
+      else owners.set(k, [q]);
+    }
+  }
+  const superseded = Object.keys(op.fields).filter((k) => owners.has(k));
+  if (superseded.length === 0) return unchanged;
+
+  const fields = { ...op.fields };
+  if (isInsertOp(op)) {
+    if (Object.keys(fields).every((k) => owners.has(k))) return null;
+    for (const k of superseded) {
+      const newest = owners.get(k)!.at(-1)!.fields[k];
+      if (newest === null || newest === undefined) delete fields[k];
+      else fields[k] = newest;
+    }
+    return { fields, before: op.before };
+  }
+
+  const before = op.before ? { ...op.before } : undefined;
+  const handOver = new Map<OutboxOp, AnyRecord>();
+  for (const k of superseded) {
+    delete fields[k];
+    if (!before || !(k in before)) continue;
+    const first = owners.get(k)![0]!;
+    if (!isInsertOp(first)) {
+      const moved = handOver.get(first) ?? { ...(first.before ?? {}) };
+      moved[k] = before[k];
+      handOver.set(first, moved);
+    }
+    delete before[k];
+  }
+  for (const [q, moved] of handOver) {
+    if (q.seq !== undefined) await db.outbox.update(q.seq, { before: moved });
+  }
+  if (Object.keys(fields).length === 0) return null;
+  return { fields, before };
+}
+
+/**
+ * An operation of a row was acknowledged: older rejected operations of the row lose the
+ * fields it carried (see `yieldToLaterOps`).
+ */
+async function yieldOlderFailedOps(op: OutboxOp): Promise<void> {
+  if (op.kind !== 'upsert') return;
+  const older = (await failedOpsForRow(op.table, op.row_id)).filter((f) => f.seq < (op.seq ?? 0));
+  for (const f of older) {
+    const kept = await yieldToLaterOps(f, [op]);
+    if (!kept) await db.failed_ops.delete(f.id!);
+    else if (kept.fields !== f.fields)
+      await db.failed_ops.update(f.id!, { fields: kept.fields, before: kept.before });
+  }
+}
+
 async function parkAsFailed(op: OutboxOp, error: PushError | undefined): Promise<void> {
   const { seq, state: _state, ...rest } = op;
-  const failed: FailedOp = {
-    ...rest,
-    seq: seq ?? 0,
-    error: error ?? { code: 'unknown' },
-    failed_at: Date.now(),
-  };
-  await db.failed_ops.add(failed);
+  // Edits made while the op was on the wire are queued behind it and own their fields.
+  const later = (await opsForRow(op.table, op.row_id)).filter((q) => (q.seq ?? 0) > (seq ?? 0));
+  const kept = await yieldToLaterOps(op, later);
+  if (kept) {
+    const failed: FailedOp = {
+      ...rest,
+      fields: kept.fields,
+      seq: seq ?? 0,
+      error: error ?? { code: 'unknown' },
+      failed_at: Date.now(),
+    };
+    if (kept.before) failed.before = kept.before;
+    else delete failed.before;
+    await db.failed_ops.add(failed);
+  }
   const hit = await findLocal(op.table, op.row_id);
   if (hit) {
-    hit.row._failed = 1;
-    hit.row._dirty = 1;
+    await refreshDirtyFlags(hit.row, op.table, op.row_id);
     await putLocal(op.table, hit.row, hit.where, op.project_id);
   }
 }
@@ -249,6 +347,8 @@ export async function ackOp(
       result.status === 'duplicate' ? (result.original_status ?? 'applied') : result.status;
     const table = op.table;
     const version = typeof result.version === 'number' ? result.version : undefined;
+    // The server has this op's values now: an older rejected op must not bring back its own.
+    await yieldOlderFailedOps(op);
 
     if (op.kind === 'delete') {
       // The row left the device when the user deleted it; nothing to restore any more.
@@ -347,11 +447,22 @@ export function listFailedOps(): Promise<FailedOp[]> {
 
 async function requeueFailed(failed: FailedOp[]): Promise<void> {
   const ordered = failed.slice().sort((x, y) => x.seq - y.seq);
+  const requeued = new Set<number>();
   for (const f of ordered) {
     const { id, error: _error, failed_at: _failedAt, seq: _seq, ...rest } = f;
     await db.failed_ops.delete(id!);
-    // Same op_id and content: the server stored nothing for a rejected operation.
-    await db.outbox.add({ ...rest, state: 'pending' });
+    // Same op_id: the server stored nothing for a rejected operation. It goes to the end of
+    // the queue, so it must not carry a field that an edit queued after it changed.
+    const later = (await opsForRow(f.table, f.row_id)).filter(
+      (q) => (q.seq ?? 0) > f.seq && !requeued.has(q.seq ?? 0),
+    );
+    const kept = await yieldToLaterOps(f, later);
+    if (kept) {
+      const op: OutboxOp = { ...rest, fields: kept.fields, state: 'pending' };
+      if (kept.before) op.before = kept.before;
+      else delete op.before;
+      requeued.add(await db.outbox.add(op));
+    }
     const hit = await findLocal(f.table, f.row_id);
     if (hit) {
       await refreshDirtyFlags(hit.row, f.table, f.row_id);
@@ -361,9 +472,10 @@ async function requeueFailed(failed: FailedOp[]): Promise<void> {
 }
 
 /**
- * Queues rejected operations again, unchanged, in their original order (e.g. after the
- * cause was fixed on the server, or a missing parent now exists). Without `ids`: all.
- * Returns how many were requeued.
+ * Queues rejected operations again under their `op_id`, in their original order (e.g. after
+ * the cause was fixed on the server, or a missing parent now exists) — with their content
+ * minus the fields a later edit of the row owns (`yieldToLaterOps`). Without `ids`: all.
+ * Returns how many were handled.
  */
 export async function retryFailedOps(ids?: readonly number[]): Promise<number> {
   return db.transaction('rw', db.tables, async () => {

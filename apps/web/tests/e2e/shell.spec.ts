@@ -21,7 +21,6 @@ import {
 
 const SUPABASE_URL =
   process.env.E2E_SUPABASE_URL ?? process.env.VITE_SUPABASE_URL ?? 'http://127.0.0.1:54321';
-const ANON_KEY = process.env.E2E_SUPABASE_ANON_KEY ?? process.env.VITE_SUPABASE_ANON_KEY ?? '';
 const EMAIL = process.env.E2E_EMAIL ?? 'collector.pemba@example.org';
 /** Seeded preferred_language of the account (supabase/seed.staging.sql). */
 const PROFILE_LANGUAGE = process.env.E2E_PROFILE_LANGUAGE ?? 'sw';
@@ -99,24 +98,6 @@ async function expectDirection(page: Page, lang: string, dir: 'rtl' | 'ltr'): Pr
   await expect(html).toHaveAttribute('lang', lang);
   await expect(html).toHaveAttribute('dir', dir);
 }
-
-/**
- * LOCAL STACK WORKAROUND — remove once scripts/local-stack/gateway/proxy.ts is fixed.
- * The gateway keeps idle keep-alive sockets to PostgREST longer than PostgREST keeps them open,
- * so the first API request after a pause (e.g. the build that precedes this suite) can come back
- * 502 ("postgrest_unreachable: socket hang up" in .local/logs/gateway.log). The app retries,
- * but Chrome logs the 502 as a console error. Consume the stale sockets first: the agent hands
- * out its free sockets newest first, so the first non-502 answer means none is left.
- */
-test.beforeAll(async ({ request }) => {
-  if (!ANON_KEY) return;
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    const response = await request.get(`${SUPABASE_URL}/rest/v1/countries?select=id&limit=1`, {
-      headers: { apikey: ANON_KEY },
-    });
-    if (response.status() !== 502) return;
-  }
-});
 
 test('shell boots: OTP sign-in, PIN, first sync, offline unlock, language switch', async ({
   page,

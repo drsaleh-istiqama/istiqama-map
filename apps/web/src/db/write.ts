@@ -454,6 +454,22 @@ function blindRowFields(def: SyncTableDef, row: AnyRecord, diff: AnyRecord): Any
   return fields;
 }
 
+/**
+ * The natural key of a restricted row (its parent included) for a blind DELETE (sync.md §4.4:
+ * blind writes are addressed by natural key and must name their parent). The op still names
+ * the row id, which is what the delete branch of `sync_push` looks up (migration 0023, step 3;
+ * it does not read `fields` of a delete). The id alone is not enough: an insert the server
+ * redirected to an existing row of the same key never created a row with that id, and a blind
+ * answer carries no `row_id` to learn the real one — only the key names that row.
+ */
+function blindKeyFields(def: SyncTableDef, row: AnyRecord): AnyRecord {
+  const fields: AnyRecord = {};
+  for (const c of [def.scopeCol, ...(def.naturalKey ?? [])]) {
+    if (c && row[c] !== null && row[c] !== undefined) fields[c] = row[c];
+  }
+  return fields;
+}
+
 async function updateRow(
   def: SyncTableDef,
   id: string,
@@ -656,7 +672,7 @@ export async function softDelete(table: TableName, id: string): Promise<void> {
         row_id: id,
         kind: 'delete',
         base_version: version,
-        fields: {},
+        fields: hit.where === 'restricted_local' ? blindKeyFields(tableDef(table), row) : {},
         snapshot,
         state: 'pending',
         attempts: 0,
