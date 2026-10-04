@@ -259,7 +259,16 @@ different), `state text not null default 'pending'` (`pending|merged|rejected|re
 
 **`staff_compensation`** (S, RESTRICTED) — `project_staff_id` → project_staff (not null),
 `monthly_amount numeric(14,2) not null` ≥ 0, `currency char(3) not null`
-(`TZS|KES|UGX|RWF|BIF|MZN|OMR|USD`), `effective_from date not null default current_date`.
+(`^[A-Z]{3}$`, constraint `staff_compensation_currency_format_ck`, and a **managed** code —
+`private.currency_is_managed`, trigger `staff_compensation_currency_tg`, migration 0072: one of
+the brief's `TZS|KES|UGX|RWF|BIF|MZN|OMR|USD`, **or** some country's `default_currency`, **or**
+a currency with a live `fx_rates` row — so a country added from the admin console pays
+salaries in its own currency without a migration, brief §0. An unmanaged code fails with
+SQLSTATE 23514 and constraint name `staff_compensation_currency_ck`, exactly as the former
+CHECK did. Only inserts and currency changes of live rows are checked: a row whose currency
+later leaves the list stays editable and deletable. Clients should offer the union of
+`countries.default_currency` and live `fx_rates.currency` (both synced) plus `USD`),
+`effective_from date not null default current_date`.
 Unique live `(project_staff_id, effective_from)`.
 
 **`fx_rates`** (S) — `currency char(3) not null`, `usd_per_unit numeric(20,10) not null` > 0,

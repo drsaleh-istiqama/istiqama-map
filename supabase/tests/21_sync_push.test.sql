@@ -7,7 +7,7 @@
 begin;
 set local search_path = public, extensions, tests;
 
-select plan(130);
+select plan(136);
 
 do $$ begin perform tests.fixture(); end $$;
 
@@ -794,22 +794,26 @@ select ok(
 
 -- The row id plays no part in a blind write: it is addressed by its natural
 -- key. nid(113) is the collector's own row (2026-01-01); nid(112) was
--- redirected (it never existed); nid(10) holds 2025-01-01.
+-- redirected (it never existed); nid(10) holds 2025-01-01 (also his own).
+-- A blind DELETE names its parent and key like an upsert (the client sends
+-- them, apps/web/src/db/write.ts softDelete); without them: parent_required.
 insert into res
 select 'g6', pg_temp.push(tests.id('u_col_pemba'), 'dev-a', jsonb_build_array(
   pg_temp.op(311, 'staff_compensation', pg_temp.nid(113), 1, jsonb_build_object('monthly_amount', 330000)),
   pg_temp.op(312, 'staff_compensation', pg_temp.nid(112), 1, jsonb_build_object('monthly_amount', 330000)),
   pg_temp.op(313, 'staff_compensation', pg_temp.nid(10), 1, jsonb_build_object(
     'project_staff_id', pg_temp.nid(5), 'effective_from', '2027-01-01', 'monthly_amount', 340000, 'currency', 'TZS')),
-  pg_temp.op(314, 'staff_compensation', pg_temp.nid(113), 1, null, 'delete'),
-  pg_temp.op(315, 'staff_compensation', pg_temp.nid(112), 1, null, 'delete')));
+  pg_temp.op(314, 'staff_compensation', pg_temp.nid(113), 1, jsonb_build_object(
+    'project_staff_id', pg_temp.nid(5), 'effective_from', '2026-01-01'), 'delete'),
+  pg_temp.op(315, 'staff_compensation', pg_temp.nid(112), 1, null, 'delete'),
+  pg_temp.op(330, 'staff_compensation', pg_temp.nid(10), 1, null, 'delete')));
 
 select ok(
   pg_temp.err('g6', 0) = 'parent_required' and pg_temp.err('g6', 1) = 'parent_required'
   and pg_temp.r('g6', 2) - 'op_id' = '{"status": "applied", "version": null}'::jsonb
   and pg_temp.r('g6', 3) - 'op_id' = '{"status": "applied", "version": null}'::jsonb
-  and pg_temp.r('g6', 4) - 'op_id' = '{"status": "applied", "version": null}'::jsonb,
-  'blind writes: an existing and an unknown id get the same answer (partial update: parent_required; delete: constant)');
+  and pg_temp.err('g6', 4) = 'parent_required' and pg_temp.err('g6', 5) = 'parent_required',
+  'blind writes: an existing and an unknown id get the same answer (partial update or delete without parent: parent_required; delete by key: constant)');
 select is(
   (select array_agg(sc.effective_from::text || ':' || sc.monthly_amount::int || ':' || (sc.id = pg_temp.nid(10))
                     order by sc.effective_from)
@@ -857,6 +861,77 @@ select ok(
   and pg_temp.r('g10', 0) -> 'conflict_fields' = '["monthly_amount"]'::jsonb
   and not (pg_temp.r('g10', 0) ? 'server_values'),
   'a country manager (aal2) gets status, row_id and conflict fields; stored values are still never echoed');
+
+-- Blind DELETE (sync.md §4.4): addressed by natural key, authorised on the
+-- parent, never deletes somebody else's row, always the constant answer.
+-- comp:p_pemba_2 / sens:p_pemba_2 belong to u_col_pemba; u_col_pemba2 holds
+-- open conflicts on both (g4), u_mgr_tz one on comp:p_pemba_2 (g10).
+insert into res
+select 'g11', pg_temp.push(tests.id('u_col_pemba2'), 'dev-b', jsonb_build_array(
+  pg_temp.op(335, 'staff_compensation', pg_temp.nid(335), 0, jsonb_build_object(        -- his own row
+    'project_staff_id', tests.id('staff:p_pemba_2'), 'effective_from', '2023-01-01',
+    'monthly_amount', 1, 'currency', 'TZS')),
+  pg_temp.op(331, 'staff_compensation', pg_temp.nid(331), 1, jsonb_build_object(        -- somebody else's row
+    'project_staff_id', tests.id('staff:p_pemba_2'), 'effective_from', '2024-01-01'), 'delete'),
+  pg_temp.op(332, 'community_sensitive', tests.id('sens:p_pemba_2'), 1, jsonb_build_object(  -- by its real id
+    'project_id', tests.id('p_pemba_2')), 'delete'),
+  pg_temp.op(333, 'staff_compensation', pg_temp.nid(333), 1, jsonb_build_object(        -- no such row
+    'project_staff_id', tests.id('staff:p_pemba_2'), 'effective_from', '2019-01-01'), 'delete'),
+  pg_temp.op(336, 'staff_compensation', tests.id('comp:p_pemba_2'), 1, jsonb_build_object(  -- other id, own key
+    'project_staff_id', tests.id('staff:p_pemba_2'), 'effective_from', '2023-01-01'), 'delete'),
+  pg_temp.op(337, 'staff_compensation', tests.id('comp:p_pemba_2'), 1, null, 'delete')));  -- existing id, no parent
+
+select is(
+  (select array_agg(e.value - 'op_id' order by e.ord)
+   from res, jsonb_array_elements(res.v -> 'results') with ordinality as e(value, ord)
+   where res.k = 'g11' and e.ord between 2 and 5),
+  array_fill('{"status": "applied", "version": null}'::jsonb, array[4]),
+  'blind delete: identical constant answers for another user''s row, a row named by its real id, a missing row and an own row');
+select is(pg_temp.err('g11', 5), 'parent_required',
+  'blind delete without the parent: parent_required although the id exists');
+select is(
+  (select array_agg(x.k || ':' || x.live order by x.k)
+   from (select 'comp' as k, (sc.deleted_at is null)::text as live from public.staff_compensation sc
+         where sc.id = tests.id('comp:p_pemba_2')
+         union all
+         select 'sens', (s.deleted_at is null)::text from public.community_sensitive s
+         where s.id = tests.id('sens:p_pemba_2')
+         union all
+         select 'own', (sc.deleted_at is null)::text from public.staff_compensation sc
+         where sc.id = pg_temp.nid(335)) x),
+  array['comp:true', 'own:false', 'sens:true'],
+  'blind delete: only the caller''s own row (found by natural key, whatever the op id) is deleted');
+select is(
+  (select array_agg(x.v order by x.v collate "C")
+   from (select c.client_user_id::text || ':' || c.table_name || ':' || (c.deleted_at is null)::text as v
+         from public.sync_conflicts c
+         where c.row_id in (tests.id('comp:p_pemba_2'), tests.id('sens:p_pemba_2')) and c.state = 'open') x),
+  (select array_agg(x order by x collate "C")
+   from unnest(array[
+     tests.id('u_col_pemba2')::text || ':community_sensitive:false',
+     tests.id('u_col_pemba2')::text || ':staff_compensation:false',
+     tests.id('u_mgr_tz')::text || ':staff_compensation:true']) as x),
+  'blind delete: the caller''s own open conflicts on the row are withdrawn, those of others stay open');
+
+insert into res
+select 'g12', pg_temp.push(tests.id('u_col_ke'), 'dev-k', jsonb_build_array(
+  pg_temp.op(338, 'staff_compensation', pg_temp.nid(338), 1, jsonb_build_object(
+    'project_staff_id', tests.id('staff:p_pemba_2'), 'effective_from', '2023-01-01'), 'delete'),
+  pg_temp.op(339, 'staff_compensation', pg_temp.nid(339), 1, jsonb_build_object(
+    'project_staff_id', pg_temp.nid(9999), 'effective_from', '2023-01-01'), 'delete')));
+select is(array[pg_temp.err('g12', 0), pg_temp.err('g12', 1)], array['out_of_scope', 'parent_missing'],
+  'blind delete: authorised on the parent''s scope (out_of_scope), an unknown parent is parent_missing');
+
+-- whoever may see the row's restricted data still deletes by id (non-blind)
+insert into res
+select 'g13', pg_temp.push(tests.id('u_mgr_tz'), 'dev-m', jsonb_build_array(
+  pg_temp.op(340, 'staff_compensation', pg_temp.nid(318), pg_temp.ver('staff_compensation', pg_temp.nid(318)),
+             null, 'delete')), 'aal2');
+select ok(
+  pg_temp.st('g13') = array['applied']
+  and (pg_temp.r('g13', 0) ->> 'version')::int = pg_temp.ver('staff_compensation', pg_temp.nid(318))
+  and (select sc.deleted_at is not null from public.staff_compensation sc where sc.id = pg_temp.nid(318)),
+  'a country manager (aal2) deletes a restricted row by id, with its version, although somebody else created it');
 
 -- =============================================================================
 -- H. Persons are never merged automatically

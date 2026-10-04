@@ -281,6 +281,31 @@ The mobile bottom bar shows: map, projects, add, maintenance, reports.
 `conflict-keep-server`, `conflict-keep-client`, `review-approve`, `review-return`,
 `v2-migrate-accept`, `v2-import-file`, `lang-ar`, `lang-sw`, `lang-en`.
 
+Unit 4 additions (used by `reports.spec.ts`, `migration.spec.ts`, `admin.spec.ts`):
+
+- Reports: `reports-page`, `reports-scope`, `reports-export`, `dashboard`, `dash-payroll`,
+  `dash-payroll-row` (`data-currency`), `dash-payroll-local`, `dash-payroll-usd`,
+  `dash-missing-rates`, `export-dialog`, `export-format-xlsx|csv`, `export-lang-ar|sw|en`,
+  `export-submit`, `export-job-row` (`data-id`, `data-state`), `export-download`,
+  `notifications-bell`, `notifications-count`, `notification-item`, `print-page`, `print-doc`
+  (`dir`, `lang`, `data-kind`), `print-code`, `print-staff-row`, `print-salary`,
+  `print-show-salaries`, `details-print` (project details → print card).
+- Migration (criterion 6): `v2-migrate-accept` opens the summary (`v2-migrate-summary`),
+  `v2-migrate-start` writes; `v2-migrate-report` (`data-pushed`, `data-keys-removed`),
+  `v2-migrate-sync`, `v2-migrate-close`, `v2-migrate-cancel`, `v2-migrate-error`,
+  `v2-import-file`, `v2-import-file-error`; bulk import `import-*`.
+- Admin: `admin-forbidden`, `admin-*` per panel (users, roles, countries, options, …).
+
+## 4a. Unit 4 integration points
+
+- Top bar: `NotificationsBell` (`src/reports`) next to `SyncBadge`.
+- Shell: `V2MigrationPrompt` (`src/migration`, default export) — loaded when the device has v2
+  data or after `/settings` / `/import` was opened. Settings: `V2ImportSection`.
+- All three are listed in `src/ui/shell/integrations.ts` and mounted through
+  `src/ui/shell/LazySlot.tsx` (lazy chunk; a failing load never breaks the shell).
+- The admin nav item is shown for `can.admin` **or** `can.manage` (country managers: users
+  and sync status only).
+
 ## 5. Unit 3 shared pieces (feature modules)
 
 - **Enumerated values** are translated with `t('enum.<enum_key>.<code>')`, generated from the

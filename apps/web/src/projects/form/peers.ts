@@ -7,11 +7,15 @@
  */
 import type { ComponentType } from 'preact';
 import type * as MapModule from '../../map';
-import type { PersonPickerProps, PersonSelection } from '../../people/PersonPicker';
+import type {
+  PersonPickerDraft,
+  PersonPickerProps,
+  PersonSelection,
+} from '../../people/PersonPicker';
 import type * as PhotosApi from '../../photos';
 import type { PhotoEditorProps } from '../../photos';
 
-export type { PersonPickerProps, PhotoEditorProps };
+export type { PersonPickerDraft, PersonPickerProps, PhotoEditorProps };
 export type PersonPickerSelection = PersonSelection;
 export type NewPersonInput = Extract<PersonSelection, { newPerson: unknown }>['newPerson'];
 export type PickLocation = (typeof MapModule)['pickLocation'];

@@ -202,8 +202,8 @@ removing each other in concurrent transactions can still both succeed (same as t
 
 | Table | collector | supervisor | manager | hq_admin | viewer | Predicate |
 |---|---|---|---|---|---|---|
-| `projects` | scope | scope | scope | all | scope | read triple on `country_id`/`branch_id` |
-| `project_land`, `project_facilities`, `project_maintenance`, `project_photos`, `project_donors`, `community_profiles` | scope | scope | scope | all | scope | parent project in read scope |
+| `projects` | scope | scope | scope | all | scope, **approved only**⁶ | read triple on `country_id`/`branch_id`; not approved → people triple too⁶ |
+| `project_land`, `project_facilities`, `project_maintenance`, `project_photos`, `project_donors`, `community_profiles` | scope | scope | scope | all | scope, **approved parent only**⁶ | parent project in read scope (and visible by ⁶) |
 | `persons` | scope | scope | scope | all | **–** | people triple on `persons.country_id`/`branch_id` |
 | `project_staff` | scope | scope | scope | all | **–** | parent project in people scope |
 | `localities` | country³ | country³ | country | all | country³ / all | `country_id` in read countries or in the country of a read branch |
@@ -215,10 +215,22 @@ removing each other in concurrent transactions can still both succeed (same as t
 ³ A locality has a country but no branch: branch-scoped roles see the localities of the country
 their branch belongs to (it is geographic reference data, like `admin_areas`).
 ⁴ Donors have no scope columns. Visible: to global readers; when linked through
-`project_donors` to a project in the caller's read scope; to their creator (`created_by`).
+`project_donors` to a project in the caller's read scope (for a viewer: an approved one, ⁶); to
+their creator (`created_by`).
 ⁵ Never rows with `table_name in ('staff_compensation', 'community_sensitive')`. Conflicts on
 tables other than projects/children (`project_id`), `persons` and `localities` are visible to
 global reviewers only.
+⁶ **Unreviewed records** (interim owner rule, `docs/OWNER_DECISIONS.md` «أسئلة فرعية» ح): a
+project whose `record_state` is not `approved` (`draft`, `submitted`, `returned`) and every row
+below it are visible only inside the caller's **people** scope — i.e. to every role except
+`viewer`. Predicate: `record_state = 'approved' or <people triple on country_id/branch_id>`.
+A user holding a viewer grant **and** another role sees unreviewed records where the other role
+reaches. Applied identically by `sync_pull`, `search`, `projects_page`, `project_duplicates`,
+`tile_projects` (pyramid groups carry `record_state`), `dashboard`, `report_country`,
+`report_project` (`PT404`), `report_donor`, `export_rows` and the `photos` bucket (§4.4).
+SECURITY DEFINER code: `private.reads_unreviewed_everywhere(read triple, people triple)` is
+true when the people scope covers the read scope (no extra filter needed); otherwise add the
+predicate above.
 
 Soft-deleted rows stay visible inside the scope (tombstones); filter `deleted_at is null` in
 the client query.
@@ -240,7 +252,7 @@ the client query.
 
 | Bucket | Read (select / signed URL) | Write (insert / update) | Delete |
 |---|---|---|---|
-| `photos` (private) `projects/{ISO2}/{project_id}/{photo_id}_{full\|thumb}.{webp\|jpg\|jpeg}` | caller can read the project (viewer included) | caller may edit the photo **row**: `{project_id}/{photo_id}` is a live `project_photos` row of a live project, and the caller is its creator with write scope on the project or a reviewer of the project (`private.photo_object_writable`; applies to insert, upsert/TUS overwrite and move — old and new name) | nobody (service role: `purge-photos`) |
+| `photos` (private) `projects/{ISO2}/{project_id}/{photo_id}_{full\|thumb}.{webp\|jpg\|jpeg}` | caller can read the project (viewer included — approved projects only, §4.2 ⁶) | caller may edit the photo **row**: `{project_id}/{photo_id}` is a live `project_photos` row of a live project, and the caller is its creator with write scope on the project or a reviewer of the project (`private.photo_object_writable`; applies to insert, upsert/TUS overwrite and move — old and new name) | nobody (service role: `purge-photos`) |
 | `exports`, `imports` (private) `{auth.uid()}/…` | own folder | own folder | nobody |
 | `tiles` (public) | every signed-in user with a valid session; anonymous HTTP through the public endpoint | `hq_admin` | `hq_admin` |
 
@@ -361,8 +373,9 @@ for the three areas; `notif:<u>`, `export:<u>`, `import:<u>`, `importrow:<u>`, `
   work because their owner bypasses RLS: `postgres` on Supabase, the superuser locally. Do not
   change the owner of these functions to a role without `BYPASSRLS`.
 - **Session revocation needs both halves.** `profiles.sessions_revoked_at` kills access tokens
-  that are still valid (checked on every statement). Refresh tokens must be revoked through the
-  Auth admin API at the same time (the `admin` Edge Function); otherwise a refreshed token gets
+  that are still valid (checked on every statement). Refresh tokens are ended in the same
+  transaction by the trigger `profiles_end_auth_sessions` (migration 0072: deletes the user's
+  `auth.sessions`, refresh tokens cascade; people-admin.md §6); otherwise a refreshed token gets
   a new `iat` and passes again. A token issued in the same second as the revocation is refused
   (fail closed) — the user simply signs in again.
 - **Device revocation is bound to the header.** `devices.revoked_at` blocks requests that carry

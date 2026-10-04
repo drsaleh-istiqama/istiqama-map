@@ -1,0 +1,472 @@
+/*
+ * Print views (brief §9.4, decision D4): an A4 sheet on screen, a clean document on paper /
+ * "Save as PDF". Corporate navy #0f2545 + gold #c8a24a; logical properties so the same rules
+ * serve Arabic (RTL) and Swahili / English (LTR).
+ */
+
+@page {
+  size: A4;
+  margin: 12mm 12mm 16mm;
+  @bottom-center {
+    content: counter(page) ' / ' counter(pages);
+    font-family: 'Tajawal', 'Segoe UI', Tahoma, sans-serif;
+    font-size: 8.5pt;
+    color: #5b6676;
+  }
+}
+
+/* ---------- Screen: toolbar + sheet ---------- */
+.pprint {
+  min-block-size: 100vh;
+  background: var(--c-surface-2);
+  padding-block-end: var(--sp-6);
+}
+.ptoolbar {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4);
+  background: var(--c-navy);
+  color: var(--c-on-navy);
+}
+.ptoolbar .btn--ghost {
+  color: var(--c-on-navy);
+}
+.ptoolbar .btn--ghost:focus-visible,
+.ptoolbar .rcheck input:focus-visible {
+  outline-color: var(--c-gold);
+}
+.ptoolbar__spacer {
+  flex: 1 1 auto;
+}
+.pprint__message {
+  max-inline-size: 40rem;
+  margin: var(--sp-6) auto;
+  padding: var(--sp-4);
+}
+
+.pdoc {
+  box-sizing: border-box;
+  inline-size: 100%;
+  max-inline-size: 210mm;
+  margin: var(--sp-4) auto;
+  padding: 10mm 12mm;
+  background: #fff;
+  color: #1b2433;
+  box-shadow: 0 2px 14px rgba(15, 37, 69, 0.18);
+  font-size: 10.5pt;
+  line-height: 1.5;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+@media (max-width: 40rem) {
+  .pdoc {
+    margin: 0;
+    padding: var(--sp-4);
+    box-shadow: none;
+  }
+}
+
+/* Running header / footer: the table header and footer groups repeat on every printed page. */
+.pframe {
+  inline-size: 100%;
+  border-collapse: collapse;
+}
+.pframe > thead > tr > td,
+.pframe > tfoot > tr > td,
+.pframe > tbody > tr > td {
+  padding: 0;
+  vertical-align: top;
+}
+.phead {
+  display: flex;
+  align-items: center;
+  gap: 3mm;
+  padding-block-end: 2.5mm;
+  margin-block-end: 5mm;
+  border-block-end: 2px solid #c8a24a;
+  color: #0f2545;
+}
+.phead__mark {
+  inline-size: 8mm;
+  block-size: 8mm;
+  border-radius: 2mm;
+  background: #0f2545;
+  box-shadow:
+    inset 0 0 0 1.2mm #0f2545,
+    inset 0 0 0 1.8mm #c8a24a;
+  flex: none;
+}
+.phead__org {
+  font-weight: 700;
+  font-size: 11pt;
+}
+.phead__title {
+  margin-inline-start: auto;
+  font-size: 9.5pt;
+  color: #5b6676;
+}
+.pfoot {
+  display: flex;
+  justify-content: space-between;
+  gap: 4mm;
+  margin-block-start: 5mm;
+  padding-block-start: 2mm;
+  border-block-start: 1px solid #d5dbe4;
+  font-size: 8pt;
+  color: #5b6676;
+}
+
+/* ---------- Title block ---------- */
+.ptitle {
+  display: flex;
+  align-items: flex-start;
+  gap: 4mm;
+  margin-block-end: 5mm;
+  color: #0f2545;
+}
+.ptitle__text {
+  min-inline-size: 0;
+}
+.ptitle__kicker {
+  margin: 0;
+  font-size: 9pt;
+  font-weight: 700;
+  color: #7a5c12;
+  text-transform: none;
+}
+.ptitle__name {
+  margin: 0;
+  font-size: 19pt;
+  line-height: 1.25;
+  color: #0f2545;
+}
+.ptitle__alt {
+  margin: 1mm 0 0;
+  color: #5b6676;
+}
+.ptitle__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2mm;
+  margin: 2mm 0 0;
+}
+
+/* ---------- Sections ---------- */
+.psec {
+  margin-block-end: 5mm;
+  break-inside: avoid-page;
+}
+.psec--wide {
+  break-inside: auto;
+}
+.psec__title {
+  margin: 0 0 2.5mm;
+  padding-inline-start: 2.5mm;
+  border-inline-start: 1.2mm solid #c8a24a;
+  font-size: 12.5pt;
+  color: #0f2545;
+  break-after: avoid;
+}
+.pkv {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 6mm;
+  margin: 0;
+}
+@media (max-width: 34rem) {
+  .pkv {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.pkv__row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 2mm;
+  padding: 1.2mm 0;
+  border-block-end: 1px solid #e6e9ef;
+  break-inside: avoid;
+}
+.pkv__row dt {
+  color: #5b6676;
+}
+.pkv__row dd {
+  margin: 0;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.pkpis {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3mm;
+  margin: 0 0 3mm;
+}
+.pkpi {
+  flex: 1 1 30mm;
+  padding: 2mm 3mm;
+  border-radius: 1.5mm;
+  background: #0f2545;
+  color: #fff;
+  border-block-end: 1mm solid #c8a24a;
+}
+.pkpi dt {
+  font-size: 8.5pt;
+  color: #c7d0de;
+}
+.pkpi dd {
+  margin: 0;
+  font-size: 13pt;
+  font-weight: 700;
+}
+
+/* ---------- Tables ---------- */
+.ptable {
+  inline-size: 100%;
+  border-collapse: collapse;
+  font-size: 9.5pt;
+  font-variant-numeric: tabular-nums;
+}
+.ptable th,
+.ptable td {
+  padding: 1.4mm 2mm;
+  text-align: start;
+  vertical-align: top;
+  border-block-end: 1px solid #e6e9ef;
+}
+.ptable thead th {
+  background: #0f2545;
+  color: #fff;
+  font-weight: 500;
+}
+.ptable tbody tr:nth-child(even) {
+  background: #f6f7f9;
+}
+.ptable tr {
+  break-inside: avoid;
+}
+.ptable--dense {
+  font-size: 8pt;
+}
+.ptable--dense th,
+.ptable--dense td {
+  padding: 1mm 1.2mm;
+}
+.ptable__sub {
+  display: block;
+  font-size: 7.5pt;
+  color: #5b6676;
+}
+.ptable__line {
+  display: block;
+  white-space: nowrap;
+}
+
+/* ---------- Photos and map ---------- */
+.pgrid {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 4mm;
+  margin-block-end: 4mm;
+  break-inside: avoid;
+}
+@media (max-width: 34rem) {
+  .pgrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.pcover figure,
+.pgallery figure {
+  margin: 0;
+}
+.pcover__img {
+  inline-size: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 1.5mm;
+}
+.pcover figcaption,
+.pgallery figcaption {
+  font-size: 8pt;
+  color: #5b6676;
+}
+.pcover__none {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 4 / 3;
+  border: 1px dashed #c3cad6;
+  border-radius: 1.5mm;
+}
+.pphoto {
+  display: block;
+  inline-size: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 1mm;
+  background: #eef1f5;
+}
+.pphoto--empty {
+  display: grid;
+  place-items: center;
+  font-size: 8pt;
+  color: #5b6676;
+}
+.pgallery {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3mm;
+  margin: 0 0 4mm;
+  padding: 0;
+  break-inside: avoid;
+}
+.pmap {
+  margin: 0;
+}
+.pmap__svg {
+  display: block;
+  inline-size: 100%;
+  block-size: auto;
+  border-radius: 1.5mm;
+  border: 1px solid #d5dbe4;
+}
+.pmap__bg {
+  fill: #f2f5f9;
+}
+.pmap__area {
+  fill: rgba(15, 37, 69, 0.12);
+  stroke: #0f2545;
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+}
+.pmap__halo {
+  fill: rgba(200, 162, 74, 0.35);
+}
+.pmap__dot {
+  fill: #c8a24a;
+  stroke: #0f2545;
+  stroke-width: 2;
+}
+.pmap__caption {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2mm;
+  font-size: 8pt;
+  color: #5b6676;
+}
+.pmap--loading,
+.pmap--empty {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 32 / 22;
+  border: 1px dashed #c3cad6;
+  border-radius: 1.5mm;
+}
+
+/* ---------- Donor projects ---------- */
+.pdproj-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 3mm;
+}
+.pdproj {
+  display: grid;
+  grid-template-columns: 38mm minmax(0, 1fr);
+  gap: 3mm;
+  padding-block-end: 3mm;
+  border-block-end: 1px solid #e6e9ef;
+  break-inside: avoid;
+}
+.pdproj__name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2mm;
+  margin: 0;
+  font-size: 11pt;
+  color: #0f2545;
+}
+.pdproj__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1mm 3mm;
+  margin: 1mm 0 0;
+  font-size: 9pt;
+}
+.pdproj__thumbs {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(3, 22mm);
+  gap: 2mm;
+  margin: 2mm 0 0;
+  padding: 0;
+}
+
+/* The dashboard inside the country report: tighter, two columns, no interactive bits. */
+.pcountry .rkpi {
+  padding: 2mm 3mm;
+}
+.pcountry .rkpi__value {
+  font-size: 13pt;
+}
+.pcountry .card {
+  padding: 3mm;
+  box-shadow: none;
+  break-inside: avoid;
+}
+.pcountry .rgrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (max-width: 34rem) {
+  .pcountry .rgrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---------- Paper ---------- */
+@media print {
+  html,
+  body {
+    background: #fff !important;
+  }
+  .ptoolbar,
+  .skip-link,
+  .toasts,
+  [data-ui-host='toast'] {
+    display: none !important;
+  }
+  .pprint {
+    background: #fff;
+    padding: 0;
+    min-block-size: 0;
+  }
+  .pdoc {
+    max-inline-size: none;
+    margin: 0;
+    padding: 0;
+    box-shadow: none;
+    font-size: 10pt;
+  }
+  .pkv,
+  .pcountry .rgrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .pgrid {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  }
+  .rtable-wrap {
+    overflow: visible;
+  }
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+}

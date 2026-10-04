@@ -223,7 +223,10 @@ Whole-call errors (HTTP error, nothing applied — retry the same batch later, i
      (`branch_country_mismatch`). A project's `locality_id` must name a locality of the
      project's (stored, derived) country, on insert and whenever `locality_id` or the
      location/country changes (`locality_country_mismatch`, PT422): the locality's names
-     are copied into `search_norm` and shown with the project.
+     are copied into `search_norm` and shown with the project. A `locality_id` that names a
+     locality merged into another one (`merge_localities`, people-admin.md §11) is replaced
+     by the surviving locality before anything else is checked; the next pull brings the
+     stored value.
    - `localities`: `country_id` defaults from the caller's single country.
    - children: the parent must exist (`parent_missing`) and be live (`parent_deleted`).
    - **`created_at`** (every table): an insert may carry the time at which the row was
@@ -260,7 +263,8 @@ Whole-call errors (HTTP error, nothing applied — retry the same batch later, i
      values → one `sync_conflicts` row per field (`state: open`), that field is left
      untouched, the remaining fields are written (`conflict`).
 7. **Delete** = soft delete (`deleted_at`). Unknown or already deleted row → `applied`
-   (no-op). Otherwise: role class of `delete`, then the **workflow rules of §4.3** for the
+   (no-op). (A blind delete of a restricted row is addressed by its natural key instead,
+   §4.4.) Otherwise: role class of `delete`, then the **workflow rules of §4.3** for the
    row's current state (a delete is a state change: e.g. a collector cannot delete his
    approved project or an approved locality). A delete on a stale base still deletes
    (`merged`). Children of a deleted project are **not** deleted on the server; the client
@@ -336,6 +340,30 @@ salary, no restricted data of others; acceptance criterion 5). For such a caller
   keys, `created_at`); a redirected insert under a deleted parent is `parent_deleted`. A
   rejection therefore never tells whether a row exists or which values it has, and an
   invalid value never becomes a conflict.
+- **Deletes are blind too** (`private.sync_delete_by_key`, migration 0023). A delete of a
+  restricted row by a caller who cannot see the restricted data of the row its id names
+  (or whose id is unknown on the server):
+  - must name the parent in `fields` (`project_id` / `project_staff_id`; otherwise
+    `parent_required`, **also when the id exists**); a missing natural-key column takes
+    its default (`effective_from` = today), exactly as for an upsert; an unknown parent is
+    `parent_missing`;
+  - is authorised on the **parent's** scope like a blind upsert (writer or reviewer there,
+    else `out_of_scope`) — never on the stored row's `created_by`, which would tell whose
+    row it is;
+  - locks the live row of the natural key, **ignoring the op's id**; withdraws the
+    caller's own open `sync_conflicts` on that row (soft-deleted: he no longer proposes
+    those values); soft-deletes the row **only when the caller created it** — deleting
+    another user's restricted row is a decision for a country manager / hq_admin who can
+    see it (non-blind, delete by id);
+  - always answers the constant `{op_id, status: "applied", version: null}` — for an own
+    row, somebody else's row and a key without a live row alike.
+
+  A caller who can see the restricted data of the stored row's country (country manager of
+  that country / hq_admin, at `aal2`) keeps the normal delete by id (rule 7 of §4.2, with
+  version and `merged`); if his id is unknown — or names a row of a country he cannot
+  see — nothing is deleted (`applied`, `version: null`). The client sends id + parent +
+  natural key for every delete of a row it holds in `restricted_local`
+  (`apps/web/src/db/write.ts` `softDelete`).
 
 Device rule (brief §3): a device without restricted capability keeps such a row only in
 `restricted_local` until the op returns any non-rejected status, then deletes it. Because
@@ -420,9 +448,21 @@ back `rejected/out_of_scope`). Users of the new scope receive the project togeth
 all its children in the same round (children are re-stamped server-side; persons keep their
 own scope and move only when their `country_id`/`branch_id` is changed).
 
+The review state works the same way for viewers (approved projects only, §5.4): a project
+that **leaves** `approved` (an edit by its collector sends it back to `submitted`, a reviewer
+returns it) is logged as a move with its unchanged country/branch (trigger
+`t86_sync_review_move`, migration 0025) and is listed under `gone` for every viewer who no
+longer sees it — a global viewer included; callers with people scope on the project keep
+receiving the row. A project that **enters** `approved` re-stamps its children, so they reach
+the viewers together with it. Donors stay on the device as described in §5.5.
+
 ### 5.4 Who gets what
 
-`viewer`: no `persons`, `project_staff`, restricted or review tables. `field_collector` /
+`viewer`: **approved projects only** and only the children (and donor links) of approved
+projects — draft, submitted and returned records are sent only inside the caller's people
+scope (interim owner rule ح, `docs/OWNER_DECISIONS.md`; same predicate as RLS, authz.md §4.2
+⁶). A user with a viewer grant **and** another role receives unreviewed records where the other
+role reaches. No `persons`, `project_staff`, restricted or review tables. `field_collector` /
 `branch_supervisor`: never the restricted tables. `country_manager` / `hq_admin` (aal2):
 restricted tables of their countries; every page containing restricted rows writes one
 `restricted_access_log` row per table (`context = 'sync_pull'`; conflicts about restricted
@@ -440,7 +480,7 @@ Donors have no country or branch. `sync_pull` sends **exactly the donors the RLS
 | Caller                                            | Donors received                                                                            |
 | ------------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | global reader (`hq_admin` at aal2, global viewer) | all                                                                                        |
-| everybody else                                    | donors he created + donors linked by a `project_donors` row to a project in his read scope |
+| everybody else                                    | donors he created + donors linked by a `project_donors` row to a project in his read scope (where he reads as a viewer only: an approved project) |
 | no effective role                                 | donors he created                                                                          |
 
 "Linked" means any `project_donors` row, live or soft-deleted, to any project in scope, live

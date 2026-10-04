@@ -133,6 +133,22 @@ export function readLegacyV2(key: LegacyV2Key): string | null {
   }
 }
 
+/**
+ * True when this device still holds the v2 key — checked by name only, without reading the
+ * value (v2 kept all its records, photos included, in it: often megabytes). The shell uses it
+ * to decide whether the migration offer is loaded at all.
+ */
+export function hasLegacyV2(key: LegacyV2Key): boolean {
+  const s = storage();
+  if (!s) return false;
+  try {
+    for (let i = 0; i < s.length; i++) if (s.key(i) === key) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 /** Removes a v2 key after its content was uploaded successfully. */
 export function removeLegacyV2(key: LegacyV2Key): void {
   const s = storage();

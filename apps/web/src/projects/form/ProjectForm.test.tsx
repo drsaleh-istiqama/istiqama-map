@@ -7,11 +7,15 @@ const mocks = vi.hoisted(() => ({
   save: vi.fn(async (_bundle: unknown) => undefined),
   queue: vi.fn(async (_rows: unknown) => undefined),
   editor: null as unknown,
+  /** The person picker the form loads (null = its minimal fallback picker). */
+  picker: null as unknown,
 }));
 
 vi.mock('../../auth', async () => {
   const { signal } = await import('@preact/signals');
+  const { DIAL_COUNTRIES } = await import('../../auth/phone');
   return {
+    DIAL_COUNTRIES,
     me: signal({
       user_id: 'u1',
       profile: { full_name: 'Amina' },
@@ -48,7 +52,7 @@ vi.mock('../../sync', async () => {
 
 vi.mock('./peers', () => ({
   loadPhotoEditor: async () => mocks.editor,
-  loadPersonPicker: async () => null,
+  loadPersonPicker: async () => mocks.picker,
   loadPickLocation: async () => mocks.pick,
   queuePhotoUploads: mocks.queue,
   discardStagedPhotos: async () => undefined,
@@ -59,6 +63,7 @@ vi.mock('../../db', async (original) => ({
   saveProjectBundle: mocks.save,
 }));
 
+import { me } from '../../auth';
 import { db, drafts, newRow, type ProjectBundle, type Row } from '../../db';
 import { fmt, t } from '../../i18n';
 import { projectCompleteness } from '../../lib/completeness';
@@ -204,6 +209,7 @@ beforeEach(async () => {
   mocks.save.mockClear();
   mocks.queue.mockClear();
   mocks.editor = null;
+  mocks.picker = null;
   mocks.pick.mockReset();
   resetShapeMemory();
   await Promise.all(db.tables.map((table) => table.clear()));
@@ -770,6 +776,104 @@ describe('restricted data', () => {
     fireEvent.click(await screen.findByTestId('form-staff-add'));
     expect(await screen.findByTestId('form-staff-salary')).toBeTruthy();
   });
+});
+
+describe('person picker draft (brief §7.4)', () => {
+  const stored = async (projectId: string): Promise<FormDraft | undefined> =>
+    (await drafts.get(draftKey('new', projectId))) as FormDraft | undefined;
+  /** The picker chunk loads lazily and reads the device first (busy worker: be patient). */
+  const LAZY = { timeout: 8000 };
+  // The real <PersonPicker> reads the user's scopes (calling code, branches): a full context.
+  const authMe = me as unknown as { value: unknown };
+  let previousMe: unknown;
+  beforeEach(async () => {
+    const fixtures = await import('../../auth/__fixtures__/myContext');
+    previousMe = authMe.value;
+    authMe.value = { ...fixtures.collectorPemba, user_id: 'u1' };
+    mocks.picker = (await import('../../people/PersonPicker')).default;
+  });
+  afterEach(() => {
+    authMe.value = previousMe;
+  });
+
+  it('a half-typed new person survives back / reload and is handed back to the picker', async () => {
+    const { draft } = setup();
+    fireEvent.click(screen.getByTestId('form-section-staff'));
+    fireEvent.click(await screen.findByTestId('form-staff-add'));
+    await screen.findByTestId('form-staff-person-input', {}, LAZY);
+    input('form-staff-person-input', 'حمدان بن راشد');
+    fireEvent.click(await screen.findByTestId('form-staff-person-new', {}, LAZY));
+    await screen.findByTestId('form-staff-person-new-name-latin');
+    input('form-staff-person-new-name-latin', 'Hamdan bin Rashid');
+    input('form-staff-person-new-birth-year', '1979');
+
+    // Autosaved with the form's own draft, under the staff row it belongs to.
+    let staffId = '';
+    await waitFor(
+      async () => {
+        const d = await stored(draft.projectId);
+        staffId = d?.working.staff[0]?.id ?? '';
+        expect(d?.extras.pickerDrafts?.[staffId]).toMatchObject({
+          mode: 'new',
+          query: 'حمدان بن راشد',
+          form: { name_ar: 'حمدان بن راشد', name_latin: 'Hamdan bin Rashid', birth_year: '1979' },
+        });
+      },
+      { timeout: 3000 },
+    );
+
+    cleanup(); // the back button / a reload: the form unmounts
+    await new Promise((r) => setTimeout(r, 20));
+    const kept = (await stored(draft.projectId))!;
+    expect(kept.extras.pickerDrafts?.[staffId]?.form?.birth_year).toBe('1979');
+
+    setup({ draft: kept }); // the next opening restores the draft
+    fireEvent.click(screen.getByTestId('form-section-staff'));
+    const nameAr = (await screen.findByTestId(
+      'form-staff-person-new-name-ar',
+      {},
+      LAZY,
+    )) as HTMLInputElement;
+    expect(nameAr.value).toBe('حمدان بن راشد');
+    expect((screen.getByTestId('form-staff-person-new-name-latin') as HTMLInputElement).value).toBe(
+      'Hamdan bin Rashid',
+    );
+    expect((screen.getByTestId('form-staff-person-new-birth-year') as HTMLInputElement).value).toBe(
+      '1979',
+    );
+
+    // Removing the staff row forgets what was typed for it.
+    fireEvent.click(screen.getByTestId('form-staff-remove'));
+    fireEvent.click(within(await screen.findByTestId('confirm-dialog')).getByTestId('confirm-ok'));
+    await waitFor(() => expect(screen.queryByTestId('form-staff-entry')).toBeNull());
+    await waitFor(async () => {
+      const d = await stored(draft.projectId);
+      expect(d?.extras.pickerDrafts?.[staffId]).toBeUndefined();
+    });
+  }, 20_000);
+
+  it('choosing the person hands the text over: nothing is kept for the picker any more', async () => {
+    const { draft } = setup();
+    fireEvent.click(screen.getByTestId('form-section-staff'));
+    fireEvent.click(await screen.findByTestId('form-staff-add'));
+    await screen.findByTestId('form-staff-person-input', {}, LAZY);
+    input('form-staff-person-input', 'سالم بن خميس');
+    fireEvent.click(await screen.findByTestId('form-staff-person-new', {}, LAZY));
+    await screen.findByTestId('form-staff-person-new-name-ar');
+    await waitFor(async () => {
+      const d = await stored(draft.projectId);
+      expect(Object.keys(d?.extras.pickerDrafts ?? {})).toHaveLength(1);
+    });
+    fireEvent.click(screen.getByTestId('form-staff-person-new-confirm'));
+    expect((await screen.findByTestId('form-staff-new-person', {}, LAZY)).textContent).toContain(
+      'سالم بن خميس',
+    );
+    await waitFor(async () => {
+      const d = await stored(draft.projectId);
+      expect(d?.extras.pickerDrafts ?? {}).toEqual({});
+      expect(d?.working.staff[0]?.person?.name_ar).toBe('سالم بن خميس');
+    });
+  }, 20_000);
 });
 
 describe('save (brief §7.9)', () => {

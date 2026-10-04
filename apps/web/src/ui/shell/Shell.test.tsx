@@ -85,6 +85,19 @@ vi.mock('../../photos/persist', () => ({
 }));
 vi.mock('../../photos/urls', () => ({ clearPhotoUrls: photoMocks.clearPhotoUrls }));
 
+// Components of other modules mounted by the shell (ui/shell/integrations.ts): markers here,
+// their behaviour is tested by their owners.
+vi.mock('../../settings/SettingsPage', stubs.view('settings'));
+vi.mock('../../import/ImportPage', stubs.view('import'));
+vi.mock('../../reports/NotificationsBell', async () => {
+  const { h } = await import('preact');
+  return { NotificationsBell: () => h('button', { 'data-testid': 'notifications-bell' }) };
+});
+vi.mock('../../migration/V2MigrationPrompt', async () => {
+  const { h } = await import('preact');
+  return { default: () => h('section', { 'data-testid': 'v2-migrate-prompt' }) };
+});
+
 vi.mock('../../db', () => ({
   setLocalSession: photoMocks.setLocalSession,
   listProjects: mocks.listProjects,
@@ -309,12 +322,11 @@ describe('<Shell> chrome', () => {
     expect(screen.getByTestId('account-role').textContent).toBe('Head office');
   });
 
-  it('tells the local database who uses the device and reconciles photo uploads', async () => {
+  it('reconciles photo uploads for the signed-in user; the local session is left to auth', async () => {
     photoMocks.setLocalSession.mockClear();
     photoMocks.reconcilePhotoUploads.mockClear();
     photoMocks.clearPhotoUrls.mockClear();
     const view = render(<Shell />);
-    expect(photoMocks.setLocalSession).not.toHaveBeenCalled();
 
     me.value = {
       user_id: 'u9',
@@ -323,13 +335,10 @@ describe('<Shell> chrome', () => {
       assigned_roles: [],
       capabilities: { can_see_restricted: true },
     };
-    await waitFor(() =>
-      expect(photoMocks.setLocalSession).toHaveBeenCalledWith({
-        userId: 'u9',
-        canSeeRestricted: true,
-      }),
-    );
     await waitFor(() => expect(photoMocks.reconcilePhotoUploads).toHaveBeenCalledTimes(1));
+    // web.md §3.4: `src/auth` owns setLocalSession (fail-closed capabilities, before the
+    // context is visible); a second writer here could store stale capabilities.
+    expect(photoMocks.setLocalSession).not.toHaveBeenCalled();
 
     view.unmount();
     await waitFor(() => expect(photoMocks.clearPhotoUrls).toHaveBeenCalledTimes(1));
@@ -446,5 +455,46 @@ describe('<Shell> chrome', () => {
       expect(screen.getByTestId('nav-maintenance').textContent).toContain('Matengenezo'),
     );
     expect(document.documentElement.lang).toBe('sw');
+  });
+});
+
+describe('<Shell> components of other modules', () => {
+  afterEach(() => {
+    localStorage.removeItem('istiqama-projects-v2');
+    localStorage.removeItem('istiqama-people-v1');
+  });
+
+  it('puts the notifications bell in the top bar, next to the sync badge (phone and desktop)', async () => {
+    render(<Shell />);
+    const bell = await screen.findByTestId('notifications-bell', {}, LAZY_VIEW);
+    expect(bell.closest('.topbar__actions')).toBe(
+      screen.getByTestId('sync-badge').closest('.topbar__actions'),
+    );
+    cleanup();
+    setViewport(true);
+    render(<Shell />);
+    expect(await screen.findByTestId('notifications-bell', {}, LAZY_VIEW)).toBeTruthy();
+    expect(screen.getAllByTestId('notifications-bell')).toHaveLength(1);
+  });
+
+  it('loads the v2 migration prompt on a device that holds v2 data', async () => {
+    localStorage.setItem('istiqama-people-v1', '[]');
+    render(<Shell />);
+    expect(await screen.findByTestId('v2-migrate-prompt', {}, LAZY_VIEW)).toBeTruthy();
+  });
+
+  it('without v2 data the prompt is not loaded — until a page that imports a v2 file is opened', async () => {
+    render(<Shell />);
+    await screen.findByTestId('notifications-bell', {}, LAZY_VIEW);
+    await screen.findByTestId('stub-map', {}, LAZY_VIEW);
+    expect(screen.queryByTestId('v2-migrate-prompt')).toBeNull();
+
+    navigate('/settings');
+    await screen.findByTestId('stub-settings', {}, LAZY_VIEW);
+    // a run started there and hidden by the user is offered again on every screen
+    expect(await screen.findByTestId('v2-migrate-prompt', {}, LAZY_VIEW)).toBeTruthy();
+    navigate('/map');
+    await screen.findByTestId('stub-map', {}, LAZY_VIEW);
+    expect(screen.getByTestId('v2-migrate-prompt')).toBeTruthy();
   });
 });

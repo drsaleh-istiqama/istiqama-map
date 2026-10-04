@@ -131,16 +131,17 @@ select is(private.write_branches(), array[tests.id('br_pemba')], 'field_collecto
 -- -----------------------------------------------------------------------------
 select tests.login_as(tests.id('u_viewer_tz'), 'aal1');
 
+-- a viewer sees approved projects only (owner decision ح; p_pemba_2 is a draft)
 select is(tests.visible('projects', tests.fixture_projects()),
-  tests.ids('p_pemba_1', 'p_pemba_2', 'p_tanga_1'), 'viewer (TZ): projects of the country');
+  tests.ids('p_pemba_1', 'p_tanga_1'), 'viewer (TZ): approved projects of the country');
 select is(tests.visible('project_photos', tests.kind_ids('photo')),
-  tests.ids('photo:p_pemba_1', 'photo:p_pemba_2', 'photo:p_tanga_1'), 'viewer (TZ): photos of the country');
+  tests.ids('photo:p_pemba_1', 'photo:p_tanga_1'), 'viewer (TZ): photos of the approved projects');
 select is(tests.visible('project_maintenance', tests.kind_ids('maint')),
-  tests.ids('maint:p_pemba_1', 'maint:p_pemba_2', 'maint:p_tanga_1'), 'viewer (TZ): maintenance of the country');
+  tests.ids('maint:p_pemba_1', 'maint:p_tanga_1'), 'viewer (TZ): maintenance of the approved projects');
 select is(tests.visible('community_profiles', tests.kind_ids('community')),
-  tests.ids('community:p_pemba_1', 'community:p_pemba_2', 'community:p_tanga_1'), 'viewer (TZ): community profiles');
+  tests.ids('community:p_pemba_1', 'community:p_tanga_1'), 'viewer (TZ): community profiles of the approved projects');
 select is(tests.visible('donors', tests.kind_ids('donor') || tests.ids('donor_unlinked')),
-  tests.ids('donor:p_pemba_1', 'donor:p_pemba_2', 'donor:p_tanga_1'), 'viewer (TZ): donors of the country''s projects');
+  tests.ids('donor:p_pemba_1', 'donor:p_tanga_1'), 'viewer (TZ): donors of the country''s approved projects');
 select is(tests.visible('persons'), '{}'::uuid[], 'viewer (TZ): no persons (names, phones)');
 select is_empty($$ select phone_e164 from public.persons $$, 'viewer (TZ): no phone numbers');
 select is(tests.visible('project_staff'), '{}'::uuid[], 'viewer (TZ): no staff');
@@ -158,7 +159,7 @@ select is(private.can_read_project(tests.id('tz'), null), true, 'viewer (TZ): ca
 select tests.login_as(tests.id('u_viewer_global'), 'aal1');
 
 select is(tests.visible('projects', tests.fixture_projects()),
-  tests.ids('p_pemba_1', 'p_pemba_2', 'p_tanga_1', 'p_ke_1'), 'viewer (global): all projects');
+  tests.ids('p_pemba_1', 'p_tanga_1', 'p_ke_1'), 'viewer (global): all approved projects');
 select is(tests.visible('donors', tests.kind_ids('donor') || tests.ids('donor_unlinked')),
   tests.ids('donor:p_pemba_1', 'donor:p_pemba_2', 'donor:p_tanga_1', 'donor:p_ke_1', 'donor_unlinked'),
   'viewer (global): all donors (donor relations)');

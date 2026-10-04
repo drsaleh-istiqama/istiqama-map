@@ -1,0 +1,54 @@
+/* Notifications menu (top bar). Small on purpose: loaded with the shell when it mounts the bell. */
+.rbell {
+  position: relative;
+}
+.rbell__count {
+  position: absolute;
+  inset-block-start: 2px;
+  inset-inline-end: 2px;
+  min-inline-size: 1.15rem;
+  block-size: 1.15rem;
+  padding-inline: 0.25rem;
+  border-radius: 999px;
+  background: var(--c-danger);
+  color: #fff;
+  font-size: 0.6875rem;
+  font-weight: var(--fw-bold);
+  line-height: 1.15rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.rnotices {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-2);
+}
+.rnotice {
+  padding: var(--sp-3);
+  border: 1px solid var(--c-line);
+  border-radius: var(--radius);
+  background: var(--c-surface);
+}
+.rnotice--unread {
+  border-inline-start: 4px solid var(--c-gold);
+  background: var(--c-gold-soft);
+}
+.rnotice__text {
+  margin: 0;
+  font-weight: var(--fw-medium);
+}
+.rnotice__meta {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-sm);
+}
+.rnotice__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-block-start: var(--sp-2);
+}
+.rnotice__actions:empty {
+  display: none;
+}

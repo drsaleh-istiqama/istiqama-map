@@ -173,6 +173,14 @@ create policy istiqama_photos_select on storage.objects
           or p.country_id = any ((select private.read_countries())::uuid[])
           or p.branch_id = any ((select private.read_branches())::uuid[])
         )
+        -- photos of unreviewed projects: people scope only, never a viewer
+        -- (the projects_select policy applies inside this probe as well)
+        and (
+          p.record_state = 'approved'
+          or (select private.people_all())
+          or p.country_id = any ((select private.people_countries())::uuid[])
+          or p.branch_id = any ((select private.people_branches())::uuid[])
+        )
     )
   );
 

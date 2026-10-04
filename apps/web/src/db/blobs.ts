@@ -94,19 +94,55 @@ export async function photoBlobBytes(): Promise<number> {
   return total;
 }
 
+/** Upper bound of nested levels walked inside one draft (drafts are small, plain data). */
+const DRAFT_WALK_DEPTH = 12;
+
+/**
+ * Adds to `found` every id of `candidates` that a stored draft mentions — as a string value or
+ * as an object key, at any depth. Deliberately ignorant of the drafts' shapes (they belong to
+ * the feature modules): the project form keeps the photos it staged in
+ * `working.photos[].id`, the photo module keeps photos that finished after their editor was
+ * gone under `photos:detached:<project id>` (`entries[].row.id`), and a future form may keep
+ * them elsewhere. A photo of an unsaved form has no row and no queued operation yet: its
+ * blobs are the only copy of the picture.
+ */
+function collectDraftReferences(value: unknown, candidates: Set<string>, found: Set<string>): void {
+  const seen = new Set<object>();
+  const walk = (v: unknown, depth: number): void => {
+    if (typeof v === 'string') {
+      if (candidates.has(v)) found.add(v);
+      return;
+    }
+    if (!v || typeof v !== 'object' || depth > DRAFT_WALK_DEPTH || seen.has(v)) return;
+    seen.add(v);
+    if (Array.isArray(v)) {
+      for (const item of v) walk(item, depth + 1);
+      return;
+    }
+    if (ArrayBuffer.isView(v) || v instanceof ArrayBuffer) return;
+    if (typeof Blob !== 'undefined' && v instanceof Blob) return;
+    for (const [key, item] of Object.entries(v as Record<string, unknown>)) {
+      if (candidates.has(key)) found.add(key);
+      walk(item, depth + 1);
+    }
+  };
+  walk(value, 0);
+}
+
 /**
  * Frees blobs that nothing on the device refers to any more: no `project_photos` row, no
- * queued or rejected operation for the photo and no upload-queue entry in `meta`
- * (`<uploadMetaPrefix><photo id>`). Run it after a completed pull that followed a scope
- * reset. Returns the number of blobs removed.
+ * queued or rejected operation for the photo, no upload-queue entry in `meta`
+ * (`<uploadMetaPrefix><photo id>`) and no stored draft that mentions the photo (a photo taken
+ * in a form that was not saved yet — see `collectDraftReferences`). Run it after a completed
+ * pull that followed a scope reset. Returns the number of blobs removed.
  */
 export async function pruneOrphanPhotoBlobs(uploadMetaPrefix = 'photo_upload:'): Promise<number> {
   return db.transaction(
     'rw',
-    [db.photo_blobs, db.project_photos, db.outbox, db.failed_ops, db.meta],
+    [db.photo_blobs, db.project_photos, db.outbox, db.failed_ops, db.meta, db.drafts],
     async () => {
       const photoIds = (await db.photo_blobs.orderBy('photo_id').uniqueKeys()) as string[];
-      let removed = 0;
+      const orphans = new Set<string>();
       for (const photoId of photoIds) {
         if (await db.project_photos.get(photoId)) continue;
         if (
@@ -121,6 +157,15 @@ export async function pruneOrphanPhotoBlobs(uploadMetaPrefix = 'photo_upload:'):
         )
           continue;
         if (await db.meta.get(uploadMetaPrefix + photoId)) continue;
+        orphans.add(photoId);
+      }
+      if (orphans.size === 0) return 0;
+      // Photos of unsaved forms: their only reference is the autosaved draft.
+      const inDrafts = new Set<string>();
+      await db.drafts.each((rec) => collectDraftReferences(rec.value, orphans, inDrafts));
+      let removed = 0;
+      for (const photoId of orphans) {
+        if (inDrafts.has(photoId)) continue;
         removed += await db.photo_blobs.where('photo_id').equals(photoId).delete();
       }
       return removed;

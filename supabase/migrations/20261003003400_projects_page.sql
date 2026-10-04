@@ -55,6 +55,10 @@ declare
   v_all boolean;
   v_countries uuid[];
   v_branches uuid[];
+  v_p_all boolean;
+  v_p_countries uuid[];
+  v_p_branches uuid[];
+  v_rev_all boolean;
   v_country uuid := nullif(f ->> 'country_id', '')::uuid;
   v_branch uuid := nullif(f ->> 'branch_id', '')::uuid;
   v_area uuid := nullif(f ->> 'admin_area_id', '')::uuid;
@@ -96,6 +100,13 @@ begin
   if not v_all and cardinality(v_countries) = 0 and cardinality(v_branches) = 0 then
     return jsonb_build_object('rows', '[]'::jsonb, 'next', null, 'total', 0);
   end if;
+  -- Unreviewed records (migration 0013, owner decision ح): outside the people
+  -- scope (i.e. where the caller reads as a viewer only) approved projects only.
+  v_p_all := private.people_all();
+  v_p_countries := private.people_countries();
+  v_p_branches := private.people_branches();
+  v_rev_all := v_p_all
+    or (not v_all and v_countries <@ v_p_countries and v_branches <@ v_p_branches);
 
   -- Cursor of the previous page.
   if v_after is not null then
@@ -146,7 +157,7 @@ begin
   --   $1 countries  $2 branches  $3 country  $4 branch  $5 area ids  $6 types
   --   $7 statuses   $8 states    $9 like pattern  $10 like patterns  $11 uid
   --   $12 donor     $13 locality $14 after name   $15 after ts       $16 after id
-  --   $17 limit
+  --   $17 limit     $18 people countries          $19 people branches
   v_where := 'p.deleted_at is null';
   if not v_all then
     -- Only the non-empty id lists are mentioned: a plain index condition for the
@@ -155,6 +166,12 @@ begin
       when cardinality(v_branches) = 0 then ' and p.country_id = any ($1)'
       when cardinality(v_countries) = 0 then ' and p.branch_id = any ($2)'
       else ' and (p.country_id = any ($1) or p.branch_id = any ($2))' end;
+  end if;
+  if not v_rev_all then
+    v_where := v_where || case
+      when cardinality(v_p_countries) = 0 and cardinality(v_p_branches) = 0
+        then ' and p.record_state = ''approved'''
+      else ' and (p.record_state = ''approved'' or p.country_id = any ($18) or p.branch_id = any ($19))' end;
   end if;
   if v_country is not null then
     v_where := v_where || ' and p.country_id = $3';
@@ -213,7 +230,7 @@ begin
       using v_countries, v_branches, v_country, v_branch, v_area_ids, v_types,
             v_statuses, v_states, v_p1, v_pats, v_uid,
             v_donor, v_locality, v_after_name, v_after_ts, v_after_id,
-            v_limit;
+            v_limit, v_p_countries, v_p_branches;
   else
     v_sql :=
       'select array_agg(s.id order by s.k desc, s.id desc), (array_agg(s.k order by s.k desc, s.id desc))[$17]'
@@ -228,7 +245,7 @@ begin
       using v_countries, v_branches, v_country, v_branch, v_area_ids, v_types,
             v_statuses, v_states, v_p1, v_pats, v_uid,
             v_donor, v_locality, v_after_name, v_after_ts, v_after_id,
-            v_limit;
+            v_limit, v_p_countries, v_p_branches;
   end if;
 
   v_ids := coalesce(v_ids, '{}'::uuid[]);
@@ -251,7 +268,7 @@ begin
       using v_countries, v_branches, v_country, v_branch, v_area_ids, v_types,
             v_statuses, v_states, v_p1, v_pats, v_uid,
             v_donor, v_locality, v_after_name, v_after_ts, v_after_id,
-            v_limit;
+            v_limit, v_p_countries, v_p_branches;
   end if;
 
   select coalesce(jsonb_agg(jsonb_build_object(

@@ -11,6 +11,7 @@
 import { batch, computed, effect, signal, type ReadonlySignal, type Signal } from '@preact/signals';
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
 import { t } from '../i18n';
+import { setLocalSession as setDbLocalSession } from '../db';
 import { getPref, setPref } from '../lib/prefs';
 import {
   deriveCapabilities,
@@ -105,6 +106,12 @@ export type ResetReason = 'sign_out' | 'revoked' | 'user_changed';
 export interface AuthPorts {
   /** Sync module: drop local data as that module defines for the given reason. */
   resetLocalData(reason: ResetReason): Promise<void>;
+  /**
+   * Local database: who uses the device and whether restricted rows may stay on it
+   * (`setLocalSession` of `src/db`, web.md §3.4). Called by this module whenever the
+   * signed-in user's context changes.
+   */
+  setLocalSession(next: { userId: string; canSeeRestricted: boolean }): Promise<void>;
   /** Sync module: work that exists only on this device. */
   pendingWork(): Promise<{ ops: number; photos: number }>;
   confirm(options: {
@@ -122,6 +129,7 @@ const defaultPorts: AuthPorts = {
     const sync = await import('../sync');
     await (sync.resetLocalData as (reason?: ResetReason) => Promise<void>)(reason);
   },
+  setLocalSession: (next) => setDbLocalSession(next),
   async pendingWork() {
     const sync = await import('../sync');
     const status = sync.syncStatus.value;
@@ -156,6 +164,33 @@ async function resetLocalData(reason: ResetReason): Promise<void> {
   } catch (error) {
     console.error('auth: resetLocalData failed', error);
   }
+}
+
+// ----------------------------------------------------------------------------- local session
+
+/** Writes are applied in call order, so an older context never overwrites a newer one. */
+let localSessionChain: Promise<void> = Promise.resolve();
+
+/**
+ * Tells the local database who uses the device (rows written offline get `created_by`, the
+ * "mine" filter, drafts per user) and whether restricted rows may stay on it — fail closed,
+ * from the same capability rule as `can.seeRestricted` (no MFA yet, revoked session → false).
+ * The value is stored by `src/db`, so an offline start after a reload keeps it.
+ */
+function recordLocalSession(ctx: MyContext, accessToken: string | null | undefined): Promise<void> {
+  const next = {
+    userId: ctx.user_id,
+    canSeeRestricted: deriveCapabilities(ctx, tokenAal(accessToken)).seeRestricted,
+  };
+  const write = async (): Promise<void> => {
+    try {
+      await ports.setLocalSession(next);
+    } catch (error) {
+      console.error('auth: setLocalSession failed', error);
+    }
+  };
+  localSessionChain = localSessionChain.then(write, write);
+  return localSessionChain;
 }
 
 // ----------------------------------------------------------------------------- wiring
@@ -243,6 +278,16 @@ supabase.auth.onAuthStateChange((event: AuthChangeEvent, incoming: Session | nul
 effect(() => {
   if (session.value) idle.start();
   else idle.stop();
+});
+
+// Every change of the signed-in user's context — a fresh `my_context()`, the cached context
+// on an unlock or an offline start, roles changed, MFA passed (new aal) — reaches the local
+// database (web.md §3.4: auth owns `setLocalSession`). Signing out or locking keeps the
+// stored value: unsent work stays attributed to its author until somebody else signs in.
+effect(() => {
+  const ctx = me.value;
+  const token = session.value?.access_token;
+  if (ctx) void recordLocalSession(ctx, token);
 });
 
 let initPromise: Promise<void> | null = null;
@@ -347,6 +392,9 @@ async function loadContext(): Promise<MyContext | null> {
     return null;
   }
   await noteUser(ctx.user_id);
+  if (session.peek()?.user.id !== ctx.user_id) return null;
+  // The local database knows the user before anything can be written under the new context.
+  await recordLocalSession(ctx, session.peek()?.access_token);
   if (session.peek()?.user.id !== ctx.user_id) return null;
   batch(() => {
     contextError.value = null;

@@ -6,11 +6,15 @@
 -- it is called only from the SECURITY DEFINER functions below after they checked the caller.
 -- ---------------------------------------------------------------------------------------------
 
+-- p_approved_only: count approved projects (and what hangs below them) only — the caller has
+-- no people scope on the requested scope, i.e. reads it as a viewer (owner decision ح,
+-- migration 0013); every view carries the `approved` grouping key for this.
 create or replace function private.dashboard_data(
   p_scope_type text,
   p_scope_id uuid,
   p_with_payroll boolean,
-  p_with_names boolean
+  p_with_names boolean,
+  p_approved_only boolean default false
 )
 returns jsonb
 language plpgsql
@@ -84,7 +88,8 @@ begin
              'returned', coalesce(sum(t.returned_count), 0)))
     into v_totals
   from private.mv_project_totals t
-  where v_g or (v_c and t.country_id = p_scope_id) or (v_b and t.branch_id = p_scope_id);
+  where (v_g or (v_c and t.country_id = p_scope_id) or (v_b and t.branch_id = p_scope_id))
+    and (t.approved or not p_approved_only);
 
   select coalesce(jsonb_agg(jsonb_build_object(
              'type', x.type, 'status', x.status, 'projects', x.n, 'capacity', x.cap)
@@ -93,7 +98,8 @@ begin
   from (
     select t.type, t.status, sum(t.project_count) as n, sum(t.capacity_sum) as cap
     from private.mv_project_totals t
-    where v_g or (v_c and t.country_id = p_scope_id) or (v_b and t.branch_id = p_scope_id)
+    where (v_g or (v_c and t.country_id = p_scope_id) or (v_b and t.branch_id = p_scope_id))
+    and (t.approved or not p_approved_only)
     group by t.type, t.status
   ) x;
 
@@ -117,7 +123,8 @@ begin
            coalesce(sum(t.project_count) filter (where t.type = 'combined'), 0) as combined,
            coalesce(sum(t.project_count) filter (where t.status = 'maintenance'), 0) as maintenance
     from private.mv_project_totals t
-    where v_g or (v_c and t.country_id = p_scope_id) or (v_b and t.branch_id = p_scope_id)
+    where (v_g or (v_c and t.country_id = p_scope_id) or (v_b and t.branch_id = p_scope_id))
+    and (t.approved or not p_approved_only)
     group by t.area1_id
   ) x
   left join public.admin_areas a on a.id = x.area1_id;
@@ -141,6 +148,7 @@ begin
              coalesce(sum(t.project_count) filter (where t.type = 'combined'), 0) as combined,
              coalesce(sum(t.project_count) filter (where t.status = 'maintenance'), 0) as maintenance
       from private.mv_project_totals t
+      where t.approved or not p_approved_only
       group by t.country_id
     ) x
     left join public.countries c on c.id = x.country_id;
@@ -166,7 +174,8 @@ begin
              coalesce(sum(t.project_count) filter (where t.type = 'combined'), 0) as combined,
              coalesce(sum(t.project_count) filter (where t.status = 'maintenance'), 0) as maintenance
       from private.mv_project_totals t
-      where v_g or (v_c and t.country_id = p_scope_id)
+      where (v_g or (v_c and t.country_id = p_scope_id))
+        and (t.approved or not p_approved_only)
       group by t.branch_id
     ) x
     left join public.branches b on b.id = x.branch_id;
@@ -182,7 +191,8 @@ begin
              'low', coalesce(sum(m.open_count) filter (where m.priority = 'low'), 0)))
     into v_maint
   from private.mv_maintenance_open m
-  where v_g or (v_c and m.country_id = p_scope_id) or (v_b and m.branch_id = p_scope_id);
+  where (v_g or (v_c and m.country_id = p_scope_id) or (v_b and m.branch_id = p_scope_id))
+    and (m.approved or not p_approved_only);
 
   -- Estimated cost per currency (never added across currencies) + USD equivalent
   select coalesce(jsonb_agg(jsonb_build_object(
@@ -194,6 +204,7 @@ begin
     select m.currency, sum(m.cost_sum) as amount
     from private.mv_maintenance_open m
     where (v_g or (v_c and m.country_id = p_scope_id) or (v_b and m.branch_id = p_scope_id))
+      and (m.approved or not p_approved_only)
       and m.currency <> ''
     group by m.currency
     having sum(m.cost_sum) <> 0
@@ -209,22 +220,25 @@ begin
 
   -- Top 20 open entries, most urgent first (separate statements so each uses its own index)
   if v_g then
-    select coalesce(jsonb_agg(to_jsonb(i) - 'priority_rank' - 'country_id' - 'branch_id'
+    select coalesce(jsonb_agg(to_jsonb(i) - 'priority_rank' - 'country_id' - 'branch_id' - 'approved'
              order by i.priority_rank, i.reported_on, i.id), '[]'::jsonb)
       into v_maint_items
     from (select * from private.mv_maintenance_items
+          where approved or not p_approved_only
           order by priority_rank, reported_on, id limit 20) i;
   elsif v_c then
-    select coalesce(jsonb_agg(to_jsonb(i) - 'priority_rank' - 'country_id' - 'branch_id'
+    select coalesce(jsonb_agg(to_jsonb(i) - 'priority_rank' - 'country_id' - 'branch_id' - 'approved'
              order by i.priority_rank, i.reported_on, i.id), '[]'::jsonb)
       into v_maint_items
-    from (select * from private.mv_maintenance_items where country_id = p_scope_id
+    from (select * from private.mv_maintenance_items
+          where country_id = p_scope_id and (approved or not p_approved_only)
           order by priority_rank, reported_on, id limit 20) i;
   else
-    select coalesce(jsonb_agg(to_jsonb(i) - 'priority_rank' - 'country_id' - 'branch_id'
+    select coalesce(jsonb_agg(to_jsonb(i) - 'priority_rank' - 'country_id' - 'branch_id' - 'approved'
              order by i.priority_rank, i.reported_on, i.id), '[]'::jsonb)
       into v_maint_items
-    from (select * from private.mv_maintenance_items where branch_id = p_scope_id
+    from (select * from private.mv_maintenance_items
+          where branch_id = p_scope_id and (approved or not p_approved_only)
           order by priority_rank, reported_on, id limit 20) i;
   end if;
   v_maint := v_maint || jsonb_build_object('estimated_cost', v_maint_cost, 'items', v_maint_items);
@@ -241,7 +255,8 @@ begin
              'other', coalesce(sum(s.assignment_count) filter (where s.role = 'other'), 0)))
     into v_staff
   from private.mv_staff_roles s
-  where v_g or (v_c and s.country_id = p_scope_id) or (v_b and s.branch_id = p_scope_id);
+  where (v_g or (v_c and s.country_id = p_scope_id) or (v_b and s.branch_id = p_scope_id))
+    and (s.approved or not p_approved_only);
 
   -- Payroll (restricted) --------------------------------------------------------------------------
   if p_with_payroll then
@@ -285,7 +300,8 @@ begin
            'expandable_sites', coalesce(sum(n.expandable_sites), 0))
     into v_needs
   from private.mv_needs n
-  where v_g or (v_c and n.country_id = p_scope_id) or (v_b and n.branch_id = p_scope_id);
+  where (v_g or (v_c and n.country_id = p_scope_id) or (v_b and n.branch_id = p_scope_id))
+    and (n.approved or not p_approved_only);
 
   -- Data completeness -----------------------------------------------------------------------------
   select jsonb_build_object(
@@ -297,7 +313,8 @@ begin
            'below_half', coalesce(sum(c.below_half_count), 0))
     into v_completeness
   from private.mv_completeness c
-  where v_g or (v_c and c.country_id = p_scope_id) or (v_b and c.branch_id = p_scope_id);
+  where (v_g or (v_c and c.country_id = p_scope_id) or (v_b and c.branch_id = p_scope_id))
+    and (c.approved or not p_approved_only);
 
   -- Weekly data-entry activity (last 12 ISO weeks, oldest first) ---------------------------------
   select jsonb_agg(to_char(w.week_start, 'YYYY-MM-DD') order by w.week_start),
@@ -312,6 +329,7 @@ begin
     select e.week_start, sum(e.created_count) as created, sum(e.updated_count) as updated
     from private.mv_entry_activity e
     where (v_g or (v_c and e.country_id = p_scope_id) or (v_b and e.branch_id = p_scope_id))
+      and (e.approved or not p_approved_only)
       and e.week_start >= v_first_week
     group by e.week_start
   ) a on a.week_start = w.week_start;
@@ -320,6 +338,7 @@ begin
     into v_collector_count
   from private.mv_entry_activity e
   where (v_g or (v_c and e.country_id = p_scope_id) or (v_b and e.branch_id = p_scope_id))
+      and (e.approved or not p_approved_only)
     and e.week_start >= v_first_week;
 
   if p_with_names then
@@ -344,6 +363,7 @@ begin
                sum(e.created_count) as created, sum(e.updated_count) as updated
         from private.mv_entry_activity e
         where (v_g or (v_c and e.country_id = p_scope_id) or (v_b and e.branch_id = p_scope_id))
+      and (e.approved or not p_approved_only)
           and e.week_start >= v_first_week
         group by e.user_id, e.week_start
       ) w
@@ -388,12 +408,14 @@ begin
 end;
 $$;
 
-revoke execute on function private.dashboard_data(text, uuid, boolean, boolean)
+revoke execute on function private.dashboard_data(text, uuid, boolean, boolean, boolean)
   from public, anon, authenticated;
 
 -- ---------------------------------------------------------------------------------------------
 -- private.report_scope_check: shared authorisation for dashboard() and report_country().
 -- Returns (allowed, with_payroll, with_names, country_id) for the CALLING user.
+-- with_names = people scope on the requested scope; without it the caller reads the scope as a
+-- viewer and gets approved projects only (dashboard_data p_approved_only = not with_names).
 -- ---------------------------------------------------------------------------------------------
 
 create or replace function private.report_scope_check(
@@ -487,7 +509,8 @@ begin
       'dashboard.payroll:' || p_scope_type || coalesce(':' || p_scope_id::text, ''));
   end if;
 
-  return private.dashboard_data(p_scope_type, p_scope_id, v_chk.with_payroll, v_chk.with_names);
+  return private.dashboard_data(p_scope_type, p_scope_id, v_chk.with_payroll, v_chk.with_names,
+                                not v_chk.with_names);
 end;
 $$;
 
@@ -495,4 +518,4 @@ revoke execute on function public.dashboard(text, uuid) from public, anon;
 grant execute on function public.dashboard(text, uuid) to authenticated;
 
 comment on function public.dashboard(text, uuid) is
-  'Dashboard for a scope (global | country | branch) from the report materialized views. Payroll only for callers with restricted access (logged); collector names omitted for viewers.';
+  'Dashboard for a scope (global | country | branch) from the report materialized views. Payroll only for callers with restricted access (logged); collector names omitted and approved projects only for viewers.';

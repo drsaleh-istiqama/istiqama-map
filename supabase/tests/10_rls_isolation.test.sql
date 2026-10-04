@@ -242,8 +242,9 @@ select is(
 -- -----------------------------------------------------------------------------
 select tests.login_as(tests.id('u_viewer_tz'), 'aal1');
 
-select is(tests.visible('projects', tests.fixture_projects()), tests.ids('p_pemba_1', 'p_pemba_2', 'p_tanga_1'),
-  'TZ viewer: Tanzanian fixture projects');
+-- approved projects only (owner decision ح: p_pemba_2 is a draft)
+select is(tests.visible('projects', tests.fixture_projects()), tests.ids('p_pemba_1', 'p_tanga_1'),
+  'TZ viewer: approved Tanzanian fixture projects');
 select is_empty(
   $$ select 1 from public.projects where country_id is distinct from tests.id('tz') $$,
   'TZ viewer: no project outside Tanzania');

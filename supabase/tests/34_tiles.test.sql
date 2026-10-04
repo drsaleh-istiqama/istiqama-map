@@ -8,7 +8,7 @@
 begin;
 set local search_path = public, extensions, tests;
 
-select plan(44);
+select plan(48);
 
 select tests.fixture_extra();
 
@@ -425,6 +425,37 @@ select is(
 select tests.login_as(tests.id('u_col_ke'), 'aal1');
 select is(length(public.tile_projects(14, :x14_p1, :y14_p1)), 0,
   'z14: the Tanzanian tile is empty for a Kenyan collector');
+
+-- ----------------------------------------------------------------------------
+-- Viewers: approved projects only (owner decision ح, migration 0013), in the
+-- pyramid groups (record_state) and in the live points. aa02 is submitted,
+-- p_pemba_2 and aa03 are drafts.
+-- ----------------------------------------------------------------------------
+select tests.login_as(tests.id('u_viewer_tz'), 'aal1');
+select is(
+  (select jsonb_agg(jsonb_build_array(f.props -> 'count', f.props -> 'id'))
+   from tests_tiles.features(public.tile_projects(13, :x13_cl, :y13_cl)) f
+   where f.layer = 'clusters'),
+  jsonb_build_array(jsonb_build_array(1, '00000000-0000-4000-8000-00000000aa01'::uuid)),
+  'viewer z13: the cell of an approved and a submitted project counts the approved one only');
+select is(
+  (select sum((f.props ->> 'count')::int)::int
+   from tests_tiles.features(public.tile_projects(0, 0, 0)) f
+   where f.layer = 'clusters'),
+  3, 'viewer z0: the three approved Tanzanian projects only (no draft, no submitted)');
+select is(
+  (select jsonb_agg(f.props -> 'id')
+   from tests_tiles.features(public.tile_projects(14, :x14_p1, :y14_p1)) f
+   where f.layer = 'points'),
+  jsonb_build_array(tests.id('p_pemba_1')),
+  'viewer z14: points of approved projects only (the draft next to it is left out)');
+
+select tests.login_as(tests.id('u_viewer_global'), 'aal1');
+select ok(
+  position(convert_to(tests.id('p_pemba_2')::text, 'UTF8') in public.tile_projects(0, 0, 0)) = 0
+  and (select sum((f.props ->> 'count')::int)::int
+       from tests_tiles.features(public.tile_projects(0, 0, 0)) f where f.layer = 'clusters') = 4,
+  'global viewer z0: the four approved projects of both countries, no draft id in any byte');
 
 -- ----------------------------------------------------------------------------
 -- Validation

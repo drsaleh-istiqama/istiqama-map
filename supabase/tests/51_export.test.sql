@@ -3,7 +3,7 @@
 begin;
 set local search_path = public, extensions, tests;
 
-select plan(53);
+select plan(54);
 
 select tests.fixture_extra();
 
@@ -109,7 +109,7 @@ select ok(not jsonb_path_exists(public.export_columns('en'), '$.columns[*] ? (@.
           'viewer: neither staff nor salary columns are offered');
 select set_config('t.job_v', public.export_request('csv', 'en', '{}'::jsonb) ->> 'id', true);
 select set_config('t.rows_v', public.export_rows(current_setting('t.job_v')::uuid, null, 1000)::text, true);
-select ok((current_setting('t.rows_v')::jsonb ->> 'count')::int >= 3
+select ok((current_setting('t.rows_v')::jsonb ->> 'count')::int >= 2
           and not (current_setting('t.rows_v')::jsonb #> '{rows,0}' ? 'staff_list')
           and not (current_setting('t.rows_v')::jsonb #> '{rows,0}' ? 'entered_by')
           and not (current_setting('t.rows_v')::jsonb #> '{rows,0}' ? 'monthly_payroll')
@@ -118,6 +118,11 @@ select ok((current_setting('t.rows_v')::jsonb ->> 'count')::int >= 3
 select is(jsonb_path_query_first(current_setting('t.rows_v')::jsonb, '$.rows[*] ? (@.id == $id)',
             jsonb_build_object('id', tests.id('p_pemba_1'))) ->> 'donors',
           'Donor p_pemba_1 (2015, 5000 USD)', 'viewer export: donors are included');
+-- approved projects only (owner decision ح, migration 0013): the draft p_pemba_2 is not exported
+select ok(not jsonb_path_exists(current_setting('t.rows_v')::jsonb, '$.rows[*] ? (@.id == $id)',
+            jsonb_build_object('id', tests.id('p_pemba_2')))
+          and not jsonb_path_exists(current_setting('t.rows_v')::jsonb, '$.rows[*] ? (@.record_state != "approved")'),
+          'viewer export: approved projects only, no draft');
 select tests.logout();
 
 -- export_finish (service role / Edge Function) -------------------------------------------------------

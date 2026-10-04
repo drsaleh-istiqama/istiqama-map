@@ -32,6 +32,10 @@
 --   * projects: read scope; localities: countries the caller can read;
 --   * staff: people scope on the person AND read scope on the project, so a
 --     viewer never gets staff hits; donors: only donors of readable projects.
+--   * "readable project" includes the unreviewed-records rule (migration 0013,
+--     owner decision ح): a project that is not approved counts only inside the
+--     caller's people scope, so a viewer finds approved projects only (applied
+--     in step 2, after the candidate step).
 --
 -- Performance (500k persons, 100k projects)
 --   * Step 1, private.search_candidates(): at most 400 ids per kind straight from
@@ -225,6 +229,7 @@ declare
   v_people_countries uuid[] := '{}'::uuid[];
   v_people_branches uuid[] := '{}'::uuid[];
   v_has_people boolean := false;
+  v_rev_all boolean;      -- sees unreviewed projects wherever he reads (no viewer-only area)
   v_geo_countries uuid[] := '{}'::uuid[];
   -- Pass 1: exact words, every kind. Pass 2: typo-tolerant for projects,
   -- localities and donors. Pass 3: typo-tolerant for staff (the 500k-row persons
@@ -252,14 +257,14 @@ begin
     return '[]'::jsonb;
   end if;
 
-  if 'staff' = any (v_kinds) then
-    v_people_all := private.people_all();
-    v_people_countries := private.people_countries();
-    v_people_branches := private.people_branches();
-    v_has_people := v_people_all
-      or cardinality(v_people_countries) > 0
-      or cardinality(v_people_branches) > 0;
-  end if;
+  v_people_all := private.people_all();
+  v_people_countries := private.people_countries();
+  v_people_branches := private.people_branches();
+  v_has_people := v_people_all
+    or cardinality(v_people_countries) > 0
+    or cardinality(v_people_branches) > 0;
+  v_rev_all := v_people_all
+    or (not v_all and v_countries <@ v_people_countries and v_branches <@ v_people_branches);
 
   if 'locality' = any (v_kinds) and not v_all then
     select coalesce(array_agg(distinct s.country_id), '{}'::uuid[])
@@ -317,6 +322,8 @@ begin
                             + 0.1 * similarity(v_q, p.search_norm))::real end as score
           from unnest(v_cand) as u(id)
           join public.projects p on p.id = u.id
+          where v_rev_all or p.record_state = 'approved'
+             or p.country_id = any (v_people_countries) or p.branch_id = any (v_people_branches)
           order by score desc, sort_name, p.id
           limit v_limit
         ) r;
@@ -389,7 +396,9 @@ begin
             where ps.person_id = pe.id
               and ps.deleted_at is null
               and p.deleted_at is null
-              and (v_all or p.country_id = any (v_countries) or p.branch_id = any (v_branches)))
+              and (v_all or p.country_id = any (v_countries) or p.branch_id = any (v_branches))
+              and (v_rev_all or p.record_state = 'approved'
+                   or p.country_id = any (v_people_countries) or p.branch_id = any (v_people_branches)))
           order by score desc, sort_name, pe.id
           limit v_limit
         ) r
@@ -401,6 +410,8 @@ begin
             and ps.deleted_at is null
             and p.deleted_at is null
             and (v_all or p.country_id = any (v_countries) or p.branch_id = any (v_branches))
+              and (v_rev_all or p.record_state = 'approved'
+                   or p.country_id = any (v_people_countries) or p.branch_id = any (v_people_branches))
         ) cnt
         cross join lateral (
           select coalesce(jsonb_agg(t.j order by t.ord), '[]'::jsonb) as projects
@@ -423,6 +434,8 @@ begin
               and ps.deleted_at is null
               and p.deleted_at is null
               and (v_all or p.country_id = any (v_countries) or p.branch_id = any (v_branches))
+              and (v_rev_all or p.record_state = 'approved'
+                   or p.country_id = any (v_people_countries) or p.branch_id = any (v_people_branches))
             order by (ps.end_date is null) desc, ps.start_date desc nulls last, p.id, ps.id
             limit c_projects_per_hit
           ) t
@@ -462,7 +475,9 @@ begin
             where pd.donor_id = d.id
               and pd.deleted_at is null
               and p.deleted_at is null
-              and (v_all or p.country_id = any (v_countries) or p.branch_id = any (v_branches)))
+              and (v_all or p.country_id = any (v_countries) or p.branch_id = any (v_branches))
+              and (v_rev_all or p.record_state = 'approved'
+                   or p.country_id = any (v_people_countries) or p.branch_id = any (v_people_branches)))
           order by score desc, sort_name, d.id
           limit v_limit
         ) r
@@ -474,6 +489,8 @@ begin
             and pd.deleted_at is null
             and p.deleted_at is null
             and (v_all or p.country_id = any (v_countries) or p.branch_id = any (v_branches))
+              and (v_rev_all or p.record_state = 'approved'
+                   or p.country_id = any (v_people_countries) or p.branch_id = any (v_people_branches))
         ) cnt
         cross join lateral (
           select coalesce(jsonb_agg(t.j order by t.ord), '[]'::jsonb) as projects
@@ -498,6 +515,8 @@ begin
                 and pd.deleted_at is null
                 and p.deleted_at is null
                 and (v_all or p.country_id = any (v_countries) or p.branch_id = any (v_branches))
+              and (v_rev_all or p.record_state = 'approved'
+                   or p.country_id = any (v_people_countries) or p.branch_id = any (v_people_branches))
               order by p.id
             ) g
             order by g.sort_name, g.id

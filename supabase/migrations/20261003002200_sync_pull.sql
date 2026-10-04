@@ -69,6 +69,18 @@
 -- round as) the link that made it visible.
 -- A first round is driven by the caller's projects and own donors.
 --
+-- UNREVIEWED RECORDS
+--
+-- Same rule as the RLS policies (migration 0013, owner decision ح): a project
+-- that is not 'approved' and its children are sent only inside the caller's
+-- PEOPLE scope (every role except viewer). For a caller whose read scope is
+-- covered by his people scope (everybody without a viewer grant) nothing
+-- changes; otherwise projects and the 'all'-audience children get
+--     and (record_state = 'approved' or <people scope>)
+-- (children through the parent join), the donor links likewise. A project that
+-- leaves 'approved' is reported under "gone" to the viewers who no longer see
+-- it, and an approval re-stamps the children (migration 0025).
+--
 -- IDLE POLLS
 --
 -- Most calls are incremental rounds in which nothing (or one table) changed.
@@ -185,6 +197,10 @@ declare
   v_r_pred     text;
   v_gone       jsonb;
   v_changed    text[];
+  -- unreviewed records (see UNREVIEWED RECORDS in the header)
+  v_vo         boolean;
+  v_unrev_t    text;
+  v_unrev_p    text;
 begin
   if v_uid is null then
     raise exception 'not_authenticated' using errcode = 'PT401';
@@ -253,6 +269,19 @@ begin
   from private.sync_tables r
   where r.audience = 'restricted';
 
+  -- Does the caller read anything as a viewer only (read scope not covered by
+  -- the people scope)? Then unreviewed projects and their children are limited
+  -- to the people scope ($11 / $12); otherwise the predicates stay unchanged.
+  v_vo := not coalesce(c.people_all, false)
+          and (coalesce(c.read_all, false)
+               or not (c.read_c <@ c.people_c and c.read_b <@ c.people_b));
+  if v_vo then
+    v_unrev_t := '(t.record_state = ''approved'' or '
+                 || private.sync_scope_pred('t', false, c.people_c, c.people_b, '$11', '$12') || ')';
+    v_unrev_p := '(p.record_state = ''approved'' or '
+                 || private.sync_scope_pred('p', false, c.people_c, c.people_b, '$11', '$12') || ')';
+  end if;
+
   v_remaining := v_limit;
 
   -- Incremental round: find the tables that have anything in the window with
@@ -306,7 +335,9 @@ begin
             -- the rows come from two sources (see DONORS in the header): page by id
             v_by_id := true;
             v_link := 'from public.project_donors pd join public.projects p on p.id = pd.project_id where '
-                      || private.sync_scope_pred('p', false, a_c, a_b);
+                      || private.sync_scope_pred('p', false, a_c, a_b)
+                      -- a viewer: links to approved projects only (policy donors_select)
+                      || case when v_vo then ' and ' || v_unrev_p else '' end;
             if v_lo = 0 then
               -- first round: driven by the caller's own donors and projects
               v_pred := 't.id in (select d.id from public.donors d where d.created_by = $8'
@@ -334,10 +365,16 @@ begin
           v_pred := private.sync_scope_pred('t', a_all, a_c, '{}'::uuid[]);
         when 'row' then
           v_pred := private.sync_scope_pred('t', a_all, a_c, a_b);
+          if v_vo and reg.table_name = 'projects' and v_pred <> 'false' then
+            v_pred := v_pred || ' and ' || v_unrev_t;
+          end if;
         when 'project' then
           v_pred := private.sync_scope_pred('p', a_all, a_c, a_b);
-          if not a_all then
+          if not a_all or (v_vo and reg.audience = 'all') then
             v_join := format('join public.projects p on p.id = t.%I', reg.scope_col);
+          end if;
+          if v_vo and reg.audience = 'all' and v_pred <> 'false' then
+            v_pred := v_pred || ' and ' || v_unrev_p;
           end if;
         when 'staff' then
           v_pred := private.sync_scope_pred('p', a_all, a_c, a_b);
@@ -437,7 +474,8 @@ begin
 
       execute v_sql
         into v_rows, v_n, v_last_x, v_last_k, v_last_id, v_ids
-        using v_lo, v_hi, v_x, v_id, v_remaining, a_c, a_b, v_uid, c.restricted_c, v_k;
+        using v_lo, v_hi, v_x, v_id, v_remaining, a_c, a_b, v_uid, c.restricted_c, v_k,
+              c.people_c, c.people_b;
 
       end if;   -- table has rows in the window
 
@@ -445,12 +483,16 @@ begin
 
       -- Rows that left the caller's scope (re-assigned to another branch /
       -- country) inside this window: reported once per round, when the table
-      -- is finished, so that the device can drop its stale copies.
+      -- is finished, so that the device can drop its stale copies. For a
+      -- viewer also the projects that left 'approved' (migration 0025), which
+      -- concerns a global viewer as well.
       v_gone := null;
-      if v_remaining > 0 and reg.scope_kind = 'row' and v_lo > 0 and not a_all
+      if v_remaining > 0 and reg.scope_kind = 'row' and v_lo > 0
+         and (not a_all or (v_vo and reg.table_name = 'projects'))
          and exists (select 1 from private.sync_scope_moves m
                      where m.table_name = reg.table_name and m.sync_xid >= v_lo and m.sync_xid < v_hi) then
-        v_gone := private.sync_gone(reg.table_name, v_lo, v_hi, a_c, a_b, v_pred);
+        v_gone := private.sync_gone(reg.table_name, v_lo, v_hi, a_all, a_c, a_b,
+                                    c.people_c, c.people_b, v_pred);
       end if;
 
       if v_n > 0 or v_gone is not null then

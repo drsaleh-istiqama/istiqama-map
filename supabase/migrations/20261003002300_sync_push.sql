@@ -150,7 +150,10 @@ begin
     from public.project_donors pd
     join public.projects p on p.id = pd.project_id
     where pd.donor_id = p_donor_id
-      and (p.country_id = any (p_ctx.read_c) or p.branch_id = any (p_ctx.read_b)));
+      and (p.country_id = any (p_ctx.read_c) or p.branch_id = any (p_ctx.read_b))
+      -- a project the caller reads as a viewer only counts when approved
+      and (p.record_state = 'approved'
+           or p.country_id = any (p_ctx.people_c) or p.branch_id = any (p_ctx.people_b)));
 end;
 $$;
 
@@ -549,6 +552,137 @@ end;
 $$;
 
 -- -----------------------------------------------------------------------------
+-- Natural keys: a key column the client left out takes its column default, as
+-- it would in the insert (staff_compensation.effective_from = today), so that a
+-- look-up by natural key finds the row an insert would collide with. Used by
+-- the upsert path (step 4) and by a blind delete (sync_delete_by_key).
+-- -----------------------------------------------------------------------------
+create or replace function private.sync_natural_key_defaults(p_reg private.sync_tables, p_values jsonb)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, private, pg_temp
+as $$
+declare
+  v_values jsonb := coalesce(p_values, '{}'::jsonb);
+  v_k      text;
+  v_def    text;
+  v_defval jsonb;
+begin
+  if p_reg.natural_key is null then
+    return v_values;
+  end if;
+  foreach v_k in array p_reg.natural_key loop
+    if not (v_values ? v_k) then
+      v_def := null;
+      select pg_get_expr(d.adbin, d.adrelid) into v_def
+      from pg_attrdef d
+      join pg_attribute a on a.attrelid = d.adrelid and a.attnum = d.adnum
+      where d.adrelid = format('public.%I', p_reg.table_name)::regclass and a.attname = v_k;
+      if v_def is not null then
+        execute format('select to_jsonb(%s)', v_def) into v_defval;
+        v_values := v_values || jsonb_build_object(v_k, v_defval);
+      end if;
+    end if;
+  end loop;
+  return v_values;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Blind DELETE of a restricted row (sync.md §4.4). Called by sync_apply_op for
+-- staff_compensation / community_sensitive when the caller cannot see the
+-- restricted data of the row named by the op id (or that id is unknown).
+--
+-- Like a blind upsert it is addressed by the natural key, never by the row id,
+-- and the answer never depends on what is stored:
+--   * the parent must be named in fields (parent_required otherwise, also when
+--     the op's id exists); missing key columns take their defaults;
+--   * authorised on the PARENT's scope (a writer or reviewer there), never on
+--     the stored row's created_by (that would tell whose row it is);
+--   * the live row of the natural key is locked (the op's id plays no part);
+--     the caller's own open sync_conflicts on it are withdrawn (soft-deleted:
+--     he no longer proposes those values); the row itself is soft-deleted only
+--     when the caller created it — deleting somebody else's restricted row is a
+--     decision for a manager who can see it (delete by id, non-blind);
+--   * always the constant {op_id, status: applied, version: null}.
+-- A caller who CAN see restricted data of the parent's country is not blind
+-- for it: his delete is by id (sync_apply_op step 3); an op whose id is unknown
+-- (or names a row of a country he cannot see) deletes nothing.
+-- -----------------------------------------------------------------------------
+create or replace function private.sync_delete_by_key(
+  p_ctx private.sync_ctx, p_reg private.sync_tables, p_op_id uuid, p_fields jsonb)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, private, pg_temp
+as $$
+declare
+  c_answer   constant jsonb := jsonb_build_object('op_id', p_op_id, 'status', 'applied', 'version', null);
+  v_key      jsonb := '{}'::jsonb;
+  v_scope    private.sync_row_scope;
+  v_writer   boolean;
+  v_reviewer boolean;
+  v_row_id   uuid;
+  v_creator  uuid;
+  v_k        text;
+begin
+  -- the parent and the natural key, nothing else of the payload
+  foreach v_k in array array[p_reg.scope_col] || coalesce(p_reg.natural_key, '{}'::text[]) loop
+    if jsonb_typeof(p_fields -> v_k) is not null and jsonb_typeof(p_fields -> v_k) <> 'null' then
+      v_key := v_key || jsonb_build_object(v_k, p_fields -> v_k);
+    end if;
+  end loop;
+  if (v_key ->> p_reg.scope_col) is null then
+    raise exception 'parent_required' using errcode = 'PT422',
+      detail = format('%s.%s is required', p_reg.table_name, p_reg.scope_col);
+  end if;
+
+  -- parent_missing when the parent does not exist (an ordering problem, as for an insert)
+  v_scope := private.sync_row_scope(p_reg, v_key, null);
+  if private.sync_sees_restricted(p_ctx, v_scope.country_id) then
+    return c_answer;
+  end if;
+
+  v_writer   := private.sync_can(p_ctx, 'write',  p_reg.scope_kind, v_scope.country_id, v_scope.branch_id);
+  v_reviewer := private.sync_can(p_ctx, 'review', p_reg.scope_kind, v_scope.country_id, v_scope.branch_id);
+  perform private.sync_authorise(
+    p_reg.push_delete, v_writer, v_reviewer, true, v_scope.project_creator = p_ctx.uid, false);
+
+  v_key := private.sync_natural_key_defaults(p_reg, v_key);
+  if p_reg.natural_key is not null and v_key ?& p_reg.natural_key then
+    execute format(
+      'select t.id, t.created_by'
+      || ' from public.%1$I t, jsonb_populate_record(null::public.%1$I, $1) r'
+      || ' where %2$s and t.deleted_at is null limit 1 for update of t',
+      p_reg.table_name,
+      (select string_agg(format('t.%1$I = r.%1$I', k), ' and ') from unnest(p_reg.natural_key) as k))
+      into v_row_id, v_creator using v_key;
+  end if;
+  if v_row_id is null then
+    return c_answer;
+  end if;
+
+  update public.sync_conflicts sc
+  set deleted_at = now()
+  where sc.table_name = p_reg.table_name
+    and sc.row_id = v_row_id
+    and sc.client_user_id = p_ctx.uid
+    and sc.state = 'open'
+    and sc.deleted_at is null;
+
+  if v_creator is not distinct from p_ctx.uid then
+    execute format('update public.%I t set deleted_at = now() where t.id = $1', p_reg.table_name)
+      using v_row_id;
+  end if;
+
+  return c_answer;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
 -- Error object of a rejected operation. Never contains DETAIL of database
 -- errors (it can quote stored values).
 -- -----------------------------------------------------------------------------
@@ -639,8 +773,7 @@ declare
   v_wrote       boolean := false;
   v_blind       boolean := false;
   v_id_taken    boolean := false;
-  v_def         text;
-  v_defval      jsonb;
+  v_merged_fn   boolean;
   v_result      jsonb;
 begin
   -- ---------------------------------------------------------------------------
@@ -689,18 +822,27 @@ begin
   -- 3. DELETE (soft)
   -- ---------------------------------------------------------------------------
   if v_kind = 'delete' then
+    -- Restricted row, caller without restricted access to the country of the
+    -- row the id names (or the id is unknown): a BLIND delete, addressed by the
+    -- natural key and answered with the constant (sync.md §4.4). Only a caller
+    -- who can see the stored row's restricted data deletes by id (below).
+    if v_restricted and not coalesce(p_ctx.restricted_all, false) then
+      if v_cur is not null then
+        v_scope := private.sync_row_scope(reg, v_cur, v_id);
+      end if;
+      if v_cur is null or not private.sync_sees_restricted(p_ctx, v_scope.country_id) then
+        return private.sync_delete_by_key(p_ctx, reg, v_op_id, v_fields);
+      end if;
+    end if;
+
     if v_cur is null then
       -- never reached the server (or already purged): nothing to do
       return jsonb_build_object('op_id', v_op_id, 'status', 'applied', 'version', null);
     end if;
     v_cur_version := (v_cur ->> 'version')::integer;
     v_scope       := private.sync_row_scope(reg, v_cur, v_id);
-    -- restricted row of a country whose restricted data the caller cannot see:
-    -- the answer is the same constant as for a blind upsert (see 8.)
-    v_blind := v_restricted and not private.sync_sees_restricted(p_ctx, v_scope.country_id);
     if (v_cur ->> 'deleted_at') is not null then
-      return jsonb_build_object('op_id', v_op_id, 'status', 'applied',
-                                'version', case when v_blind then null else v_cur_version end);
+      return jsonb_build_object('op_id', v_op_id, 'status', 'applied', 'version', v_cur_version);
     end if;
 
     v_writer   := private.sync_can(p_ctx, 'write',  reg.scope_kind, v_scope.country_id, v_scope.branch_id);
@@ -740,8 +882,8 @@ begin
 
     return jsonb_build_object(
       'op_id', v_op_id,
-      'status', case when v_others_any and not v_blind then 'merged' else 'applied' end,
-      'version', case when v_blind then null else v_version end);
+      'status', case when v_others_any then 'merged' else 'applied' end,
+      'version', v_version);
   end if;
 
   -- ---------------------------------------------------------------------------
@@ -777,6 +919,20 @@ begin
         detail = 'lon must be within -180..180 and lat within -90..90';
     end if;
     v_has_geom := true;
+  end if;
+
+  -- A project naming a locality that was merged into another one
+  -- (merge_localities, migration 0071) — typically entered offline before the
+  -- device pulled the merge — is pointed at the surviving locality; the device
+  -- receives the stored value with its next pull.
+  if v_table = 'projects' and jsonb_typeof(v_clean -> 'locality_id') = 'string' then
+    if v_merged_fn is null then
+      v_merged_fn := to_regprocedure('private.locality_merged_into(uuid)') is not null;
+    end if;
+    if v_merged_fn then
+      v_clean := v_clean || jsonb_build_object('locality_id',
+        private.locality_merged_into((v_clean ->> 'locality_id')::uuid));
+    end if;
   end if;
 
   -- Blind writes (sync.md §4.4). A caller who cannot see the restricted data of
@@ -828,18 +984,7 @@ begin
   -- would in the insert (staff_compensation.effective_from = today): the
   -- lookup below must find the row that the insert would collide with.
   if v_cur is null and reg.natural_key is not null then
-    foreach v_k in array reg.natural_key loop
-      if not (v_clean ? v_k) then
-        select pg_get_expr(d.adbin, d.adrelid) into v_def
-        from pg_attrdef d
-        join pg_attribute a on a.attrelid = d.adrelid and a.attnum = d.adnum
-        where d.adrelid = format('public.%I', v_table)::regclass and a.attname = v_k;
-        if v_def is not null then
-          execute format('select to_jsonb(%s)', v_def) into v_defval;
-          v_clean := v_clean || jsonb_build_object(v_k, v_defval);
-        end if;
-      end if;
-    end loop;
+    v_clean := private.sync_natural_key_defaults(reg, v_clean);
   end if;
 
   -- Natural key: an insert for a parent that already has a live row (two devices
@@ -1356,6 +1501,8 @@ revoke execute on function
   private.sync_guard_project_staff(private.sync_ctx, text, jsonb, jsonb, boolean),
   private.sync_guard_project_donors(private.sync_ctx, text, jsonb, jsonb, boolean),
   private.sync_guard_person_merge_requests(private.sync_ctx, text, jsonb, jsonb, boolean),
+  private.sync_natural_key_defaults(private.sync_tables, jsonb),
+  private.sync_delete_by_key(private.sync_ctx, private.sync_tables, uuid, jsonb),
   private.sync_error(text, text, text, text, text),
   private.sync_apply_op(private.sync_ctx, jsonb)
 from public, anon, authenticated;

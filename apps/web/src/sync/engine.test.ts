@@ -60,6 +60,26 @@ async function started(options: EngineOptions = {}): Promise<SyncEngine> {
 
 const rpcCalls = (fn: string) => server.calls.rpc.filter((c) => c.fn === fn);
 
+/**
+ * Resolves as soon as the status signal satisfies `predicate` — event driven (a signal
+ * effect), so the test waits exactly as long as the asynchronous IndexedDB reads behind the
+ * status take, however busy the machine is; no polling interval, no guessed delay.
+ */
+function statusReaches(predicate: (s: SyncEngine['status']['value']) => boolean): Promise<void> {
+  return new Promise((resolve) => {
+    let done = false;
+    let dispose: (() => void) | null = null;
+    dispose = effect(() => {
+      if (done || !predicate(engine.status.value)) return;
+      done = true;
+      resolve();
+      // disposing from inside the effect's first run: dispose is not assigned yet
+      queueMicrotask(() => dispose?.());
+    });
+    if (done) dispose();
+  });
+}
+
 beforeEach(() => {
   store = new LocalStore(`engine-${uid()}`);
   server = new FakeServer();
@@ -266,10 +286,13 @@ describe('sync engine — live counters', () => {
     await started();
     const id = uid();
     await store.mutate('projects', id, { name_ar: 'x', type: 'mosque' });
-    await clock.advance(60);
-    expect(engine.status.value.pendingOps).toBe(1);
+    // The change notification refreshes the counters (a debounced timer, then an asynchronous
+    // count): wait for that refresh itself rather than a fixed amount of time — under
+    // full-suite load the count used to land after `clock.advance(60)` had returned.
+    await statusReaches((s) => s.pendingOps === 1);
     expect(server.calls.push).toHaveLength(0);
-    // write kick: 4 s after the write instead of waiting for the two-minute timer
+    // write kick: 4 s after the write instead of waiting for the two-minute timer — scheduled
+    // by the same refresh, synchronously after it published the counter
     expect(Math.min(...clock.waiting())).toBeLessThanOrEqual(4_000);
     await clock.advance(4_000);
     await engine.whenIdle();

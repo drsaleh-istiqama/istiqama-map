@@ -304,11 +304,22 @@ async function parkAsFailed(op: OutboxOp, error: PushError | undefined): Promise
   }
 }
 
-/** Children rejected only because their parent was missing get another chance once it exists. */
+const waitsForParent = (f: FailedOp): boolean =>
+  f.error.code === 'parent_missing' || f.error.code === 'parent_required';
+
+/**
+ * Children rejected only because their parent was missing get another chance once it exists.
+ * Runs for every acknowledged insert, so it must not read the rejected operations one by one:
+ * nothing at all when none exist (the usual case), the `project_id` index for a project (the
+ * only reference of the project child tables), a scan of `failed_ops` only for the rarer
+ * parents (localities, donors, persons, staff rows).
+ */
 async function requeueOrphans(parentTable: TableName, parentId: string): Promise<void> {
-  const candidates = await db.failed_ops
-    .filter((f) => f.error.code === 'parent_missing' || f.error.code === 'parent_required')
-    .toArray();
+  if ((await db.failed_ops.count()) === 0) return;
+  const candidates =
+    parentTable === 'projects'
+      ? await db.failed_ops.where('project_id').equals(parentId).filter(waitsForParent).toArray()
+      : await db.failed_ops.filter(waitsForParent).toArray();
   const mine = candidates.filter(
     (f) =>
       (parentTable === 'projects' && f.project_id === parentId) ||

@@ -301,10 +301,18 @@ begin
   -- projects_page, so the planner sees the smallest possible query.
   --   $1 countries  $2 branches  $3 country  $4 branch  $5 area ids  $6 types  $7 statuses
   --   $8 states  $9 like pattern  $10 like patterns  $11 uid  $12 donor  $13 locality
-  --   $14 explicit ids  $15 after id  $16 limit
+  --   $14 explicit ids  $15 after id  $16 limit  $17 people countries  $18 people branches
   v_where := 'p.deleted_at is null';
   if not v_all then
     v_where := v_where || ' and (p.country_id = any ($1) or p.branch_id = any ($2))';
+  end if;
+  -- Unreviewed records (migration 0013, owner decision ح): where the caller reads as a viewer
+  -- only, approved projects only. Nothing is added when his people scope covers his read scope.
+  if not private.reads_unreviewed_everywhere(v_all, v_countries, v_branches,
+                                             v_p_all, v_p_countries, v_p_branches) then
+    v_where := v_where || case
+      when not v_people then ' and p.record_state = ''approved'''
+      else ' and (p.record_state = ''approved'' or p.country_id = any ($17) or p.branch_id = any ($18))' end;
   end if;
   if v_country is not null then v_where := v_where || ' and p.country_id = $3'; end if;
   if v_branch is not null then v_where := v_where || ' and p.branch_id = $4'; end if;
@@ -336,7 +344,8 @@ begin
           || v_where || ' order by p.id limit $16 + 1) s'
     into v_ids
     using v_countries, v_branches, v_country, v_branch, v_area_ids, v_types, v_statuses,
-          v_states, v_p1, v_pats, v_uid, v_donor, v_locality, v_ids_filter, v_after_id, v_limit;
+          v_states, v_p1, v_pats, v_uid, v_donor, v_locality, v_ids_filter, v_after_id, v_limit,
+          v_p_countries, v_p_branches;
 
   v_ids := coalesce(v_ids, '{}'::uuid[]);
   if cardinality(v_ids) > v_limit then

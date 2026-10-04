@@ -201,6 +201,7 @@ describe('CORS', () => {
     expect(pre.status).toBe(204);
     expect(pre.headers.get('access-control-allow-methods')).toBe('GET, POST, OPTIONS');
     expect(pre.headers.get('access-control-allow-headers')).toContain('x-device-id');
+    expect(pre.headers.get('access-control-allow-headers')).toContain('x-file-name');
     expect(preflight(bad, ['POST']).headers.has('access-control-allow-methods')).toBe(false);
   });
 });

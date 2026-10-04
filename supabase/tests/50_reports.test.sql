@@ -122,11 +122,17 @@ select tests.login_as(tests.id('u_sup_pemba'), 'aal1');
 select ok(not (public.dashboard('branch', tests.id('br_pemba')) ? 'payroll'), 'branch supervisor: no payroll section');
 select tests.logout();
 
+-- a viewer counts approved projects only (owner decision ح, migration 0013)
+select set_config('t.tz_approved',
+  (select count(*)::text from public.projects p
+   where p.country_id = tests.id('tz') and p.deleted_at is null and p.record_state = 'approved'), true);
 select tests.login_as(tests.id('u_viewer_tz'), 'aal1');
 select set_config('t.x', public.dashboard('country', tests.id('tz'))::text, true);
 select ok(not (current_setting('t.x')::jsonb ? 'payroll'), 'viewer: no payroll section');
 select ok(not (current_setting('t.x')::jsonb -> 'entry_activity' ? 'collectors'), 'viewer: no collector names');
-select ok((current_setting('t.x')::jsonb #>> '{totals,projects}')::int >= 3, 'viewer: gets the totals');
+select ok((current_setting('t.x')::jsonb #>> '{totals,projects}')::int = current_setting('t.tz_approved')::int
+          and (current_setting('t.x')::jsonb #>> '{totals,by_record_state,draft}')::int = 0,
+          'viewer: gets the totals of the approved projects only (no draft)');
 select throws_ok(format('select public.dashboard(%L, %L)', 'country', tests.id('ke')), 'PT403', null, 'viewer: no dashboard of another country');
 select tests.logout();
 

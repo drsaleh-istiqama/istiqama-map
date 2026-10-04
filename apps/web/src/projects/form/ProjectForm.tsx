@@ -225,6 +225,8 @@ export function ProjectForm({
             donor?: { id: string };
           }>;
           const row = rows.find((r) => r.id === id);
+          // What was typed in the person picker of a removed staff row goes with it.
+          const { [id]: _typed, ...pickerDrafts } = d.extras.pickerDrafts ?? {};
           return {
             ...d,
             working: { ...d.working, [key]: rows.filter((r) => r.id !== id) },
@@ -232,6 +234,7 @@ export function ProjectForm({
               ...d.extras,
               newPersonIds: d.extras.newPersonIds.filter((p) => p !== row?.person?.id),
               newDonorIds: d.extras.newDonorIds.filter((p) => p !== row?.donor?.id),
+              ...(d.extras.pickerDrafts ? { pickerDrafts } : {}),
             },
           };
         }),

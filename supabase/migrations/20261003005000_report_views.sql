@@ -9,6 +9,12 @@
 -- Grouping keys are never NULL: a missing country / branch / level-1 area is stored as the nil
 -- UUID (00000000-0000-0000-0000-000000000000) so that the unique index covers every row.
 -- The report functions translate the nil UUID back to JSON null.
+--
+-- Every view that counts projects (or rows below them) carries `approved` (record_state =
+-- 'approved') as a grouping key / column: a viewer sees approved projects only (owner decision
+-- ح, migration 0013), so dashboard() / report_country() of a caller without people scope on the
+-- requested scope sum the approved groups only. mv_payroll needs none (restricted readers always
+-- have people scope).
 
 -- ---------------------------------------------------------------------------------------------
 -- Helpers
@@ -97,6 +103,7 @@ select
   ) as area1_id,
   coalesce(p.type, 'unspecified') as type,
   coalesce(p.status, 'unspecified') as status,
+  (p.record_state = 'approved') is true as approved,
   count(*)::bigint as project_count,
   coalesce(sum(p.capacity), 0)::bigint as capacity_sum,
   (count(*) filter (where p.record_state = 'draft'))::bigint as draft_count,
@@ -108,11 +115,11 @@ left join public.admin_areas a on a.id = p.admin_area_id
 left join public.admin_areas ap on ap.id = a.parent_id
 left join public.admin_areas ag on ag.id = ap.parent_id
 where p.deleted_at is null
-group by 1, 2, 3, 4, 5
+group by 1, 2, 3, 4, 5, 6
 with data;
 
 create unique index mv_project_totals_key
-  on private.mv_project_totals (country_id, branch_id, area1_id, type, status);
+  on private.mv_project_totals (country_id, branch_id, area1_id, type, status, approved);
 create index mv_project_totals_branch on private.mv_project_totals (branch_id);
 
 -- ---------------------------------------------------------------------------------------------
@@ -125,6 +132,7 @@ select
   coalesce(p.branch_id, private.nil_uuid()) as branch_id,
   coalesce(m.priority, 'medium') as priority,
   coalesce(m.currency::text, '') as currency,
+  (p.record_state = 'approved') is true as approved,
   count(*)::bigint as open_count,
   coalesce(sum(m.estimated_cost), 0)::numeric as cost_sum
 from public.project_maintenance m
@@ -132,11 +140,11 @@ join public.projects p on p.id = m.project_id
 where m.deleted_at is null
   and p.deleted_at is null
   and m.state in ('open', 'in_progress')
-group by 1, 2, 3, 4
+group by 1, 2, 3, 4, 5
 with data;
 
 create unique index mv_maintenance_open_key
-  on private.mv_maintenance_open (country_id, branch_id, priority, currency);
+  on private.mv_maintenance_open (country_id, branch_id, priority, currency, approved);
 create index mv_maintenance_open_branch on private.mv_maintenance_open (branch_id);
 
 -- Open maintenance entries themselves, pre-sorted for the "open maintenance by priority" list.
@@ -156,7 +164,8 @@ select
   m.reported_on,
   m.description,
   m.estimated_cost,
-  m.currency::text as currency
+  m.currency::text as currency,
+  (p.record_state = 'approved') is true as approved
 from public.project_maintenance m
 join public.projects p on p.id = m.project_id
 where m.deleted_at is null
@@ -181,6 +190,7 @@ select
   coalesce(p.country_id, private.nil_uuid()) as country_id,
   coalesce(p.branch_id, private.nil_uuid()) as branch_id,
   coalesce(s.role, 'other') as role,
+  (p.record_state = 'approved') is true as approved,
   count(*)::bigint as assignment_count,
   count(distinct s.person_id)::bigint as person_count
 from public.project_staff s
@@ -190,10 +200,10 @@ where s.deleted_at is null
   and p.deleted_at is null
   and pe.deleted_at is null
   and (s.end_date is null or s.end_date >= current_date)
-group by 1, 2, 3
+group by 1, 2, 3, 4
 with data;
 
-create unique index mv_staff_roles_key on private.mv_staff_roles (country_id, branch_id, role);
+create unique index mv_staff_roles_key on private.mv_staff_roles (country_id, branch_id, role, approved);
 create index mv_staff_roles_branch on private.mv_staff_roles (branch_id);
 
 -- ---------------------------------------------------------------------------------------------
@@ -253,6 +263,7 @@ create materialized view private.mv_needs as
 select
   coalesce(p.country_id, private.nil_uuid()) as country_id,
   coalesce(p.branch_id, private.nil_uuid()) as branch_id,
+  (p.record_state = 'approved') is true as approved,
   count(*)::bigint as project_count,
   coalesce(sum(f.quran_need), 0)::bigint as quran_need,
   coalesce(sum(f.quran_count), 0)::bigint as quran_count,
@@ -265,10 +276,10 @@ from public.projects p
 left join public.project_facilities f on f.project_id = p.id and f.deleted_at is null
 left join public.project_land l on l.project_id = p.id and l.deleted_at is null
 where p.deleted_at is null
-group by 1, 2
+group by 1, 2, 3
 with data;
 
-create unique index mv_needs_key on private.mv_needs (country_id, branch_id);
+create unique index mv_needs_key on private.mv_needs (country_id, branch_id, approved);
 create index mv_needs_branch on private.mv_needs (branch_id);
 
 -- ---------------------------------------------------------------------------------------------
@@ -279,16 +290,17 @@ create materialized view private.mv_completeness as
 select
   coalesce(p.country_id, private.nil_uuid()) as country_id,
   coalesce(p.branch_id, private.nil_uuid()) as branch_id,
+  (p.record_state = 'approved') is true as approved,
   count(*)::bigint as project_count,
   coalesce(sum(p.completeness), 0)::bigint as completeness_sum,
   (count(*) filter (where coalesce(p.completeness, 0) < 100))::bigint as incomplete_count,
   (count(*) filter (where coalesce(p.completeness, 0) < 50))::bigint as below_half_count
 from public.projects p
 where p.deleted_at is null
-group by 1, 2
+group by 1, 2, 3
 with data;
 
-create unique index mv_completeness_key on private.mv_completeness (country_id, branch_id);
+create unique index mv_completeness_key on private.mv_completeness (country_id, branch_id, approved);
 create index mv_completeness_branch on private.mv_completeness (branch_id);
 
 -- ---------------------------------------------------------------------------------------------
@@ -308,6 +320,7 @@ events as (
     p.created_by as user_id,
     p.country_id,
     p.branch_id,
+    (p.record_state = 'approved') is true as approved,
     date_trunc('week', (p.created_at at time zone 'utc'))::date as week_start,
     1 as created,
     0 as updated
@@ -320,6 +333,7 @@ events as (
     p.updated_by,
     p.country_id,
     p.branch_id,
+    (p.record_state = 'approved') is true,
     date_trunc('week', (p.updated_at at time zone 'utc'))::date,
     0,
     1
@@ -338,14 +352,15 @@ select
   e.user_id,
   coalesce(e.country_id, private.nil_uuid()) as country_id,
   coalesce(e.branch_id, private.nil_uuid()) as branch_id,
+  e.approved,
   sum(e.created)::bigint as created_count,
   sum(e.updated)::bigint as updated_count
 from events e
-group by 1, 2, 3, 4
+group by 1, 2, 3, 4, 5
 with data;
 
 create unique index mv_entry_activity_key
-  on private.mv_entry_activity (week_start, user_id, country_id, branch_id);
+  on private.mv_entry_activity (week_start, user_id, country_id, branch_id, approved);
 create index mv_entry_activity_country on private.mv_entry_activity (country_id, week_start);
 create index mv_entry_activity_branch on private.mv_entry_activity (branch_id, week_start);
 

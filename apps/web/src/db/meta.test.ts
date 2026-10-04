@@ -139,6 +139,49 @@ describe('photo blobs', () => {
     expect(await photoBlob(kept.id, 'thumb')).toBeDefined();
     expect(await photoBlob('uploading', 'full')).toBeDefined();
   });
+
+  it('pruneOrphanPhotoBlobs keeps the photos of unsaved form drafts (regression)', async () => {
+    // A photo taken in a form that was never saved: blobs on the device, no row, no queued
+    // operation — only the autosaved draft knows it. Pruning it would lose the picture.
+    const projectId = tid(0x80);
+    const inForm = tid(0x90);
+    const detached = tid(0x90);
+    const nested = tid(0x90);
+    const orphan = tid(0x90);
+    for (const id of [inForm, detached, nested, orphan]) {
+      await putPhotoBlob(id, 'full', new Blob(['f']), { projectId });
+      await putPhotoBlob(id, 'thumb', new Blob(['t']), { projectId });
+    }
+    // the project form's draft (src/projects/form/model.ts)
+    await drafts.put(`project-form:new:${projectId}`, {
+      v: 1,
+      mode: 'new',
+      projectId,
+      working: { project: { id: projectId }, photos: [{ id: inForm, project_id: projectId }] },
+      extras: { seenPhotoIds: [inForm] },
+    });
+    // the photo module's record of photos that finished after their editor was gone
+    await drafts.put(`photos:detached:${projectId}`, {
+      v: 1,
+      projectId,
+      entries: [{ userId: USER_A, row: { id: detached, project_id: projectId } }],
+    });
+    // any other draft shape: an id as a map key, deep inside
+    await drafts.put('some-feature:draft', { a: { b: [{ c: { [nested]: { caption: 'x' } } }] } });
+
+    expect(await pruneOrphanPhotoBlobs()).toBe(2); // full + thumb of the orphan only
+    for (const id of [inForm, detached, nested]) {
+      expect(await photoBlob(id, 'full')).toBeDefined();
+      expect(await photoBlob(id, 'thumb')).toBeDefined();
+    }
+    expect(await photoBlob(orphan, 'full')).toBeUndefined();
+
+    // Draft discarded / saved elsewhere: the photo is an orphan now.
+    await drafts.remove(`project-form:new:${projectId}`);
+    expect(await pruneOrphanPhotoBlobs()).toBe(2);
+    expect(await photoBlob(inForm, 'full')).toBeUndefined();
+    expect(await photoBlob(detached, 'full')).toBeDefined();
+  });
 });
 
 describe('syncPort (the engine-facing facade)', () => {

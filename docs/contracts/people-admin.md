@@ -11,7 +11,9 @@ access log) and the sync-status board of §1. Read this instead of the SQL.
 | `20261003004300_restricted_read.sql` | `restricted_read` |
 | `20261003004400_admin_rpcs.sql` | `admin_users`, `admin_set_role`, `admin_remove_role`, `admin_set_user_active`, `admin_revoke_sessions`, `admin_restore_device` |
 | `20261003004500_sync_status.sql` | `private.sync_rejections` + `private.log_sync_rejection`, `report_device_status`, `sync_status` |
-| `supabase/tests/40…45_*.test.sql` | 286 pgTAP assertions |
+| `20261003007100_followups.sql` | `user_display_names` (§10), `merge_localities`, `revert_locality_merge` + `private.locality_merges`, `private.locality_merged_into`, `private.locality_merge_allowed` (§11) |
+| `20261003007200_review_fixes_server.sql` | managed currencies for `staff_compensation` (schema.md), `private.end_auth_sessions` + trigger `profiles_end_auth_sessions`, `admin_end_auth_sessions` (§6) |
+| `supabase/tests/40…46_*.test.sql` | 317 pgTAP assertions |
 
 ## 0. Conventions
 
@@ -316,10 +318,24 @@ oneself (`cannot_deactivate_self`), not on the last active `hq_admin` (`last_hq_
   stolen token can omit. `{ …, "device_id": "…", "scope": "device", "auth_logout_required": true }`.
   Unknown device ⇒ `device_not_found`.
 
-**The `admin` Edge Function must call this RPC with the administrator's JWT and then, when
-`auth_logout_required`, sign the user out through the Auth admin API** (refresh tokens);
-otherwise a refreshed token gets a new `iat` and passes again. If the lost phone's SIM receives
-the sign-in codes, deactivate the account instead.
+**Refresh tokens die in the same transaction** (migration 0072): every forward move of
+`profiles.sessions_revoked_at` and every deactivation fires the trigger
+`profiles_end_auth_sessions`, which deletes the user's `auth.sessions` (GoTrue's
+`refresh_tokens` and `mfa_amr_claims` cascade) and his session-less refresh tokens
+(`private.end_auth_sessions`). This holds whoever calls the RPC — the `admin` Edge Function or
+a direct `rpc()` — and on every target (hosted Supabase or the local gateway). Otherwise a
+refreshed token would get a new `iat` and pass again.
+
+The `admin` Edge Function still honours `auth_logout_required` (kept for compatibility): it
+calls `admin_end_auth_sessions(p_user_id uuid) returns integer` — **service role only**
+(EXECUTE for `service_role`, and the JWT role must be `service_role`), returns the number of
+sessions ended (0 when the trigger already did it), raises `PT503 auth_sessions_unavailable`
+when the Auth tables are not reachable from the database and `PT422 invalid_argument` for a
+null id. The gateway-only `POST /auth/v1/admin/users/{id}/logout` is no longer needed.
+`private.end_auth_sessions` never raises: if the function owner cannot write `auth.sessions`
+on some deployment it returns NULL, the revocation of the access tokens still commits, and
+`admin_end_auth_sessions` then fails loudly so the function reports `auth_logout.done: false`.
+If the lost phone's SIM receives the sign-in codes, deactivate the account instead.
 
 ### `admin_restore_device(p_user_id uuid, p_device_id text) returns jsonb`
 
@@ -368,8 +384,10 @@ heartbeat is what the administrator wants to see).
 `sync_push` rolls a rejected operation back and (deliberately) does not keep it in
 `sync_applied_ops`, so the server has no record of it. `rejected_7d` is counted from
 `private.sync_rejections (rejected_at, user_id, device_id, op_id, table_name, row_id, code,
-error)`, which is filled by this helper. **`sync_push` has to call it in its exception
-handler** (after the sub-transaction was rolled back):
+error)`, which is filled by this helper. **Wired:** `sync_push` (migration 0023) calls it once
+for every result with `status: "rejected"` — validation/authorisation errors of the op's
+sub-transaction as well as `invalid_op` (no UUID `op_id`: logged with `op_id` null) and
+`op_id_taken` — outside the rolled-back sub-transaction:
 
 ```sql
 perform private.log_sync_rejection(v_uid, v_device, v_op, v_res -> 'error');
@@ -377,8 +395,13 @@ perform private.log_sync_rejection(v_uid, v_device, v_op, v_res -> 'error');
 
 `p_op` = the operation as sent (`op_id`, `table`, `id` are extracted when well-formed),
 `p_error` = the error object returned to the client (`code` is stored). It never raises.
-`private.sync_rejections_cleanup(p_keep interval default '30 days') returns integer` prunes the
-log (schedule it daily with the other jobs). Until the call is added `rejected_7d` is 0.
+Whole-call errors (`PT401`, `PT403 session_revoked`, `PT422 too_many_ops`, `PT429`, …) are not
+logged. `private.sync_rejections_cleanup(p_keep interval default '30 days') returns integer`
+prunes the log; migration 0070 schedules it daily (pg_cron job
+`istiqama-sync-rejections-cleanup`, 02:53). `sync_status()` counts the last 7 days
+(`window_days`) per device (`device_id` of the push) and per user (all of the user's rejections,
+with or without a device id). pgTAP: file 21 asserts push → log → `rejected_7d` (user and
+device), file 45 the board's counting.
 
 ## 8. Phone masking
 
@@ -404,3 +427,85 @@ caller's people scope, should such a row ever be listed.
   window; a branch or country scope is ANDed in the index.
 - `private.person_names` adds one row per person and script (≈ 200 MB with indexes at 500k
   persons) and one trigger execution per person insert / rename / scope move.
+
+## 10. `user_display_names(p_ids uuid[]) returns jsonb`
+
+Names for "entered by" (project `created_by`), conflict authors (`client_user_id`) and
+resolvers (`resolved_by`) on the device, which only holds user ids. Any signed-in user;
+session gate (`PT401` / `PT403 session_revoked`), `PT429` (120 / minute).
+
+```jsonc
+[ { "id": "…", "full_name": "…" } ]      // sorted by full_name; unknown or invisible ids are left out
+```
+
+At most **200 ids** per call (`PT422 too_many_ids`); `null` / empty → `[]`. A user U is named
+when the caller
+
+| | Rule | Same rule as |
+|---|---|---|
+| a | is U | `profiles_select_own` |
+| b | is `hq_admin` (aal2) | `profiles_select_hq` |
+| c | can see restricted data of a country in which U holds a live role (country scope, or a branch of that country) | `profiles_select_manager` |
+| d | has **people** scope on a project U created ("entered by") | `report_project.entered_by`, export `entered_by` |
+| e | may see a sync conflict U raised or resolved: project conflicts in his review scope (restricted tables only with restricted access to the project's country), person conflicts in his review scope, locality conflicts in the countries of his review scope, other rows for global reviewers | policy `sync_conflicts_select`, `sync_pull` |
+
+A `viewer` (and a caller without effective roles) gets **only his own name** — names are
+people data (brief §3). Deactivated users keep their name (attribution of what they entered).
+The answer never tells whether an id exists.
+
+## 11. Locality merge
+
+### `merge_localities(p_source uuid, p_target uuid) returns jsonb`
+
+Folds a duplicate village (typically a `proposed` one typed in the field) into the surviving
+one of the **same country**. Caller: a reviewer of the source's country (branch supervisor
+of a branch in that country, country manager, hq_admin), with the branch rule of brief §3
+(`private.locality_merge_allowed`):
+
+- **country level** (`hq_admin`, or a reviewer role on the country itself —
+  `country_manager`): any live locality of the country, approved or proposed;
+- **branch level** (`branch_supervisor`): only a locality whose status is `proposed`, and only
+  when **every** project naming it (live or soft-deleted) belongs to one of his branches. An
+  approved locality, or one used by a project of another branch, is refused with the same
+  `PT403 forbidden` — the answer never tells how many hidden projects use it.
+
+The projects are read and locked before the decision, so the rule is applied to exactly the
+rows the merge re-points; `projects_moved` therefore only counts projects inside the caller's
+review scope.
+
+1. every project (live or soft-deleted) with `locality_id = p_source` is re-pointed to
+   `p_target` — ordinary audited UPDATEs: `version`, `sync_xid`, `search_norm` follow and the
+   devices receive the projects on their next pull (a device that changed `locality_id`
+   offline gets a field conflict); the review state of the projects is not touched;
+2. the source locality is soft-deleted (its tombstone reaches the devices);
+3. `private.locality_merges` keeps the undo record (moved project ids, who, when).
+
+Late pushes: a project op that still names the merged locality (entered offline before the
+device pulled the merge) is stored with the surviving one — `sync_push` follows the
+un-reverted merges of soft-deleted localities (`private.locality_merged_into`, chains
+A → B → C included); the device receives the stored value with its next pull.
+
+```jsonc
+{ "merge_id": "…", "source_id": "…", "target_id": "…", "projects_moved": 2, "source_deleted": true }
+```
+
+Errors: `PT422 invalid_argument` (null / equal ids), `PT403 forbidden` (no review right at
+all, the caller can see but not review the source's country, or — branch level — the source
+is approved or used by another branch), `PT404 locality_not_found`
+(source or target missing or deleted, or outside the caller's read scope — never tells
+which), `PT422 locality_country_mismatch`, `PT429` (30 / minute, shared with the revert).
+
+### `revert_locality_merge(p_merge_id uuid) returns jsonb`
+
+Same caller rule (a branch supervisor may undo only the merge of a `proposed` locality whose
+recorded projects are all in his branches). Restores the source locality and re-points the recorded projects that
+**still** name the target (a project re-pointed by hand since the merge keeps its newer value).
+`{ "merge_id", "source_id", "target_id", "projects_restored": 1, "source_restored": true }`.
+Errors: `PT404 locality_merge_not_found` (unknown or outside the review scope),
+`PT403 forbidden` (branch-level caller, approved source or another branch's projects),
+`PT409 merge_not_revertible` (already undone, or the target was deleted meanwhile).
+
+Index: `localities_country_status_idx (country_id, status)` (migration 0002) serves the
+reviewer's list of proposed villages per country. It is deliberately **not** partial
+(`where deleted_at is null`): the same index serves look-ups that must see tombstones, and the
+live-row filter on top of it is cheap; no partial copy was added.

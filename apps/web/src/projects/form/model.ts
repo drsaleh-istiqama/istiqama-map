@@ -7,6 +7,7 @@
  * that moment, so a pull that arrived meanwhile is never reverted (see merge.ts).
  */
 import { newRow, tableDef, type ProjectBundle, type Row, type TableName } from '../../db';
+import type { PersonPickerDraft } from '../../people/pickerDraft';
 
 /** Bumped when the stored draft shape changes incompatibly (older drafts are then ignored). */
 export const DRAFT_VERSION = 1;
@@ -57,6 +58,19 @@ export interface FormExtras {
   manualArea: boolean;
   /** Open maintenance dialog (absent in drafts stored before it existed = none). */
   pendingMaintenance?: PendingMaintenance | null;
+  /**
+   * What is typed in the person picker of a staff row and not chosen yet (search text, or a
+   * half-filled "new person" form), by staff row id — `<PersonPicker draft onDraftChange>`
+   * (src/people/pickerDraft.ts). Autosaved with the rest of the draft, so Back, a reload or a
+   * phone call never lose it (brief §7.4). Absent in older drafts = nothing typed.
+   */
+  pickerDrafts?: Record<string, PersonPickerDraft>;
+}
+
+/** True when a person picker of the form holds typed input worth keeping. */
+export function pickerDraftsPending(extras: Pick<FormExtras, 'pickerDrafts'>): boolean {
+  const all = extras.pickerDrafts;
+  return !!all && typeof all === 'object' && Object.values(all).some((d) => !!d);
 }
 
 export interface FormDraft {

@@ -12,6 +12,7 @@ import {
   isFormDraft,
   parseDraftKey,
   pendingMaintenanceChanged,
+  pickerDraftsPending,
   type FormDraft,
 } from './model';
 import { discardStagedPhotos } from './peers';
@@ -43,12 +44,16 @@ export interface AutosaveOptions {
   onError?: (error: unknown) => void;
 }
 
-/** True when the draft holds something worth keeping (also text typed in an open dialog). */
+/**
+ * True when the draft holds something worth keeping (also text typed in an open dialog, or
+ * in a person picker before a person was chosen).
+ */
 export function draftWorthKeeping(d: FormDraft): boolean {
   return (
     hasChanges(d.original, d.working) ||
     d.extras.newLocality !== null ||
-    pendingMaintenanceChanged(d.extras.pendingMaintenance)
+    pendingMaintenanceChanged(d.extras.pendingMaintenance) ||
+    pickerDraftsPending(d.extras)
   );
 }
 

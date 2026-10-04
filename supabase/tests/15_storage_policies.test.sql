@@ -113,8 +113,8 @@ select is_empty(
 select tests.login_as(tests.id('u_viewer_tz'), 'aal1');
 select is(
   (select count(*)::int from storage.objects where bucket_id = 'photos'
-     and private.photo_object_project(name) = any (tests.fixture_projects())), 6,
-  'TZ viewer: may view the photos of the country');
+     and private.photo_object_project(name) = any (tests.fixture_projects())), 4,
+  'TZ viewer: may view the photos of the country''s approved projects (not those of the draft p_pemba_2)');
 
 select tests.login_as(tests.id('u_mgr_tz'), 'aal1');
 select is_empty($$ select 1 from storage.objects where bucket_id = 'photos' $$, 'manager at AAL1: no photo object');

@@ -4,7 +4,7 @@
  * Structurally compatible with `DbPort` of `src/sync/ports.ts` (checked in
  * `syncPort.test.ts`); `src/db` itself does not import anything from `src/sync`.
  */
-import { liveQuery } from 'dexie';
+import Dexie, { type ObservabilitySet } from 'dexie';
 import {
   ackOp,
   markInflight,
@@ -48,33 +48,39 @@ const toSyncOp = (op: OutboxOp): SyncOp => ({
   attempts: op.attempts,
 });
 
+/** Stores whose changes `watchQueues` reports. */
+const WATCHED_STORES = ['outbox', 'failed_ops', 'meta'] as const;
+
 /**
  * Calls `listener` whenever the outbox, the rejected operations or `meta` change — in this
  * tab or another one. Returns the unsubscribe function.
+ *
+ * Reads nothing: it listens to Dexie's `storagemutated` event, which every committed write
+ * transaction fires with the parts it changed (`idb://<db>/<store>/<index>`), in this tab
+ * and — through Dexie's BroadcastChannel — in the others. A `liveQuery` over the stores used
+ * to re-read the whole outbox after every acknowledged operation: O(queue) per op, i.e.
+ * quadratic for a long offline queue.
  */
 export function watchQueues(listener: () => void): () => void {
-  let first = true;
-  const subscription = liveQuery(async () => {
-    // Values, not counts: Dexie re-runs key-only queries only when keys come and go.
-    const [outbox, failed, meta] = await Promise.all([
-      db.outbox.toArray(),
-      db.failed_ops.count(),
-      db.meta.toArray(),
-    ]);
-    return outbox.length + failed + meta.length;
-  }).subscribe({
-    next: () => {
-      if (first) {
-        first = false;
-        return;
+  const prefixes = WATCHED_STORES.map((store) => `idb://${db.name}/${store}/`);
+  let active = true;
+  const onMutated = (parts: ObservabilitySet): void => {
+    if (!active) return;
+    for (const part of Object.keys(parts)) {
+      if (!prefixes.some((prefix) => part.startsWith(prefix))) continue;
+      try {
+        listener();
+      } catch (error) {
+        console.error('db: queue watcher failed', error);
       }
-      listener();
-    },
-    error: () => {
-      /* the database was closed (wipe, version change): nothing to report */
-    },
-  });
-  return () => subscription.unsubscribe();
+      return;
+    }
+  };
+  Dexie.on.storagemutated.subscribe(onMutated);
+  return () => {
+    active = false;
+    Dexie.on.storagemutated.unsubscribe(onMutated);
+  };
 }
 
 export const syncPort = {

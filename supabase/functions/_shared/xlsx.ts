@@ -10,10 +10,15 @@
  * The unit tests read the result back with SheetJS and with `_shared/xlsx-read.ts`.
  *
  * Layout: one sheet; row 1 = bold header, frozen; right-to-left sheet view for Arabic;
- * text as inline strings (never formulas), numbers as numbers. Text cells get the same
- * formula-injection guard as the CSV export, so a file that is later saved as CSV stays safe.
+ * text as inline strings (never formulas), numbers as numbers.
+ *
+ * Formula injection: an inline string (`t="inlineStr"`) is never evaluated by a spreadsheet,
+ * so the text is written AS IS — prefixing an apostrophe (the CSV guard) would corrupt values
+ * such as E.164 phone numbers (`'+255…`). Text that looks like a formula additionally gets a
+ * cell style with `quotePrefix="1"`: Excel/LibreOffice keep it as text even when the cell is
+ * edited, and add the protective apostrophe themselves when the sheet is saved as CSV.
  */
-import { guardFormula } from './csv.ts';
+import { looksLikeFormula } from './csv.ts';
 import type { Cell } from './labels.ts';
 import { ZipEntryStream, ZipWriter } from './zip.ts';
 
@@ -21,6 +26,9 @@ import { ZipEntryStream, ZipWriter } from './zip.ts';
 export const XLSX_MAX_ROWS = 1_048_576;
 export const XLSX_MAX_COLUMNS = 16_384;
 export const XLSX_MAX_CELL_CHARS = 32_767;
+
+/** Index in `cellXfs` of the text style with `quotePrefix="1"`. */
+const STYLE_QUOTED = 2;
 
 export const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
@@ -134,13 +142,15 @@ export class XlsxWriter {
     if (typeof value === 'number') {
       return Number.isFinite(value) ? `<c r="${ref}"${s}><v>${value}</v></c>` : '';
     }
-    let text = guardFormula(typeof value === 'boolean' ? String(value) : value);
+    let text = typeof value === 'boolean' ? String(value) : value;
     if (text === '') return '';
     if (text.length > XLSX_MAX_CELL_CHARS) {
       text = text.slice(0, XLSX_MAX_CELL_CHARS - 1) + String.fromCharCode(0x2026);
       this.truncated++;
     }
-    return `<c r="${ref}"${s} t="inlineStr"><is><t xml:space="preserve">${xmlEscape(text)}</t></is></c>`;
+    // Data cells that look like formulas: text style with quotePrefix (see the file header).
+    const st = style === 0 && looksLikeFormula(text) ? ` s="${STYLE_QUOTED}"` : s;
+    return `<c r="${ref}"${st} t="inlineStr"><is><t xml:space="preserve">${xmlEscape(text)}</t></is></c>`;
   }
 
   private rowXml(cells: ReadonlyArray<Cell | boolean | undefined>, style: number): string {
@@ -251,9 +261,11 @@ export class XlsxWriter {
         '</fills>' +
         '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
         '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
-        '<cellXfs count="2">' +
+        '<cellXfs count="3">' +
         '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
         '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>' +
+        // STYLE_QUOTED: text format (@) + quotePrefix, for data text that looks like a formula
+        '<xf numFmtId="49" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" quotePrefix="1"/>' +
         '</cellXfs>' +
         '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
         '</styleSheet>',

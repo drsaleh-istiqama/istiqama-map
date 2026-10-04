@@ -8,6 +8,13 @@ All functions are `SECURITY DEFINER`, pin their `search_path`, are **not executa
 inactive profile, manager/HQ without MFA) gets empty results, not an error — except the two
 reference-geography functions, which raise `PT403`.
 
+**Unreviewed records** (interim owner rule ح, authz.md §4.2 ⁶): a project that is not
+`approved` counts only inside the caller's **people** scope, so a `viewer` gets approved
+projects only — in `project_duplicates`, `search` (projects, staff and donor hits),
+`projects_page` (rows and `total`) and `tile_projects` (pyramid groups carry `record_state`;
+points too). For callers whose people scope covers their read scope nothing is added to the
+query.
+
 | RPC | Volatility / verb | Rate limit | Typical latency¹ |
 |---|---|---|---|
 | `locate_point(p_lon, p_lat)` → jsonb | STABLE (GET or POST) | — | ~1 ms |
@@ -234,7 +241,8 @@ all; ask for `["clusters"]`/`["points"]` only when no heat map is shown). The ad
 not available on tiles: fit the map to the area instead.
 
 Scope: the caller's read scope is applied to every pyramid row and project
-(`country_id`/`branch_id`); filters can only narrow it. `PT422` for coordinates outside the zoom.
+(`country_id`/`branch_id`) — outside his people scope approved projects only (a viewer); filters
+can only narrow it. `PT422` for coordinates outside the zoom.
 
 Data freshness
 

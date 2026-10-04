@@ -1,0 +1,170 @@
+/* v2 → v3 migration: prompt, panel, dialog. Logical properties only; RTL first. */
+
+.mig-prompt {
+  position: fixed;
+  z-index: 40;
+  inset-inline: var(--sp-3);
+  inset-block-end: calc(4.5rem + env(safe-area-inset-bottom, 0px));
+  max-inline-size: 30rem;
+  margin-inline-start: auto;
+  padding: var(--sp-4);
+  border: 1px solid var(--c-gold);
+  border-radius: var(--radius-lg);
+  background: var(--c-surface);
+  box-shadow: 0 8px 24px rgb(15 37 69 / 18%);
+}
+
+@media (min-width: 900px) {
+  .mig-prompt {
+    inset-block-end: var(--sp-4);
+    inset-inline-end: var(--sp-4);
+  }
+}
+
+.mig-prompt--compact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding-block: var(--sp-2);
+}
+
+.mig-prompt__title {
+  margin-block-end: var(--sp-2);
+  font-size: var(--fs-lg);
+}
+
+.mig-prompt p {
+  margin-block: 0 var(--sp-2);
+}
+
+.mig-local {
+  padding: var(--sp-3);
+  border: 1px solid var(--c-gold);
+  border-radius: var(--radius);
+  background: var(--c-gold-soft);
+}
+
+.mig-local p {
+  margin-block: 0 var(--sp-2);
+}
+
+.mig-runs h3 {
+  margin-block: 0 var(--sp-2);
+  font-size: var(--fs-md);
+}
+
+.mig-runs ul {
+  margin: 0 0 var(--sp-2);
+  padding-inline-start: var(--sp-5);
+  font-size: var(--fs-sm);
+}
+
+.mig-small {
+  font-size: var(--fs-sm);
+}
+
+.mig-center {
+  text-align: center;
+}
+
+.mig-lead {
+  font-weight: 700;
+}
+
+.mig-note {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius);
+  background: var(--c-info-soft);
+}
+
+.mig-counts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: var(--sp-2);
+  margin: 0;
+}
+
+.mig-counts__item {
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--c-line);
+  border-radius: var(--radius);
+  background: var(--c-surface-2);
+}
+
+.mig-counts__item dt {
+  color: var(--c-muted);
+  font-size: var(--fs-sm);
+}
+
+.mig-counts__item dd {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 700;
+}
+
+.mig-rules {
+  margin: 0;
+  padding-inline-start: var(--sp-5);
+}
+
+.mig-rules li + li {
+  margin-block-start: var(--sp-1);
+}
+
+.mig-warnings summary {
+  cursor: pointer;
+  min-block-size: 44px;
+  display: flex;
+  align-items: center;
+  font-weight: 700;
+}
+
+.mig-warnings ul {
+  margin: var(--sp-1) 0;
+  padding-inline-start: var(--sp-5);
+  font-size: var(--fs-sm);
+}
+
+.mig-w {
+  color: var(--c-maintenance-ink);
+}
+
+.mig-w--info {
+  color: var(--c-muted);
+}
+
+.mig-push {
+  padding: var(--sp-3);
+  border-radius: var(--radius);
+  background: var(--c-info-soft);
+}
+
+.mig-push--ok {
+  background: var(--c-active-soft);
+}
+
+.mig-push p {
+  margin: 0;
+}
+
+.mig-push p + p {
+  margin-block-start: var(--sp-1);
+}
+
+.mig-failures {
+  padding: var(--sp-3);
+  border: 1px solid var(--c-danger);
+  border-radius: var(--radius);
+  background: var(--c-danger-soft);
+}
+
+.mig-failures p {
+  margin: 0;
+}
+
+.mig-failures ul {
+  margin: var(--sp-1) 0;
+  padding-inline-start: var(--sp-5);
+  font-size: var(--fs-sm);
+}

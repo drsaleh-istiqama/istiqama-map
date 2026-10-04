@@ -11,6 +11,9 @@
  *      mvt          project vector tiles: stale-while-revalidate, small and short-lived
  *      pmtiles      EXTENSION POINT for the map module (offline packs, Range requests)
  *      static-data  locale JSON and fonts outside the precache: cache first
+ *      glyphs       map glyph ranges (`map/fonts/…pbf`): cache first in the map module's own
+ *                   glyph bucket (one copy); the essential ranges are stored at install time,
+ *                   so labels show on a first map screen that happens offline
  *      asset        hashed build assets outside the precache: cache first
  *  - Only complete, successful responses are stored (no errors, no opaque responses).
  *  - `skipWaiting()` runs only when the page asks for it, i.e. after the user accepted the
@@ -29,9 +32,12 @@ import {
 import { RangeRequestsPlugin } from 'workbox-range-requests';
 import { NavigationRoute, registerRoute } from 'workbox-routing';
 import { CacheFirst, NetworkFirst, NetworkOnly, StaleWhileRevalidate } from 'workbox-strategies';
+import { ESSENTIAL_GLYPHS, glyphFileUrl } from './map/glyphs';
 import {
   CACHE_NAMES,
   classifyRequest,
+  GLYPH_CACHE_POLICY,
+  glyphWarmUrls,
   isLegacyCache,
   SW_MESSAGES,
   thumbnailCacheKey,
@@ -167,6 +173,61 @@ registerRoute(
     plugins: [neverStore, new RangeRequestsPlugin()],
   }),
 );
+
+// --- Map glyphs: cache first, in the map module's own bucket (one copy) -------------------------
+// src/map/glyphs.ts reads `istiqama-map-glyphs` directly (also offline, without a request) and
+// stores what it fetched there under the same URL; this route makes the worker use that bucket
+// too, so a range is never kept twice. Stored without the host's headers (no `Vary`), exactly
+// like the map module stores it, so both find each other's entries.
+async function asGlyphResponse(response: Response): Promise<Response | null> {
+  if (response.status !== 200 || response.type === 'opaque') return null;
+  return new Response(await response.clone().arrayBuffer(), {
+    status: 200,
+    headers: { 'content-type': 'application/x-protobuf' },
+  });
+}
+
+const glyphBody: WorkboxPlugin = {
+  cacheWillUpdate: async ({ response }) => asGlyphResponse(response),
+};
+
+registerRoute(
+  is('glyphs'),
+  new CacheFirst({
+    cacheName: CACHE_NAMES.glyphs,
+    plugins: [
+      okOnly,
+      glyphBody,
+      new ExpirationPlugin({ ...GLYPH_CACHE_POLICY, purgeOnQuotaError: true }),
+    ],
+  }),
+);
+
+/**
+ * The essential ranges (Latin, digits, Arabic and its presentation forms — `ESSENTIAL_GLYPHS`
+ * of the map module, ~1.2 MB) go into the glyph bucket while the worker installs: the first
+ * map screen may well happen offline, in the field. Best effort — a failure never blocks the
+ * installation; the map module fills the gaps on its next online visit.
+ */
+async function warmGlyphs(): Promise<void> {
+  const cache = await caches.open(CACHE_NAMES.glyphs);
+  const urls = glyphWarmUrls(self.registration.scope, ESSENTIAL_GLYPHS, glyphFileUrl);
+  await Promise.all(
+    urls.map(async (url) => {
+      try {
+        if (await cache.match(url)) return;
+        const body = await asGlyphResponse(await fetch(url));
+        if (body) await cache.put(url, body);
+      } catch {
+        // offline, or the file is not deployed: the map module fetches it later
+      }
+    }),
+  );
+}
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(warmGlyphs().catch(() => undefined));
+});
 
 // --- Locale JSON and fonts that are not part of the precache ------------------------------------
 registerRoute(

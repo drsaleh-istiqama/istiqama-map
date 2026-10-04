@@ -15,8 +15,10 @@
  *   - The upload to `exports/{user_id}/{job_id}.{ext}` and `export_finish` (which creates the
  *     notification) use the service role, as the contract prescribes. The owner id comes from
  *     the job row the database returned for the caller's token.
- *   - The signed URL is created with the caller's own token: the storage policy only lets the
- *     owner of the folder sign it.
+ *   - The signed URL is created HERE, with the service role and a fixed short lifetime
+ *     (≤ 300 s), and only for a job the CALLER's token can still read: own job (RLS), not
+ *     soft-deleted, state `done`, file inside the owner's folder. Clients never sign export
+ *     files themselves (a self-signed URL could carry any expiry and outlive the job).
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { requireUser } from '../_shared/auth.ts';
@@ -63,7 +65,7 @@ const PAGE_SIZE = intEnv('EXPORT_PAGE_SIZE', 1000, 1, 2000);
  * limit the job is delivered as CSV instead (see `fallback` in the status response).
  */
 const XLSX_MAX_ROWS = intEnv('EXPORT_XLSX_MAX_ROWS', 200_000, 1, 1_048_575);
-const SIGNED_URL_SECONDS = intEnv('EXPORT_SIGNED_URL_SECONDS', 300, 30, 3600);
+const SIGNED_URL_SECONDS = intEnv('EXPORT_SIGNED_URL_SECONDS', 300, 30, 300);
 const MAX_ATTEMPTS = intEnv('EXPORT_MAX_ATTEMPTS', 3, 1, 10);
 /** A `running` job whose row has not been touched for this long is considered abandoned. */
 const STALE_MS = intEnv('EXPORT_STALE_SECONDS', 120, 10) * 1000;
@@ -118,8 +120,11 @@ function extensionOf(path: string | null): string | null {
   return m ? m[1]!.toLowerCase() : null;
 }
 
-/** The job plus what the client needs to act on it. */
-async function describe(user: SupabaseClient, job: Job): Promise<Record<string, unknown>> {
+/**
+ * The job plus what the client needs to act on it. `job` must come from `loadJob` /
+ * `export_request` with the caller's token (that is the authorization for signing).
+ */
+async function describe(job: Job): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = { job };
   const delivered = extensionOf(job.storage_path);
   if (delivered && delivered !== job.format) {
@@ -129,8 +134,13 @@ async function describe(user: SupabaseClient, job: Job): Promise<Record<string, 
       : { from: job.format, to: delivered, reason: 'row_limit', limit: XLSX_MAX_ROWS };
   }
   if (job.state === 'done' && job.storage_path) {
-    const { data, error } = await user.storage
-      .from(BUCKET)
+    if (!job.storage_path.startsWith(`${job.user_id}/`)) {
+      out.download = null;
+      out.download_error = 'storage path outside the owner folder';
+      return out;
+    }
+    const { data, error } = await serviceClient()
+      .storage.from(BUCKET)
       .createSignedUrl(job.storage_path, SIGNED_URL_SECONDS, { download: job.file_name ?? true });
     if (error || !data) {
       out.download = null;
@@ -333,7 +343,7 @@ export const handler = createHandler('export', ['GET', 'POST'], async (req) => {
     const params = new URL(req.url).searchParams;
     const id = params.get('job') ?? params.get('job_id');
     if (!isUuid(id)) throw errors.validation('invalid_job_id', 'Pass ?job=<export job id>.');
-    return json(await describe(user, await loadJob(user, id)));
+    return json(await describe(await loadJob(user, id)));
   }
 
   enforceRateLimit('export', caller.userId, 30);
@@ -361,7 +371,7 @@ export const handler = createHandler('export', ['GET', 'POST'], async (req) => {
     );
   }
 
-  if (job.state === 'done') return json(await describe(user, job), 200);
+  if (job.state === 'done') return json(await describe(job), 200);
   if (job.state === 'failed' || job.state === 'cancelled' || job.state === 'expired')
     throw errors.conflict(
       'export_not_active',

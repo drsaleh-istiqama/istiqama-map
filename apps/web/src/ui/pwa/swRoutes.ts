@@ -3,6 +3,7 @@
  * decision "what may be cached, and how" is unit-tested. `src/sw.ts` wires each kind to a
  * Workbox strategy.
  */
+import { GLYPH_CACHE } from '../../map/glyphs';
 
 export type RequestKind =
   /** Page navigation → network first, offline fallback to the precached shell. */
@@ -19,6 +20,11 @@ export type RequestKind =
   | 'pmtiles'
   /** Locale JSON and font files that are not in the precache → cache first. */
   | 'static-data'
+  /**
+   * Self-hosted map glyphs (`<base>map/fonts/<font>/<range>.pbf`) → cache first in the map
+   * module's own glyph bucket (one copy, shared with `src/map/glyphs.ts`).
+   */
+  | 'glyphs'
   /** Hashed build assets that are not in the precache → cache first. */
   | 'asset'
   /** Everything else → not handled by the service worker (plain network). */
@@ -41,6 +47,8 @@ export interface RouteEnv {
 }
 
 const THUMBNAIL = /_thumb\.[a-z0-9]+$/i;
+/** `…/map/fonts/<font stack>/<start>-<end>.pbf` (any base path in front). */
+const GLYPH_FILE = /\/map\/fonts\/[^/]+\/\d{1,5}-\d{1,5}\.pbf$/;
 const MVT_PATHS = ['/rest/v1/rpc/tile_projects', '/functions/v1/tiles'];
 const API_PREFIXES = ['/rest/v1/', '/auth/v1/', '/functions/v1/', '/realtime/v1/', '/graphql/v1'];
 
@@ -95,6 +103,11 @@ export function isThumbnail(url: URL, env: RouteEnv): boolean {
   );
 }
 
+/** A glyph range shipped with the app (same origin; MapLibre labels cannot be drawn without it). */
+export function isGlyphFile(url: URL, env: RouteEnv): boolean {
+  return url.origin === env.appOrigin && GLYPH_FILE.test(url.pathname);
+}
+
 export function classifyRequest(request: RequestInfoLike, env: RouteEnv): RequestKind {
   let url: URL;
   try {
@@ -106,6 +119,9 @@ export function classifyRequest(request: RequestInfoLike, env: RouteEnv): Reques
   if ((request.method ?? 'GET').toUpperCase() !== 'GET')
     return isSupabaseRequest(url, env) ? 'api' : 'other';
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return 'other';
+  // The app's own glyph files, before the API / tiles rules (which may share the origin or a
+  // path prefix with the app in a self-hosted deployment).
+  if (isGlyphFile(url, env) && request.mode !== 'navigate') return 'glyphs';
 
   if (isMvtTile(url, env)) return 'mvt';
   if (isApiCall(url, env)) return 'api';
@@ -149,7 +165,32 @@ export const CACHE_NAMES = {
   assets: 'istiqama-assets',
   /** Full PMTiles files stored by the map module (offline packs); served with Range support. */
   mapPacks: 'istiqama-map-packs',
+  /**
+   * Map glyph ranges. The SAME bucket the map module's glyph protocol reads first
+   * (`GLYPH_CACHE` of src/map/glyphs.ts), under the same URLs: what the service worker stores
+   * there is found by the map offline, and what the map stores is served by the worker —
+   * never two copies.
+   */
+  glyphs: GLYPH_CACHE,
 } as const;
+
+/** How long glyph ranges stay cached, and how many (39 files are shipped, ~3 MB in all). */
+export const GLYPH_CACHE_POLICY = { maxEntries: 64, maxAgeSeconds: 365 * 24 * 60 * 60 } as const;
+
+/**
+ * URLs the service worker stores in the glyph bucket when it installs, so that a device whose
+ * first map screen happens offline still draws labels (place names, cluster counts). `ranges`
+ * are the map module's essential ranges (`ESSENTIAL_GLYPHS`) and `fileUrl` its URL builder,
+ * so the keys are exactly the ones the map module looks up.
+ */
+export function glyphWarmUrls(
+  scope: string,
+  ranges: ReadonlyArray<readonly [string, string]>,
+  fileUrl: (base: string, font: string, range: string) => string,
+): string[] {
+  const base = scope.endsWith('/') ? scope : `${scope}/`;
+  return [...new Set(ranges.map(([font, range]) => fileUrl(base, font, range)))];
+}
 
 /** Caches holding per-user content: emptied on sign-out (`purgeUserCaches()` in `register.ts`). */
 export const USER_CACHES: readonly string[] = [CACHE_NAMES.thumbnails, CACHE_NAMES.tiles];

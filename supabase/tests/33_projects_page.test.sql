@@ -91,6 +91,8 @@ from public.projects p where p.branch_id = tests.id('br_pemba') and p.deleted_at
 select array_agg(p.id order by p.updated_at desc, p.id desc)::text as exp_updated
 from public.projects p where p.branch_id = tests.id('br_pemba') and p.deleted_at is null \gset
 select count(*)::int as all_projects from public.projects p where p.deleted_at is null \gset
+select count(*)::int as approved_projects from public.projects p
+where p.deleted_at is null and p.record_state = 'approved' \gset
 
 -- ----------------------------------------------------------------------------
 -- Keyset paging: every row exactly once, in order
@@ -209,8 +211,8 @@ select is(tests_page.walk(jsonb_build_object('country_id', tests.id('tz')), 3), 
 select tests.login_as(tests.id('u_viewer_global'), 'aal1');
 select is(
   (public.projects_page('{}'::jsonb, null, 1) ->> 'total')::int,
-  :all_projects,
-  'a global viewer sees every live project');
+  :approved_projects,
+  'a global viewer sees every live approved project (owner decision ح: no draft / submitted / returned)');
 
 -- ----------------------------------------------------------------------------
 -- Validation

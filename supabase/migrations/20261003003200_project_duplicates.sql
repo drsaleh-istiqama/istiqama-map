@@ -44,6 +44,11 @@ declare
   v_all boolean := private.read_all();
   v_countries uuid[] := private.read_countries();
   v_branches uuid[] := private.read_branches();
+  -- unreviewed records (migration 0013): outside the people scope approved only
+  v_p_all boolean := private.people_all();
+  v_p_countries uuid[] := private.people_countries();
+  v_p_branches uuid[] := private.people_branches();
+  v_rev_all boolean;
   v_name text := nullif(btrim(private.norm(coalesce(p_name, ''))), '');
   v_pt geometry(Point, 4326);
   v_box geometry;
@@ -65,6 +70,8 @@ begin
   if not v_all and cardinality(v_countries) = 0 and cardinality(v_branches) = 0 then
     return '[]'::jsonb;
   end if;
+  v_rev_all := v_p_all
+    or (not v_all and v_countries <@ v_p_countries and v_branches <@ v_p_branches);
 
   if p_lon is not null then
     v_pt := st_setsrid(st_makepoint(p_lon, p_lat), 4326);
@@ -98,6 +105,8 @@ begin
       and (p.type = p_type or p.type = 'combined' or p_type = 'combined')
       and (p_exclude_id is null or p.id <> p_exclude_id)
       and (v_all or p.country_id = any (v_countries) or p.branch_id = any (v_branches))
+      and (v_rev_all or p.record_state = 'approved'
+           or p.country_id = any (v_p_countries) or p.branch_id = any (v_p_branches))
       and st_dwithin(p.geom::geography, v_pt::geography, c_radius_m)
   ),
   named as (
@@ -114,6 +123,8 @@ begin
              or (v_area3 is not null and p.admin_area_id = v_area3))
         and (p_exclude_id is null or p.id <> p_exclude_id)
         and (v_all or p.country_id = any (v_countries) or p.branch_id = any (v_branches))
+        and (v_rev_all or p.record_state = 'approved'
+             or p.country_id = any (v_p_countries) or p.branch_id = any (v_p_branches))
     ) s
     where s.sim >= c_min_similarity
   ),

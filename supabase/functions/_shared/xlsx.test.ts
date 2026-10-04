@@ -102,18 +102,35 @@ describe('XlsxWriter', () => {
     expect(ltr).toMatch(/<c r="A1" s="1" t="inlineStr">/);
   });
 
-  it('applies the formula-injection guard to text cells, never writes a formula', async () => {
+  it('never writes a formula; formula-looking text stays verbatim with a quotePrefix style', async () => {
     const bytes = await buildXlsx({ sheetName: 'x', rtl: false, columns: COLUMNS }, [
       ['=1+1', '+255700000001', -7, '@SUM(A1:A9)'],
       ['-خطر', '\t=cmd', 3, '=HYPERLINK("http://evil","x")'],
+      ['مسجد', 'plain', 1, 'a=b'],
     ]);
     const xml = await sheetXml(bytes);
     expect(xml).not.toContain('<f>');
+    // inline strings are never evaluated: no apostrophe is added to the value (phones stay E.164)
     const rows = XLSX.utils.sheet_to_json(XLSX.read(bytes, { type: 'array' }).Sheets.x!, {
       header: 1,
     });
-    expect(rows[1]).toEqual([`'=1+1`, `'+255700000001`, -7, `'@SUM(A1:A9)`]);
-    expect(rows[2]).toEqual([`'-خطر`, `'\t=cmd`, 3, `'=HYPERLINK("http://evil","x")`]);
+    expect(rows[1]).toEqual(['=1+1', '+255700000001', -7, '@SUM(A1:A9)']);
+    expect(rows[2]).toEqual(['-خطر', '\t=cmd', 3, '=HYPERLINK("http://evil","x")']);
+    expect(rows[3]).toEqual(['مسجد', 'plain', 1, 'a=b']);
+    const mine = await readXlsx(bytes, { maxRows: 10 });
+    expect(mine.rows[1]).toEqual(['=1+1', '+255700000001', -7, '@SUM(A1:A9)']);
+    // formula-looking cells carry the text style with quotePrefix="1"; ordinary text does not
+    expect(xml).toMatch(/<c r="A2" s="2" t="inlineStr">/);
+    expect(xml).toMatch(/<c r="B2" s="2" t="inlineStr">/);
+    expect(xml).toMatch(/<c r="B3" s="2" t="inlineStr">/);
+    expect(xml).toMatch(/<c r="A4" t="inlineStr">/);
+    expect(xml).toMatch(/<c r="D4" t="inlineStr">/);
+    const entry = readZipDirectory(bytes).find((e) => e.name === 'xl/styles.xml')!;
+    const styles = new TextDecoder().decode(await readZipEntry(bytes, entry, 1_000_000));
+    const xfs = /<cellXfs count="(\d+)">(.*?)<\/cellXfs>/.exec(styles)!;
+    const list = xfs[2]!.match(/<xf [^>]*\/>/g)!;
+    expect(Number(xfs[1])).toBe(list.length);
+    expect(list[2]).toContain('quotePrefix="1"');
   });
 
   it('keeps markup, quotes and line breaks of cell text intact', async () => {

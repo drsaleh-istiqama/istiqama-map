@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { ESSENTIAL_GLYPHS, GLYPH_CACHE, glyphFileUrl } from '../../map/glyphs';
 import {
   CACHE_NAMES,
   classifyRequest,
+  GLYPH_CACHE_POLICY,
+  glyphWarmUrls,
   isApiCall,
   isCacheableStatus,
   isLegacyCache,
@@ -97,6 +100,26 @@ describe('classifyRequest', () => {
     expect(kind(`${APP}/some/data.json`)).toBe('other');
   });
 
+  it('map glyph ranges of the app → glyphs (cache first in the map module bucket)', () => {
+    expect(kind(`${APP}/map/fonts/Noto%20Sans%20Regular/0-255.pbf`)).toBe('glyphs');
+    expect(kind(`${APP}/map/fonts/Noto%20Sans%20Medium/65024-65279.pbf`)).toBe('glyphs');
+    // under a base path
+    expect(kind(`${APP}/app/map/fonts/Noto%20Sans%20Italic/256-511.pbf`)).toBe('glyphs');
+    // not glyph files
+    expect(kind(`${APP}/map/fonts/OFL.txt`)).toBe('other');
+    expect(kind(`${APP}/map/fonts/Noto%20Sans%20Regular/0-255.pbf.bak`)).toBe('other');
+    expect(kind(`${APP}/map/sprites/light.json`)).toBe('other');
+    expect(kind('https://example.com/map/fonts/Noto%20Sans%20Regular/0-255.pbf')).toBe('other');
+    expect(kind(`${APP}/map/fonts/Noto%20Sans%20Regular/0-255.pbf`, { method: 'POST' })).toBe(
+      'other',
+    );
+    // a self-hosted deployment where the API or the tiles share the app origin
+    const shared: RouteEnv = { appOrigin: APP, supabaseOrigin: APP, tilesUrl: `${APP}/map` };
+    expect(
+      classifyRequest({ url: `${APP}/map/fonts/Noto%20Sans%20Regular/0-255.pbf` }, shared),
+    ).toBe('glyphs');
+  });
+
   it('other origins and odd requests are left alone', () => {
     expect(kind('https://example.com/whatever.js')).toBe('other');
     expect(kind('https://example.com/', { mode: 'navigate' })).toBe('other');
@@ -181,6 +204,46 @@ describe('cache rules', () => {
   it('per-user caches are the thumbnails and the project tiles', () => {
     expect([...USER_CACHES].sort()).toEqual([CACHE_NAMES.thumbnails, CACHE_NAMES.tiles].sort());
     expect(new Set(Object.values(CACHE_NAMES)).size).toBe(Object.values(CACHE_NAMES).length);
+  });
+
+  it('glyphs live in the bucket the map module reads — one copy, never two', () => {
+    expect(CACHE_NAMES.glyphs).toBe(GLYPH_CACHE);
+    // not purged on sign-out (shipped fonts, no user content)
+    expect(USER_CACHES).not.toContain(CACHE_NAMES.glyphs);
+    expect(GLYPH_CACHE_POLICY.maxEntries).toBeGreaterThanOrEqual(39); // every shipped range fits
+    expect(GLYPH_CACHE_POLICY.maxAgeSeconds).toBeGreaterThan(0);
+  });
+
+  it('the ranges warmed at install are the map module essentials, under its own URLs', () => {
+    const urls = glyphWarmUrls(`${APP}/`, ESSENTIAL_GLYPHS, glyphFileUrl);
+    expect(urls).toHaveLength(ESSENTIAL_GLYPHS.length);
+    expect(urls[0]).toBe(glyphFileUrl(`${APP}/`, 'Noto Sans Regular', '0-255'));
+    expect(urls[0]).toBe(`${APP}/map/fonts/Noto%20Sans%20Regular/0-255.pbf`);
+    // the worker would route every one of them to the glyph bucket
+    for (const u of urls) expect(kind(u)).toBe('glyphs');
+    // Arabic letters and their presentation forms are there (names are Arabic first)
+    expect(urls).toContain(`${APP}/map/fonts/Noto%20Sans%20Regular/1536-1791.pbf`);
+    expect(urls).toContain(`${APP}/map/fonts/Noto%20Sans%20Regular/65024-65279.pbf`);
+    // a scope without a trailing slash and duplicates are handled
+    expect(
+      glyphWarmUrls(
+        `${APP}/app`,
+        [
+          ['Noto Sans Regular', '0-255'],
+          ['Noto Sans Regular', '0-255'],
+        ],
+        glyphFileUrl,
+      ),
+    ).toEqual([`${APP}/app/map/fonts/Noto%20Sans%20Regular/0-255.pbf`]);
+  });
+
+  it('every warmed range is a file that ships with the app', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const fonts = path.resolve(__dirname, '..', '..', '..', 'public', 'map', 'fonts');
+    for (const [font, range] of ESSENTIAL_GLYPHS) {
+      expect(fs.existsSync(path.join(fonts, font, `${range}.pbf`)), `${font} ${range}`).toBe(true);
+    }
   });
 
   it('recognises the caches left behind by v2', () => {

@@ -30,7 +30,8 @@
 --
 -- Security: SECURITY DEFINER. The cluster pyramid is a materialized view (no RLS),
 -- therefore every row is filtered here by the caller's read scope; a caller
--- without any readable scope gets an empty tile.
+-- without any readable scope gets an empty tile. Projects that are not approved
+-- count only inside the caller's people scope (a viewer: approved only).
 -- =============================================================================
 
 do $$
@@ -79,6 +80,10 @@ declare
   v_all boolean;
   v_countries uuid[];
   v_branches uuid[];
+  v_p_all boolean;
+  v_p_countries uuid[];
+  v_p_branches uuid[];
+  v_rev_all boolean;
   v_f_countries uuid[] := private.jsonb_text_array(v_filters -> 'country_id')::uuid[];
   v_f_branches uuid[] := private.jsonb_text_array(v_filters -> 'branch_id')::uuid[];
   v_types text[] := private.jsonb_text_array(v_filters -> 'type');
@@ -104,6 +109,14 @@ begin
   if not v_all and cardinality(v_countries) = 0 and cardinality(v_branches) = 0 then
     return ''::bytea;
   end if;
+  -- Unreviewed records (migration 0013, owner decision ح): outside the people
+  -- scope approved projects only. The pyramid groups carry record_state, so
+  -- this is one more filter on the groups of the tile (no extra index probe).
+  v_p_all := private.people_all();
+  v_p_countries := private.people_countries();
+  v_p_branches := private.people_branches();
+  v_rev_all := v_p_all
+    or (not v_all and v_countries <@ v_p_countries and v_branches <@ v_p_branches);
 
   v_want_needs := v_layers is null or 'needs' = any (v_layers);
   v_env := st_tileenvelope(v_z, v_x, v_y);
@@ -141,6 +154,8 @@ begin
         and m.tx = v_x
         and m.ty = v_y
         and (v_all or m.country_id = any (v_countries) or m.branch_id = any (v_branches))
+        and (v_rev_all or m.record_state = 'approved'
+             or m.country_id = any (v_p_countries) or m.branch_id = any (v_p_branches))
         and (v_f_countries is null or m.country_id = any (v_f_countries))
         and (v_f_branches is null or m.branch_id = any (v_f_branches))
         and (v_types is null or m.type = any (v_types))
@@ -221,6 +236,8 @@ begin
       where p.deleted_at is null
         and p.geom && v_env_4326
         and (v_all or p.country_id = any (v_countries) or p.branch_id = any (v_branches))
+        and (v_rev_all or p.record_state = 'approved'
+             or p.country_id = any (v_p_countries) or p.branch_id = any (v_p_branches))
         and (v_f_countries is null or p.country_id = any (v_f_countries))
         and (v_f_branches is null or p.branch_id = any (v_f_branches))
         and (v_types is null or p.type = any (v_types))

@@ -6,7 +6,7 @@
 begin;
 set local search_path = public, extensions, tests;
 
-select plan(79);
+select plan(83);
 
 select tests.fixture();
 
@@ -197,6 +197,37 @@ select tests.login_as(:'new_user', 'aal1');
 select is(
   row(private.can_review(tests.id('tz'), tests.id('br_tanga')), private.can_review(tests.id('tz'), tests.id('br_pemba')))::text,
   row(true, false)::text, 'the new supervisor can review the own branch only');
+
+-- ---------------------------------------------------------------------------
+-- Last-hq_admin guard is serialised (write skew): every path that can take
+-- away an hq_admin holds one transaction-scoped advisory lock, so two
+-- administrators removing / deactivating each other at the same moment run
+-- one after the other and the second one sees the first one's result.
+-- (The calls run inside savepoints and are rolled back: pgTAP results are
+-- recorded only after the rollback, from psql variables.)
+-- ---------------------------------------------------------------------------
+select tests.login_as(tests.id('u_hq'), 'aal2');
+select (hashtextextended('istiqama:last_hq_admin', 0) >> 32)::int::oid as lk_class,
+       (hashtextextended('istiqama:last_hq_admin', 0) & 4294967295)::oid as lk_obj \gset
+\set lk_held 'exists (select 1 from pg_locks l where l.locktype = ''advisory'' and l.pid = pg_backend_pid() and l.granted and l.objsubid = 1 and l.classid = ' :lk_class ' and l.objid = ' :lk_obj ')'
+
+savepoint t44_lock;
+select public.admin_set_user_active(tests.id('u_col_tanga'), true) ->> 'user_id' as lk_x \gset
+select :lk_held as lk_activate \gset
+select public.admin_set_user_active(tests.id('u_col_tanga'), false) ->> 'user_id' as lk_x \gset
+select :lk_held as lk_deactivate \gset
+rollback to savepoint t44_lock;
+select :lk_held as lk_released \gset
+
+savepoint t44_lock;
+select public.admin_remove_role((:'g2'::jsonb ->> 'id')::uuid) ->> 'id' as lk_x \gset
+select :lk_held as lk_remove \gset
+rollback to savepoint t44_lock;
+
+select is(:'lk_activate'::boolean, false, 'activating a user does not take the hq_admin guard lock');
+select is(:'lk_deactivate'::boolean, true, 'deactivating a user holds the hq_admin guard lock until commit');
+select is(:'lk_remove'::boolean, true, 'removing a role grant holds the hq_admin guard lock until commit');
+select is(:'lk_released'::boolean, false, '(the lock is transaction-scoped: gone after the rollback)');
 
 -- ---------------------------------------------------------------------------
 -- admin_remove_role

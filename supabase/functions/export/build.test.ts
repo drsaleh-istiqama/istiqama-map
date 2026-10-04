@@ -233,11 +233,13 @@ describe('XLSX export', () => {
       'يعمل',
       101,
       'لا',
-      `'=HYPERLINK("http://evil","x")`,
+      // XLSX: verbatim text (inline strings are never evaluated) + quotePrefix style
+      '=HYPERLINK("http://evil","x")',
     ]);
     expect(rows[3]).toEqual(['TZ-PN-000003', 'مسجد', 'يعمل', 103, 'نعم']);
     const entry = readZipDirectory(bytes).find((e) => e.name === 'xl/worksheets/sheet1.xml')!;
     const xml = new TextDecoder().decode(await readZipEntry(bytes, entry, 10_000_000));
+    expect(xml).toMatch(/<c r="F2" s="2" t="inlineStr"><is><t xml:space="preserve">=HYPERLINK/);
     expect(xml).toContain('rightToLeft="1"');
     expect(xml).toContain('state="frozen"');
     expect(xml).not.toContain('<f>');

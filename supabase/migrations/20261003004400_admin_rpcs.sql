@@ -334,6 +334,46 @@ comment on function public.admin_set_role(uuid, text, text, uuid) is
   'Grants a role with a validated scope to a user (hq_admin only). Idempotent.';
 
 -- -----------------------------------------------------------------------------
+-- private.lock_hq_admins — serialises every "may this remove an hq_admin?" check.
+--
+-- The last-hq_admin guard reads OTHER rows than the one it changes (write
+-- skew): two administrators removing / deactivating each other at the same
+-- moment would each still see the other one as live and both succeed, leaving
+-- nobody able to administer the system. Every path that can take away an
+-- effective hq_admin therefore calls this first, BEFORE locking its own target
+-- row (one lock order everywhere: advisory lock, then rows):
+--   1. a transaction-scoped advisory lock: the second caller waits until the
+--      first one has committed or rolled back; under READ COMMITTED its next
+--      statement (the guard) takes a fresh snapshot and sees the result;
+--   2. FOR UPDATE on every live global hq_admin grant and its profile: the
+--      same rows a concurrent change would touch, so a caller running at
+--      REPEATABLE READ / SERIALIZABLE gets a serialization failure (40001)
+--      instead of a stale "another administrator still exists".
+-- -----------------------------------------------------------------------------
+create or replace function private.lock_hq_admins()
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, private, pg_temp
+as $$
+begin
+  perform pg_advisory_xact_lock(hashtextextended('istiqama:last_hq_admin', 0));
+
+  perform 1
+  from public.user_roles ur
+  join public.profiles p on p.id = ur.user_id
+  where ur.role = 'hq_admin'
+    and ur.scope_type = 'global'
+    and ur.deleted_at is null
+  for update of ur, p;
+end;
+$$;
+
+comment on function private.lock_hq_admins() is
+  'Serialises the last-hq_admin guard (advisory xact lock + FOR UPDATE on the live hq_admin grants and profiles). Call before locking the target row.';
+
+-- -----------------------------------------------------------------------------
 -- public.admin_remove_role — soft delete; the last hq_admin cannot be removed.
 -- -----------------------------------------------------------------------------
 create or replace function public.admin_remove_role(p_role_id uuid)
@@ -354,6 +394,13 @@ begin
     raise exception 'invalid_argument' using errcode = 'PT422',
       detail = 'The role grant id is required.';
   end if;
+
+  -- before the row lock (lock order); taken for every removal because the
+  -- grant's role is only known after reading it, and admin writes are rare
+  perform private.lock_hq_admins();
+  -- re-check with a fresh snapshot: a concurrent call we waited for may have
+  -- just taken away the caller's own hq_admin right
+  v_scope := private.admin_scope(false);
 
   select * into v_role from public.user_roles ur where ur.id = p_role_id for update;
   if v_role.id is null then
@@ -408,6 +455,14 @@ begin
   if p_user_id is null or p_active is null then
     raise exception 'invalid_argument' using errcode = 'PT422',
       detail = 'The user id and the active flag are required.';
+  end if;
+
+  -- a deactivation may take away an hq_admin: serialise the guard below
+  -- (before the row lock — same lock order as admin_remove_role)
+  if not p_active then
+    perform private.lock_hq_admins();
+    -- re-check: the caller may have just lost the right in the call we waited for
+    v_scope := private.admin_scope(false);
   end if;
 
   select * into v_profile
@@ -605,6 +660,7 @@ comment on function public.admin_restore_device(uuid, text) is
 -- -----------------------------------------------------------------------------
 revoke execute on function private.admin_scope(boolean) from public, anon, authenticated;
 revoke execute on function private.admin_user_in_countries(uuid, uuid[]) from public, anon, authenticated;
+revoke execute on function private.lock_hq_admins() from public, anon, authenticated;
 grant  execute on function private.admin_scope(boolean) to service_role;
 grant  execute on function private.admin_user_in_countries(uuid, uuid[]) to service_role;
 

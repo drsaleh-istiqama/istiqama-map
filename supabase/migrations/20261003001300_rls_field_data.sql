@@ -20,6 +20,15 @@
 -- Scope rule (Appendix A.3): global matches everything, a country scope matches
 -- country_id, a branch scope matches branch_id.
 --
+-- Unreviewed records (owner decision, interim — docs/OWNER_DECISIONS.md "أسئلة
+-- فرعية" ح): a project whose record_state is not 'approved' (draft, submitted,
+-- returned) and every row below it are visible only in the PEOPLE scope, i.e.
+-- to every role except viewer. A viewer serves donor relations ("public
+-- reports", brief §3) and sees approved projects only; a user with a viewer
+-- grant AND another role sees unreviewed records where the other role reaches.
+-- The same rule is applied by sync_pull, search, projects_page, tile_projects,
+-- the dashboard, the report_* functions and the export.
+--
 -- Shape of every scope predicate:
 --     (select private.x_all())
 --     or country_id = any ((select private.x_countries())::uuid[])
@@ -37,13 +46,24 @@ drop policy if exists projects_select on public.projects;
 create policy projects_select on public.projects
   for select to authenticated
   using (
-    (select private.read_all())
-    or country_id = any ((select private.read_countries())::uuid[])
-    or branch_id = any ((select private.read_branches())::uuid[])
+    (
+      (select private.read_all())
+      or country_id = any ((select private.read_countries())::uuid[])
+      or branch_id = any ((select private.read_branches())::uuid[])
+    )
+    -- unreviewed records: people scope only (never for a viewer)
+    and (
+      record_state = 'approved'
+      or (select private.people_all())
+      or country_id = any ((select private.people_countries())::uuid[])
+      or branch_id = any ((select private.people_branches())::uuid[])
+    )
   );
 
 -- -----------------------------------------------------------------------------
--- Children of a project that every reader of the project may see
+-- Children of a project that every reader of the project may see (a viewer:
+-- only children of approved projects). A global non-viewer reader skips the
+-- probe; everybody else probes the parent, whose own policy applies as well.
 -- -----------------------------------------------------------------------------
 do $$
 declare
@@ -57,12 +77,16 @@ begin
     execute format('drop policy if exists %I on public.%I', t || '_select', t);
     execute format(
       'create policy %1$I on public.%2$I for select to authenticated using ('
-      '  (select private.read_all())'
+      '  (select private.people_all())'
       '  or exists ('
       '    select 1 from public.projects p'
       '    where p.id = %2$I.project_id'
-      '      and (p.country_id = any ((select private.read_countries())::uuid[])'
-      '        or p.branch_id = any ((select private.read_branches())::uuid[]))))',
+      '      and ((select private.read_all())'
+      '        or p.country_id = any ((select private.read_countries())::uuid[])'
+      '        or p.branch_id = any ((select private.read_branches())::uuid[]))'
+      '      and (p.record_state = ''approved'''
+      '        or p.country_id = any ((select private.people_countries())::uuid[])'
+      '        or p.branch_id = any ((select private.people_branches())::uuid[]))))',
       t || '_select', t);
   end loop;
 end
@@ -127,9 +151,10 @@ create policy localities_select on public.localities
   );
 
 -- -----------------------------------------------------------------------------
--- donors: have no country/branch of their own. Visible to global readers, to
--- anybody who can read a project the donor is linked to, and to their creator
--- (a donor entered in the field before it is linked to a project).
+-- donors: have no country/branch of their own. Visible to global readers
+-- (a global viewer included), to anybody who can read a project the donor is
+-- linked to (for a viewer: an approved project), and to their creator (a donor
+-- entered in the field before it is linked to a project).
 -- -----------------------------------------------------------------------------
 drop policy if exists donors_select on public.donors;
 create policy donors_select on public.donors
@@ -144,6 +169,9 @@ create policy donors_select on public.donors
       where pd.donor_id = donors.id
         and (p.country_id = any ((select private.read_countries())::uuid[])
           or p.branch_id = any ((select private.read_branches())::uuid[]))
+        and (p.record_state = 'approved'
+          or p.country_id = any ((select private.people_countries())::uuid[])
+          or p.branch_id = any ((select private.people_branches())::uuid[]))
     )
   );
 

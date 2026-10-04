@@ -286,7 +286,8 @@ describe('export — POST { format, lang, filters }', () => {
       'قابلية التوسع',
     ]);
     expect(sheet.rows[1]).toEqual(['TZ-PN-000001', 'مسجد النور', 'مسجد', 'يعمل', 120, 'نعم']);
-    expect(sheet.rows[2]?.[1]).toBe(`'=HYPERLINK("x")`);
+    // verbatim text in an inline string (never evaluated), no apostrophe added to the value
+    expect(sheet.rows[2]?.[1]).toBe(`=HYPERLINK("x")`);
     expect(sheet.formulaCells).toBe(0);
   });
 
@@ -416,7 +417,7 @@ describe('export — POST { job_id } (job created by the client)', () => {
 });
 
 describe('export — GET ?job=<id>', () => {
-  it('a done job comes with a short-lived signed URL made with the CALLER token', async () => {
+  it('a done job comes with a short-lived signed URL, signed by the function after the CALLER read the job', async () => {
     const handler = await loadHandler();
     const path = `${userId}/job-done.csv`;
     const done = job({
@@ -427,9 +428,15 @@ describe('export — GET ?job=<id>', () => {
       row_count: 1,
     });
     api
-      .on('GET', '/rest/v1/export_jobs', jsonResponse([done]))
-      .on('POST', `/storage/v1/object/sign/exports/${path}`, (req) => {
+      .on('GET', '/rest/v1/export_jobs', (req) => {
+        // the job is read with the caller's token and soft-deleted jobs are excluded
         expect(req.bearer()).toBe(token);
+        expect(req.url.searchParams.get('deleted_at')).toBe('is.null');
+        return jsonResponse([done]);
+      })
+      .on('POST', `/storage/v1/object/sign/exports/${path}`, (req) => {
+        // fixed lifetime, service role: clients never sign export files themselves
+        expect(req.bearer()).toBe(SERVICE_KEY);
         expect(req.json()).toEqual({ expiresIn: 300 });
         return jsonResponse({ signedURL: `/object/sign/exports/${path}?token=signed-token` });
       });
@@ -450,7 +457,38 @@ describe('export — GET ?job=<id>', () => {
     });
     expect(String(body.download.url)).toContain('token=signed-token');
     expect(String(body.download.url)).toContain('download=istiqama-projects.csv');
-    expect(api.calls.some((c) => c.bearer() === SERVICE_KEY)).toBe(false);
+    expect(String(body.download.path)).toMatch(/^\/storage\/v1\/object\/sign\/exports\//);
+  });
+
+  it('never signs a deleted / foreign job, a path outside the owner folder, or a longer lifetime', async () => {
+    // EXPORT_SIGNED_URL_SECONDS cannot raise the lifetime above 300 s
+    const handler = await loadHandler({ EXPORT_SIGNED_URL_SECONDS: '315360000' });
+    // soft-deleted (or somebody else's) job: the caller's read returns nothing → 404, no signing
+    api.on('GET', '/rest/v1/export_jobs', jsonResponse([]));
+    const gone = await get(handler, `?job=${String(job().id)}`);
+    expect(gone.status).toBe(404);
+    expect(api.calls.some((c) => c.path.startsWith('/storage/'))).toBe(false);
+
+    // a path outside the owner's folder is never signed
+    const odd = job({ state: 'done', storage_path: `${nextUserId()}/x.csv`, file_name: 'x.csv' });
+    api.on('GET', '/rest/v1/export_jobs', jsonResponse([odd]));
+    const res = await get(handler, `?job=${String(odd.id)}`);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { download: unknown }).download).toBeNull();
+    expect(api.calls.some((c) => c.path.startsWith('/storage/'))).toBe(false);
+
+    // the lifetime stays capped
+    const path = `${userId}/capped.csv`;
+    const done = job({ state: 'done', storage_path: path, file_name: 'capped.csv' });
+    api
+      .on('GET', '/rest/v1/export_jobs', jsonResponse([done]))
+      .on('POST', `/storage/v1/object/sign/exports/${path}`, (req) => {
+        expect(req.json<{ expiresIn: number }>().expiresIn).toBeLessThanOrEqual(300);
+        return jsonResponse({ signedURL: `/object/sign/exports/${path}?token=t` });
+      });
+    const ok = await get(handler, `?job=${String(done.id)}`);
+    const body = (await ok.json()) as { download: { expires_in: number } };
+    expect(body.download.expires_in).toBeLessThanOrEqual(300);
   });
 
   it('a queued job has no download; a bad id is a 422', async () => {

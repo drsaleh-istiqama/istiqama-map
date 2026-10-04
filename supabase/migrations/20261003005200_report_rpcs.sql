@@ -23,13 +23,19 @@ revoke execute on function private.report_strip(jsonb) from public, anon, authen
 -- their own, so this is the only thing that keeps a donor known only in Tanzania away from a
 -- Kenyan user (brief §14.5). The caller passes its read triple (fetched once, authz.md §3 b);
 -- used by report_donor and by the import (donor look-up and link, migration 0055).
+-- Unreviewed records (migration 0013, owner decision ح): a link to a project that is not approved
+-- counts only inside the caller's people scope — p_rev_all (the caller has no viewer-only area,
+-- the default) or the people arrays.
 create or replace function private.donor_visible(
   p_donor_id uuid,
   p_created_by uuid,
   p_uid uuid,
   p_read_all boolean,
   p_read_countries uuid[],
-  p_read_branches uuid[]
+  p_read_branches uuid[],
+  p_rev_all boolean default true,
+  p_people_countries uuid[] default '{}'::uuid[],
+  p_people_branches uuid[] default '{}'::uuid[]
 )
 returns boolean
 language sql
@@ -43,10 +49,32 @@ as $$
            from public.project_donors pd
            join public.projects p on p.id = pd.project_id
            where pd.donor_id = p_donor_id
-             and (p.country_id = any (p_read_countries) or p.branch_id = any (p_read_branches)))
+             and (p.country_id = any (p_read_countries) or p.branch_id = any (p_read_branches))
+             and (coalesce(p_rev_all, true) or p.record_state = 'approved'
+                  or p.country_id = any (p_people_countries) or p.branch_id = any (p_people_branches)))
 $$;
 
-revoke execute on function private.donor_visible(uuid, uuid, uuid, boolean, uuid[], uuid[])
+revoke execute on function private.donor_visible(uuid, uuid, uuid, boolean, uuid[], uuid[], boolean, uuid[], uuid[])
+  from public, anon, authenticated;
+
+-- Does the caller read anything as a viewer only? false = his people scope covers his read
+-- scope (no viewer grant reaching further), so unreviewed projects need no extra filter.
+create or replace function private.reads_unreviewed_everywhere(
+  p_read_all boolean, p_read_countries uuid[], p_read_branches uuid[],
+  p_people_all boolean, p_people_countries uuid[], p_people_branches uuid[])
+returns boolean
+language sql
+immutable
+parallel safe
+set search_path = public, extensions, private, pg_temp
+as $$
+  select coalesce(p_people_all, false)
+      or (not coalesce(p_read_all, false)
+          and coalesce(p_read_countries, '{}'::uuid[]) <@ coalesce(p_people_countries, '{}'::uuid[])
+          and coalesce(p_read_branches, '{}'::uuid[]) <@ coalesce(p_people_branches, '{}'::uuid[]))
+$$;
+
+revoke execute on function private.reads_unreviewed_everywhere(boolean, uuid[], uuid[], boolean, uuid[], uuid[])
   from public, anon, authenticated;
 
 -- ---------------------------------------------------------------------------------------------
@@ -96,6 +124,10 @@ begin
   end if;
 
   v_people := private.can_see_people(v_p.country_id, v_p.branch_id);
+  -- an unreviewed record is not there for a viewer (migration 0013, owner decision ح)
+  if v_p.record_state is distinct from 'approved' and not v_people then
+    raise exception 'project not found' using errcode = 'PT404';
+  end if;
   v_restricted := private.can_see_restricted(v_p.country_id);
 
   select jsonb_build_object('id', c.id, 'iso2', c.iso2, 'name_ar', c.name_ar,
@@ -316,6 +348,9 @@ declare
   v_all boolean;
   v_countries uuid[];
   v_branches uuid[];
+  v_p_countries uuid[];
+  v_p_branches uuid[];
+  v_rev_all boolean;
   v_donor jsonb;
   v_creator uuid;
   v_summary jsonb;
@@ -332,6 +367,11 @@ begin
   if not v_all and cardinality(v_countries) = 0 and cardinality(v_branches) = 0 then
     raise exception 'no read access' using errcode = 'PT403';
   end if;
+  -- unreviewed records (migration 0013, owner decision ح): a viewer gets approved projects only
+  v_p_countries := private.people_countries();
+  v_p_branches := private.people_branches();
+  v_rev_all := private.reads_unreviewed_everywhere(
+    v_all, v_countries, v_branches, private.people_all(), v_p_countries, v_p_branches);
 
   select jsonb_build_object('id', d.id, 'name_ar', d.name_ar, 'name_latin', d.name_latin,
            'notes', d.notes),
@@ -341,7 +381,8 @@ begin
   -- Same answer for "does not exist" and "not visible to you" (never reveal existence): the
   -- donor must be one the caller can see (donors_select / sync_pull rule, brief §14.5).
   if v_donor is null
-     or not private.donor_visible(p_id, v_creator, auth.uid(), v_all, v_countries, v_branches) then
+     or not private.donor_visible(p_id, v_creator, auth.uid(), v_all, v_countries, v_branches,
+                                  v_rev_all, v_p_countries, v_p_branches) then
     raise exception 'donor not found' using errcode = 'PT404';
   end if;
 
@@ -367,7 +408,9 @@ begin
   ) x
   join public.projects p on p.id = x.project_id
   where p.deleted_at is null
-    and (v_all or p.country_id = any (v_countries) or p.branch_id = any (v_branches));
+    and (v_all or p.country_id = any (v_countries) or p.branch_id = any (v_branches))
+      and (v_rev_all or p.record_state = 'approved'
+           or p.country_id = any (v_p_countries) or p.branch_id = any (v_p_branches));
 
   -- Contributions per currency (never added across currencies)
   select coalesce(jsonb_agg(jsonb_build_object('currency', y.currency, 'amount', y.amount)
@@ -380,6 +423,8 @@ begin
     where pd.donor_id = p_id and pd.deleted_at is null and p.deleted_at is null
       and pd.amount is not null and pd.currency is not null
       and (v_all or p.country_id = any (v_countries) or p.branch_id = any (v_branches))
+      and (v_rev_all or p.record_state = 'approved'
+           or p.country_id = any (v_p_countries) or p.branch_id = any (v_p_branches))
     group by pd.currency
   ) y;
 
@@ -427,6 +472,8 @@ begin
     join public.projects p on p.id = x.project_id
     where p.deleted_at is null
       and (v_all or p.country_id = any (v_countries) or p.branch_id = any (v_branches))
+      and (v_rev_all or p.record_state = 'approved'
+           or p.country_id = any (v_p_countries) or p.branch_id = any (v_p_branches))
     order by x.sort_year nulls last, p.code nulls last, p.id
     limit c_max_projects
   ) z;
@@ -459,6 +506,7 @@ as $$
 declare
   v_nil constant uuid := private.nil_uuid();
   v_chk record;
+  v_ao boolean;
   v_result jsonb;
   v_branches jsonb;
 begin
@@ -476,10 +524,14 @@ begin
                                    'report_country.payroll:country:' || p_id::text);
   end if;
 
-  v_result := private.dashboard_data('country', p_id, v_chk.with_payroll, v_chk.with_names);
+  -- without people scope on the country the caller reads it as a viewer: approved projects only
+  -- (owner decision ح, migration 0013); every view carries the `approved` grouping key
+  v_ao := not v_chk.with_names;
+  v_result := private.dashboard_data('country', p_id, v_chk.with_payroll, v_chk.with_names, v_ao);
 
   with ids as (
-    select t.branch_id from private.mv_project_totals t where t.country_id = p_id
+    select t.branch_id from private.mv_project_totals t
+    where t.country_id = p_id and (t.approved or not v_ao)
     union
     select b.id from public.branches b where b.country_id = p_id and b.deleted_at is null
   ),
@@ -495,25 +547,38 @@ begin
            coalesce(sum(t.project_count) filter (where t.status = 'building'), 0) as building,
            coalesce(sum(t.project_count) filter (where t.status = 'inactive'), 0) as inactive,
            coalesce(sum(t.approved_count), 0) as approved
-    from private.mv_project_totals t where t.country_id = p_id group by t.branch_id
+    from private.mv_project_totals t
+    where t.country_id = p_id and (t.approved or not v_ao)
+    group by t.branch_id
   ),
   mt as (
     select m.branch_id, sum(m.open_count) as open_maintenance,
            coalesce(sum(m.open_count) filter (where m.priority = 'urgent'), 0) as urgent_maintenance
-    from private.mv_maintenance_open m where m.country_id = p_id group by m.branch_id
+    from private.mv_maintenance_open m
+    where m.country_id = p_id and (m.approved or not v_ao)
+    group by m.branch_id
   ),
   st as (
     select s.branch_id, sum(s.assignment_count) as staff
-    from private.mv_staff_roles s where s.country_id = p_id group by s.branch_id
+    from private.mv_staff_roles s
+    where s.country_id = p_id and (s.approved or not v_ao)
+    group by s.branch_id
   ),
+  -- mv_needs / mv_completeness hold one row per (branch, approved): summed per branch
   nd as (
-    select n.branch_id, n.quran_need, n.teacher_housing_gaps, n.imam_housing_gaps,
-           n.transport_needed, n.expandable_sites
-    from private.mv_needs n where n.country_id = p_id
+    select n.branch_id, sum(n.quran_need) as quran_need,
+           sum(n.teacher_housing_gaps) as teacher_housing_gaps, sum(n.imam_housing_gaps) as imam_housing_gaps,
+           sum(n.transport_needed) as transport_needed, sum(n.expandable_sites) as expandable_sites
+    from private.mv_needs n
+    where n.country_id = p_id and (n.approved or not v_ao)
+    group by n.branch_id
   ),
   cm as (
-    select c.branch_id, c.project_count, c.completeness_sum, c.incomplete_count
-    from private.mv_completeness c where c.country_id = p_id
+    select c.branch_id, sum(c.project_count) as project_count, sum(c.completeness_sum) as completeness_sum,
+           sum(c.incomplete_count) as incomplete_count
+    from private.mv_completeness c
+    where c.country_id = p_id and (c.approved or not v_ao)
+    group by c.branch_id
   ),
   pay as (
     select p.branch_id,
@@ -576,4 +641,4 @@ comment on function public.report_project(uuid) is
 comment on function public.report_donor(uuid) is
   'Donor report for a donor visible to the caller (donors_select rule, PT404 otherwise): donor, summary and up to 500 of its projects inside the caller''s read scope, with photo paths and status.';
 comment on function public.report_country(uuid) is
-  'Periodic country report: dashboard sections for the country plus a per-branch table.';
+  'Periodic country report: dashboard sections for the country plus a per-branch table. Callers without people scope on the country (viewers) get approved projects only.';

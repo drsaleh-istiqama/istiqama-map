@@ -291,24 +291,32 @@ select isnt(
 -- =============================================================================
 insert into res select 'view', pg_temp.pull_all(tests.id('u_viewer_tz'), 1000);
 
+-- approved projects only (owner decision ح, migration 0013): the draft
+-- p_pemba_2 and its children are not sent to a viewer
 select ok(
-  tests.ids('p_pemba_1', 'p_pemba_2', 'p_tanga_1') <@ pg_temp.t('view', 'projects')
-  and not (array[tests.id('p_ke_1')] && pg_temp.t('view', 'projects')),
-  'viewer: projects of his country');
+  tests.ids('p_pemba_1', 'p_tanga_1') <@ pg_temp.t('view', 'projects')
+  and not (tests.ids('p_ke_1', 'p_pemba_2') && pg_temp.t('view', 'projects')),
+  'viewer: approved projects of his country (no draft, no other country)');
 select ok(
   not (pg_temp.tables('view') && array['persons', 'project_staff', 'staff_compensation', 'community_sensitive',
                                        'sync_conflicts', 'person_merge_requests']),
   'viewer: no persons, no staff, no restricted data, no review tables');
 select ok(
   tests.ids('photo:p_pemba_1', 'photo:p_tanga_1') <@ pg_temp.t('view', 'project_photos')
-  and tests.ids('community:p_pemba_1', 'community:p_tanga_1') <@ pg_temp.t('view', 'community_profiles'),
-  'viewer: public children of the projects are sent');
+  and tests.ids('community:p_pemba_1', 'community:p_tanga_1') <@ pg_temp.t('view', 'community_profiles')
+  and not (pg_temp.t('view', 'project_photos') && tests.ids('photo:p_pemba_2'))
+  and not (pg_temp.t('view', 'project_maintenance') && tests.ids('maint:p_pemba_2'))
+  and not (pg_temp.t('view', 'community_profiles') && tests.ids('community:p_pemba_2'))
+  and not (pg_temp.t('view', 'project_donors') && tests.ids('pdonor:p_pemba_2')),
+  'viewer: public children of the approved projects are sent, none of the draft');
 
 insert into res select 'viewg', pg_temp.pull_all(tests.id('u_viewer_global'), 1000);
 select ok(
   tests.ids('p_pemba_1', 'p_tanga_1', 'p_ke_1') <@ pg_temp.t('viewg', 'projects')
+  and not (tests.ids('p_pemba_2') && pg_temp.t('viewg', 'projects'))
+  and not (tests.ids('photo:p_pemba_2') && pg_temp.t('viewg', 'project_photos'))
   and not (pg_temp.tables('viewg') && array['persons', 'project_staff', 'staff_compensation', 'community_sensitive']),
-  'global viewer: all countries, still no people and no restricted data');
+  'global viewer: approved projects of all countries, still no people and no restricted data');
 
 -- =============================================================================
 -- 5. HQ: everything
@@ -331,9 +339,9 @@ insert into res select 'tanga', pg_temp.pull_all(tests.id('u_col_tanga'), 1000);
 select is(pg_temp.t('col2', 'donors'), tests.ids('donor:p_pemba_1', 'donor:p_pemba_2'),
   'second Pemba collector: the donors of the branch projects, not the unlinked donor of a colleague');
 select ok(
-  tests.ids('donor:p_pemba_1', 'donor:p_pemba_2', 'donor:p_tanga_1') <@ pg_temp.t('view', 'donors')
-  and not (pg_temp.t('view', 'donors') && tests.ids('donor:p_ke_1', 'donor_unlinked')),
-  'country viewer: donors linked to projects of his country only');
+  tests.ids('donor:p_pemba_1', 'donor:p_tanga_1') <@ pg_temp.t('view', 'donors')
+  and not (pg_temp.t('view', 'donors') && tests.ids('donor:p_ke_1', 'donor:p_pemba_2', 'donor_unlinked')),
+  'country viewer: donors linked to approved projects of his country only');
 select ok(
   tests.ids('donor:p_pemba_1', 'donor:p_tanga_1', 'donor:p_ke_1', 'donor_unlinked') <@ pg_temp.t('viewg', 'donors')
   and tests.ids('donor:p_pemba_1', 'donor:p_tanga_1', 'donor:p_ke_1', 'donor_unlinked') <@ pg_temp.t('hq', 'donors'),

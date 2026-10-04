@@ -90,6 +90,13 @@ vi.mock('../map/PacksSection', async () => {
       h('section', { 'data-testid': 'settings-map-packs', 'data-mock': 'packs-section' }),
   };
 });
+// Same for the v2 import panel (src/migration has its own tests).
+vi.mock('../migration/V2ImportSection', async () => {
+  const { h } = await import('preact');
+  const V2ImportSection = () =>
+    h('section', { 'data-testid': 'settings-v2-import', 'data-mock': 'v2-import-section' });
+  return { V2ImportSection, default: V2ImportSection };
+});
 
 import * as auth from '../auth';
 import { locale, setLocale } from '../i18n';
@@ -214,12 +221,14 @@ describe('storage and Wi-Fi only', () => {
 });
 
 describe('sections owned by other teams', () => {
-  it('mounts the offline map packs manager and keeps the v2 import placeholder', () => {
+  it('mounts the offline map packs manager and the v2 import section of the migration module', () => {
     render(<SettingsPage />);
     expect(screen.getByTestId('settings-map-packs').getAttribute('data-mock')).toBe(
       'packs-section',
     );
-    expect(screen.getByTestId('settings-v2-import').textContent).toContain('previous version');
+    expect(screen.getByTestId('settings-v2-import').getAttribute('data-mock')).toBe(
+      'v2-import-section',
+    );
   });
 });
 

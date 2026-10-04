@@ -25,6 +25,8 @@ const ALLOWED_HEADERS = [
   'x-device-id',
   'x-supabase-api-version',
   'x-region',
+  // `import` with the raw file as the body names the file in this header (README, import).
+  'x-file-name',
   'if-none-match',
   'prefer',
   'cache-control',

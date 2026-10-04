@@ -165,6 +165,33 @@ describe('restore and the unfinished-entries list', () => {
     await a.stop();
   });
 
+  it('text typed in a person picker alone makes an edit draft worth keeping (and it is saved)', async () => {
+    const project = newRow('projects', { name_ar: 'x', type: 'mosque' } as Partial<
+      Row<'projects'>
+    >);
+    const staff = newRow('project_staff', { project_id: project.id, role: 'imam' } as Partial<
+      Row<'project_staff'>
+    >);
+    let d = editDraft({ project, maintenance: [], photos: [], donors: [], staff: [staff] }, 'u1');
+    d = { ...d, extras: { ...d.extras, pickerDrafts: {} } };
+    expect(draftWorthKeeping(d)).toBe(false); // picker opened, nothing typed
+    d = {
+      ...d,
+      extras: { ...d.extras, pickerDrafts: { [staff.id]: { mode: 'search', query: 'حمدان' } } },
+    };
+    expect(draftWorthKeeping(d)).toBe(true);
+    const store = memoryStore();
+    const a = createAutosave({ read: () => d, store, changeDelayMs: 10 });
+    a.changed();
+    await vi.advanceTimersByTimeAsync(10);
+    const saved = store.map.get(draftKey('edit', project.id))!.value as FormDraft;
+    expect(saved.extras.pickerDrafts?.[staff.id]).toEqual({ mode: 'search', query: 'حمدان' });
+    // A draft stored before the field existed is read as "nothing typed".
+    const { pickerDrafts: _none, ...older } = d.extras;
+    expect(draftWorthKeeping({ ...d, extras: older })).toBe(false);
+    await a.stop();
+  });
+
   it('discarding a draft frees the photos staged in it', async () => {
     const store = memoryStore();
     const d = typed(newDraft({ userId: 'u1' }), 'x');

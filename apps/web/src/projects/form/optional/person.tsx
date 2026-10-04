@@ -23,6 +23,7 @@ import { fieldId } from '../validate';
 import {
   loadPersonPicker,
   type NewPersonInput,
+  type PersonPickerDraft,
   type PersonPickerProps,
   type PersonPickerSelection,
 } from '../peers';
@@ -93,6 +94,21 @@ export function PersonField({ entry }: { entry: StaffEntry }) {
     api.clearError(key);
   };
 
+  // Typed in the picker but not chosen yet (search text, half-filled "new person" form): kept
+  // in the autosaved draft and handed back when the picker mounts again (Back, reload, a
+  // folded section reopened — brief §7.4).
+  const pickerDraft = draft.extras.pickerDrafts?.[entry.id] ?? null;
+  const onPickerDraft = (next: PersonPickerDraft | null): void => {
+    api.update((d) => {
+      const current = d.extras.pickerDrafts ?? {};
+      if (!next && !(entry.id in current)) return d; // nothing to forget: no autosave
+      const pickerDrafts = { ...current };
+      if (next) pickerDrafts[entry.id] = next;
+      else delete pickerDrafts[entry.id];
+      return { ...d, extras: { ...d.extras, pickerDrafts } };
+    });
+  };
+
   const newPersonLine = isNew && entry.person && (
     <p class="pf-picked" data-testid="form-staff-new-person">
       <span>{pickName(entry.person)}</span>
@@ -119,6 +135,8 @@ export function PersonField({ entry }: { entry: StaffEntry }) {
           adminAreaId={project.admin_area_id}
           role={entry.role ?? undefined}
           testId="form-staff-person"
+          draft={pickerDraft}
+          onDraftChange={onPickerDraft}
         />
         {error && (
           <p class="field__error" id={errorId} role="alert">

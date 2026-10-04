@@ -65,7 +65,10 @@ Refreshed together by `refresh_reports()`; every view has a unique index and is 
 
 Rules:
 - All non-deleted projects are counted whatever their `record_state`; the split by record state is
-  in `totals.by_record_state`.
+  in `totals.by_record_state`. Every view except `mv_payroll` also groups by `approved`
+  (`record_state = 'approved'`, boolean) so that a viewer's dashboard / country report can sum the
+  approved groups only (§2). `mv_payroll` needs no such key: restricted readers always have
+  people scope.
 - Payroll = the latest `staff_compensation` row (`effective_from <= today`) of every current
   assignment. Amounts of different currencies are **never added**; the USD figure uses the latest
   `fx_rates` row per currency (`USD` itself = 1). A currency without a rate has
@@ -99,6 +102,12 @@ Access: `global` needs a global role; `country` a global role or a role on that 
   `restricted_access_log` row (`table_name = staff_compensation`, empty id list,
   `context = 'dashboard.payroll:<type>[:<id>]'`).
 - `entry_activity.collectors` (user names) is omitted for viewers.
+- **Unreviewed records** (interim owner rule ح, authz.md §4.2 ⁶): a caller without people scope
+  on the requested scope (a viewer; for `global`: without `people_all`) gets **approved projects
+  only** in every section (totals and their splits, by area/country/branch, maintenance and its
+  items, staff by role, needs, completeness, entry activity). `report_country` applies the same
+  to its branch table, `report_project` answers `PT404` for an unreviewed project, and
+  `report_donor` and `export_rows` leave unreviewed projects out.
 - Rate limit: 120 calls / minute / user.
 
 ```jsonc

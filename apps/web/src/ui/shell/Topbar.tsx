@@ -6,6 +6,8 @@ import { Button } from '../Button';
 import { IconDownload, IconMore, IconPlus } from '../icons';
 import { SyncBadge } from '../SyncBadge';
 import { BrandMark } from './BrandMark';
+import { loadNotificationsBell } from './integrations';
+import { LazySlot } from './LazySlot';
 
 export interface TopbarProps {
   title: string;
@@ -36,6 +38,7 @@ export function Topbar({ title, desktop, canAdd, onInstall, moreOpen, onOpenMore
       </div>
       <div class="topbar__actions">
         <SyncBadge />
+        <LazySlot load={loadNotificationsBell} />
         {desktop && onInstall && (
           <Button
             size="sm"

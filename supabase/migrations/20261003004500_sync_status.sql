@@ -17,9 +17,10 @@
 --
 -- sync_push applies every operation in its own sub-transaction and does NOT
 -- keep rejected operations in the idempotency ledger (they may be retried), so
--- nothing else on the server remembers them. sync_push calls
--- private.log_sync_rejection() from its exception handler (outside the rolled
--- back sub-transaction); sync_status() counts the last 7 days from here.
+-- nothing else on the server remembers them. sync_push (migration 0023) calls
+-- private.log_sync_rejection() once for every result with status "rejected"
+-- (errors of the op's sub-transaction, invalid_op, op_id_taken), outside the
+-- rolled-back sub-transaction; sync_status() counts the last 7 days from here.
 -- Rows are disposable diagnostics: private.sync_rejections_cleanup() removes
 -- everything older than 30 days.
 -- -----------------------------------------------------------------------------

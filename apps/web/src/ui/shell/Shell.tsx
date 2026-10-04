@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { can, me, session } from '../../auth';
-import { setLocalSession } from '../../db';
 import { isLocale, savedLocale, setLocale, t } from '../../i18n';
 import { navigate, setScrollContainer, useRoute } from '../../routes';
 import { startSync, stopSync } from '../../sync';
@@ -10,6 +9,8 @@ import { installAvailable, promptInstall, watchInstallPrompt } from '../pwa/regi
 import { toast } from '../Toast';
 import { OfflineBanner, UpdatePrompt } from './Banners';
 import { visibleNav } from './nav';
+import { loadV2MigrationPrompt, v2MigrationWanted, V2_IMPORT_ROUTES } from './integrations';
+import { LazySlot } from './LazySlot';
 import { BottomNav, MoreSheet, Sidebar } from './Navigation';
 import { RouteOutlet } from './RouteOutlet';
 import { Topbar } from './Topbar';
@@ -22,7 +23,6 @@ export const DESKTOP_QUERY = '(min-width: 900px)';
 interface ContextLike {
   user_id?: string;
   profile?: { preferred_language?: string | null } | null;
-  capabilities?: { can_see_restricted?: boolean } | null;
 }
 
 /**
@@ -36,10 +36,14 @@ export function Shell() {
   const [moreOpen, setMoreOpen] = useState(false);
   const mainRef = useRef<HTMLElement>(null);
   const firstRender = useRef(true);
+  // The v2 migration prompt (brief §10): loaded on a device that holds v2 data, or once the
+  // user opened a page where a v2 export file can be imported (a run started there and hidden
+  // by the user is offered again by the prompt on every screen). Sticky for this shell mount:
+  // the prompt stays while a run removes the v2 keys and finishes pending uploads.
+  const [offerV2Migration, setOfferV2Migration] = useState(v2MigrationWanted);
 
   const context = me.value as ContextLike | null;
   const userId = context?.user_id ?? null;
-  const canSeeRestricted = context?.capabilities?.can_see_restricted === true;
   const profileLanguage = context?.profile?.preferred_language ?? null;
   const signedIn = Boolean(session.value);
 
@@ -70,13 +74,8 @@ export function Shell() {
     if (userId) void loadAppSettings();
   }, [userId]);
 
-  // Who uses this device, for the local database: rows written offline get `created_by`
-  // (the "mine" filter, the device-side duplicate flag) and restricted rows stay in
-  // `restricted_local` unless the user may read them (docs/contracts/web.md §3.4). The value
-  // is stored, so an offline start after a reload keeps it.
-  useEffect(() => {
-    if (userId) setLocalSession({ userId, canSeeRestricted }).catch(() => undefined);
-  }, [userId, canSeeRestricted]);
+  // Who uses this device (`setLocalSession` of the local database) is recorded by `src/auth`
+  // whenever the user's context changes (web.md §3.4) — before that context reaches the shell.
 
   // Safety net for interrupted sessions: photos saved on this device whose upload was never
   // queued (the app closed right after saving) join the upload queue. Lazy: the photos module
@@ -117,6 +116,10 @@ export function Shell() {
     document.title = `${title} — ${t('common.appName')}`;
   }, [title]);
 
+  useEffect(() => {
+    if (!offerV2Migration && V2_IMPORT_ROUTES.test(match.path)) setOfferV2Migration(true);
+  }, [match.path, offerV2Migration]);
+
   // On navigation only (not on a language switch): close the sheet, move focus to the new content.
   useEffect(() => {
     setMoreOpen(false);
@@ -151,6 +154,7 @@ export function Shell() {
       <div class="shell__banners">
         <OfflineBanner />
         <UpdatePrompt />
+        {offerV2Migration && <LazySlot load={loadV2MigrationPrompt} />}
       </div>
       <Topbar
         title={title}

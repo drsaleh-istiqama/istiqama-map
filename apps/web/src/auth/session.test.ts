@@ -12,6 +12,7 @@ import {
   hqAdminAal2,
   managerTzAal1,
   managerTzAal2,
+  supervisorPemba,
 } from './__fixtures__/myContext';
 import type { MyContext } from './context';
 // Types only: the modules themselves are loaded freshly for every test (see `load`).
@@ -151,6 +152,7 @@ interface Harness {
   vault: StoreModule['vault'];
   key: string;
   resets: string[];
+  localSessions: LocalSessionWrite[];
   ports: {
     pendingWork: ReturnType<typeof vi.fn<() => Promise<{ ops: number; photos: number }>>>;
     confirm: ReturnType<
@@ -205,6 +207,7 @@ async function load(): Promise<Harness> {
   fakeControl.attach(vault.storage, STORAGE_KEY);
   const s = await import('./session');
   const resets: string[] = [];
+  const localSessions: LocalSessionWrite[] = [];
   const ports = {
     pendingWork: vi.fn(async () => ({ ops: 0, photos: 0 })),
     confirm: vi.fn(async () => true),
@@ -212,12 +215,26 @@ async function load(): Promise<Harness> {
   s.setAuthPorts({
     resetLocalData: async (reason) => {
       resets.push(reason);
+      localSessions.push({ reset: reason });
+    },
+    setLocalSession: async (next) => {
+      localSessions.push(next);
     },
     pendingWork: ports.pendingWork,
     confirm: ports.confirm,
   });
   await s.initAuth();
-  return { s, control: fakeControl, vault, key: STORAGE_KEY, resets, ports };
+  return { s, control: fakeControl, vault, key: STORAGE_KEY, resets, localSessions, ports };
+}
+
+/** What reached the local database, in order (resets interleaved to check ordering). */
+type LocalSessionWrite = { userId: string; canSeeRestricted: boolean } | { reset: string };
+
+/** The last local-session write (resets skipped). */
+function lastLocalSession(h: Harness): { userId: string; canSeeRestricted: boolean } | undefined {
+  return h.localSessions
+    .filter((w): w is Exclude<LocalSessionWrite, { reset: string }> => 'userId' in w)
+    .at(-1);
 }
 
 /** Sign in as the owner of `ctx` and wait for the context. */
@@ -717,6 +734,132 @@ describe('several users on one device', () => {
     expect(h.resets).toEqual(['sign_out', 'user_changed']);
     expect(seenDuringReset).toEqual([null]);
     expect(h.s.me.value).toEqual(collectorMombasa);
+  });
+});
+
+describe('local session of the device database (setLocalSession)', () => {
+  it('records the user once my_context() answered, before the context becomes visible', async () => {
+    const h = await load();
+    const seenWhileWriting: Array<MyContext | null> = [];
+    h.s.setAuthPorts({
+      setLocalSession: async (next) => {
+        seenWhileWriting.push(h.s.me.value);
+        h.localSessions.push(next);
+      },
+    });
+    await signIn(h, collectorPemba);
+    expect(lastLocalSession(h)).toEqual({
+      userId: collectorPemba.user_id,
+      canSeeRestricted: false,
+    });
+    // the first write happened while the context was not visible yet
+    expect(seenWhileWriting[0]).toBeNull();
+  });
+
+  it('follows the capabilities: restricted rows may stay only after MFA (aal2)', async () => {
+    const h = await load();
+    await signInWithPin(h, managerTzAal1);
+    expect(lastLocalSession(h)).toEqual({
+      userId: managerTzAal1.user_id,
+      canSeeRestricted: false,
+    });
+    h.control.rpc = ok(managerTzAal2);
+    await h.vault.storage.setItem(
+      h.key,
+      JSON.stringify(sessionFor(managerTzAal2, 'aal2', 'refresh-aal2')),
+    );
+    await h.s.refreshContext();
+    expect(lastLocalSession(h)).toEqual({
+      userId: managerTzAal2.user_id,
+      canSeeRestricted: true,
+    });
+  });
+
+  it('fails closed: an aal2 context cached with an aal1 token does not keep restricted rows', async () => {
+    const h = await load();
+    // the cached/answered context claims aal2 capabilities while the token is still aal1
+    h.control.rpc = ok(managerTzAal2);
+    h.control.nextSession = sessionFor(managerTzAal2, 'aal1');
+    await h.s.verifyOtp('someone@example.org', '123456', 'email');
+    await h.s.refreshContext();
+    expect(h.s.me.value?.user_id).toBe(managerTzAal2.user_id);
+    expect(lastLocalSession(h)?.canSeeRestricted).toBe(false);
+  });
+
+  it('an unlock with the cached context (offline) records the user again', async () => {
+    const h = await load();
+    await signInWithPin(h, collectorPemba);
+    h.s.pin.lock();
+    h.localSessions.length = 0;
+    vi.stubGlobal('navigator', { onLine: false });
+    expect(await h.s.pin.unlock(PIN)).toBe(true);
+    await vi.waitFor(() =>
+      expect(lastLocalSession(h)).toEqual({
+        userId: collectorPemba.user_id,
+        canSeeRestricted: false,
+      }),
+    );
+  });
+
+  it('a different user: the previous user’s data is handed over first, then the new user is recorded', async () => {
+    const h = await load();
+    await signInWithPin(h, collectorPemba);
+    await h.s.signOut({ force: true });
+    h.localSessions.length = 0;
+    await signIn(h, collectorMombasa);
+    const firstWrite = h.localSessions.findIndex((w) => 'userId' in w);
+    expect(h.localSessions.slice(0, firstWrite)).toEqual([{ reset: 'user_changed' }]);
+    expect(lastLocalSession(h)).toEqual({
+      userId: collectorMombasa.user_id,
+      canSeeRestricted: false,
+    });
+  });
+
+  it('locking and signing out keep the stored user (unsent work stays attributed)', async () => {
+    const h = await load();
+    await signInWithPin(h, collectorPemba);
+    const before = h.localSessions.length;
+    h.s.pin.lock();
+    await h.s.signOut({ force: true });
+    const after = h.localSessions.slice(before).filter((w) => 'userId' in w);
+    expect(after).toEqual([]);
+  });
+
+  it('a failing database write is logged, never breaks the sign-in', async () => {
+    const h = await load();
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    h.s.setAuthPorts({
+      setLocalSession: async () => {
+        throw new Error('quota');
+      },
+    });
+    await signIn(h, collectorPemba);
+    expect(h.s.me.value).toEqual(collectorPemba);
+    expect(errors).toHaveBeenCalledWith('auth: setLocalSession failed', expect.any(Error));
+  });
+
+  it('the default port writes the real local database', async () => {
+    vi.resetModules();
+    globalThis.indexedDB = new IDBFactory();
+    localStorage.clear();
+    const { fakeControl } = (await import('./supabase')) as unknown as {
+      fakeControl: FakeControl & { attach(storage: unknown, key: string): void };
+    };
+    const { vault, STORAGE_KEY } = await import('./store');
+    fakeControl.attach(vault.storage, STORAGE_KEY);
+    const s = await import('./session');
+    s.setAuthPorts({ resetLocalData: async () => undefined });
+    await s.initAuth();
+    fakeControl.rpc = ok(supervisorPemba);
+    fakeControl.nextSession = sessionFor(supervisorPemba);
+    await s.verifyOtp('someone@example.org', '123456', 'email');
+    await s.refreshContext();
+    const dbModule = await import('../db');
+    // stored (survives a reload), not only cached in memory
+    expect(await dbModule.getMeta('local_session')).toEqual({
+      userId: supervisorPemba.user_id,
+      canSeeRestricted: false,
+    });
   });
 });
 

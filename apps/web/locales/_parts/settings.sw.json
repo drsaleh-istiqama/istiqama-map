@@ -15,8 +15,6 @@
   "pendingPhotos": "Picha ambazo bado hazijapakiwa",
   "wifiOnlyLabel": "Pakia picha kwa Wi-Fi pekee",
   "wifiOnlyHint": "Huokoa kifurushi cha data: picha hubaki kwenye kifaa hadi utakapounganishwa na Wi-Fi.",
-  "v2ImportTitle": "Kuhamisha data ya toleo la awali",
-  "v2ImportPlaceholder": "Zana ya kuhamisha data ya toleo la 2 kutoka kwenye kifaa hiki au kutoka faili la JSON itaonekana hapa.",
   "securityTitle": "Usalama",
   "pinChange": "Badilisha PIN",
   "pinCurrent": "PIN ya sasa",
