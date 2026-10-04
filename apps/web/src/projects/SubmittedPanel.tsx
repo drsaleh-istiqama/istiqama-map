@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'preact/hooks';
-import { listProjects, type ListCursor, type ProjectFilter, type ProjectListItem } from '../db';
+import { db, listProjects, type ListCursor, type ProjectFilter, type ProjectListItem } from '../db';
 import { fmt, pickName, t } from '../i18n';
 import { navigate } from '../routes';
 import { syncStatus } from '../sync';
-import { Button, EmptyState, Spinner, toast, VirtualList } from '../ui';
+import { Badge, Button, EmptyState, Spinner, toast, useLiveQuery, VirtualList } from '../ui';
 import { RecordStateBadge, StatusBadge, TypeIcon } from './labels';
 import { canApprove, canReturn, type Actor } from './permissions';
 import { placeOf, SyncFlags } from './ProjectCard';
@@ -48,6 +48,12 @@ function SubmittedRow({
   };
   const approvable = canApprove(item, actor);
   const returnable = canReturn(item, actor);
+  // The v2 migration flag (migration 0073): only the rows in view exist, so one primary-key
+  // read per rendered row; the badge sits in the badge line (the row height is fixed).
+  const migrationNote = useLiveQuery(
+    () => db.projects.get(item.id).then((p) => p?.migration_note?.trim() || null),
+    [item.id],
+  );
   return (
     <div class="rrow" data-testid="review-row" data-id={item.id}>
       <div class="rrow__head">
@@ -63,6 +69,11 @@ function SubmittedRow({
         <StatusBadge status={item.status} />
         <RecordStateBadge state={item.record_state} />
         <SyncFlags dirty={item.dirty} conflict={item.conflict} failed={item.failed} />
+        {migrationNote && (
+          <Badge tone="warning" title={migrationNote} testId="review-migration-note">
+            {t('projects.migrationNoteFlag')}
+          </Badge>
+        )}
       </div>
       <div class="rrow__text">
         {[

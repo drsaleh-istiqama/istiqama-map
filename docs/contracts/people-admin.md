@@ -179,13 +179,19 @@ Merging/reverting/deciding requires review rights over **both** persons.
 ```jsonc
 { "v": 1, "source_id": "…", "target_id": "…",
   "moved_staff": ["<project_staff.id>", …],
-  "collapsed_staff": [{ "id": "<soft-deleted staff id>", "kept_id": "<surviving staff id>",
-                        "moved_compensation": ["<staff_compensation.id>", …] }],
+  "collapsed_staff": [{ "id": "<soft-deleted staff id>", "kept_id": "<surviving staff id>" }],
   "target_filled": { "phone_e164": "+255…" },
   "merged_by": "…", "merged_at": "…",
   "reverted_by": "…", "reverted_at": "…",        // after a revert
   "decision_note": "…" }                          // after a rejection with a note
 ```
+
+`undo` is readable by every reviewer of the persons (RLS, `sync_pull`), branch supervisors
+included, so it never names salary rows: which `staff_compensation` rows a collapse moved is
+restricted data and lives in `private.person_merge_comp_moves` (no API access). A BEFORE
+trigger on `person_merge_requests` strips any `collapsed_staff[].moved_compensation` into that
+table; an AFTER trigger (state `merged` → `reverted`) moves the salary rows back (migration
+0075; undo rows written earlier are scrubbed by the migration).
 
 Errors: `forbidden`, `person_not_found`, `invalid_argument` (same id / null),
 `person_already_merged` (source or target deleted/merged).
@@ -413,6 +419,12 @@ heartbeat is what the administrator wants to see).
 ### `sync_status() returns jsonb`
 
 `hq_admin`: all users; `country_manager`: own country.
+
+`open_conflicts` counts conflicts on the restricted tables (`staff_compensation`,
+`community_sensitive`) only where the caller has restricted access to the conflict's country
+(hq_admin; country manager of that country at aal2). A blind write stores a conflict exactly
+when its value differs from the stored one, so counting it for anybody else would be an
+equality oracle on salaries (migration 0075).
 
 ```jsonc
 { "generated_at": "…", "scope": "all" | "country", "country_ids": null | ["…"], "window_days": 7,

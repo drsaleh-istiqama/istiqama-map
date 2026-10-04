@@ -65,8 +65,8 @@ select ok(
 
 select is(
   (select array_agg(table_name order by table_name) from private.sync_tables where guard is not null),
-  array['localities', 'person_merge_requests', 'project_donors', 'project_staff', 'projects'],
-  'registry: tables with a push guard (workflow / visibility of the linked row)');
+  array['localities', 'person_merge_requests', 'project_donors', 'project_photos', 'project_staff', 'projects'],
+  'registry: tables with a push guard (workflow / visibility of the linked row / photo upload state)');
 
 select is(
   (select count(*)::int from private.sync_tables r

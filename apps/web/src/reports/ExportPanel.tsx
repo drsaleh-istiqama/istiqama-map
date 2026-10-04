@@ -23,8 +23,18 @@ import { STATUS_ORDER, TYPE_ORDER, RECORD_STATE_ORDER } from './Dashboard';
 import { isObj, type ExportFormat, type ExportJob, type ExportLang, type ScopeRef } from './types';
 import { scopeFilters } from './scope';
 
+/**
+ * What the file holds (`filters.dataset`, migration 0073; contract reports-import-export §4):
+ *   - `projects`: the projects table; an XLSX workbook also gets the «الكادر» / Staff sheet
+ *     when the caller has people scope (the server decides);
+ *   - `staff`: the staff table alone (one row per current assignment) — the way to get the
+ *     staff as CSV, since a CSV file holds one table. People scope only (viewers get PT403).
+ */
+export type ExportDataset = 'projects' | 'staff';
+
 export interface ExportChoices {
   format: ExportFormat;
+  dataset: ExportDataset;
   lang: ExportLang;
   type: string;
   status: string;
@@ -36,6 +46,7 @@ export interface ExportChoices {
 export function defaultChoices(l: Locale): ExportChoices {
   return {
     format: 'xlsx',
+    dataset: 'projects',
     lang: l,
     type: '',
     status: '',
@@ -48,6 +59,8 @@ export function defaultChoices(l: Locale): ExportChoices {
 /** `p_filters` of `export_request` for the dashboard scope plus the dialog's extra filters. */
 export function exportFilters(scope: ScopeRef, c: ExportChoices): Record<string, unknown> {
   const filters: Record<string, unknown> = { ...scopeFilters(scope) };
+  // `projects` is the server default: sent only for the staff table.
+  if (c.dataset === 'staff') filters.dataset = 'staff';
   if (c.type) filters.type = c.type;
   if (c.status) filters.status = c.status;
   if (c.recordState) filters.record_state = c.recordState;
@@ -57,6 +70,7 @@ export function exportFilters(scope: ScopeRef, c: ExportChoices): Record<string,
 }
 
 const LANGS: ExportLang[] = ['ar', 'sw', 'en'];
+const DATASETS: readonly ExportDataset[] = ['projects', 'staff'];
 
 export interface ExportDialogProps {
   open: boolean;
@@ -78,6 +92,10 @@ export function ExportDialog(props: ExportDialogProps) {
   const [error, setError] = useState<string | null>(null);
   const set = (patch: Partial<ExportChoices>): void => onChoices({ ...c, ...patch });
   const restricted = can.seeRestricted.value;
+  // The staff table lists persons: offered only with people scope (brief §3; the server
+  // refuses it otherwise). A choice kept from another session falls back to projects.
+  const people = can.seePeople.value;
+  const dataset: ExportDataset = people ? c.dataset : 'projects';
 
   const submit = async (event?: Event): Promise<void> => {
     event?.preventDefault();
@@ -92,7 +110,7 @@ export function ExportDialog(props: ExportDialogProps) {
       const job = await requestExport({
         format: c.format,
         lang: c.lang,
-        filters: exportFilters(props.scope, c),
+        filters: exportFilters(props.scope, { ...c, dataset }),
       });
       toast(t('reports.exportStarted'), 'info');
       props.onStarted(job);
@@ -168,6 +186,33 @@ export function ExportDialog(props: ExportDialogProps) {
             ))}
           </div>
         </fieldset>
+        {people && (
+          <fieldset class="rexport__group" data-testid="export-dataset">
+            <legend class="field__label">{t('reports.exportDataset')}</legend>
+            <div class="rchoice">
+              {DATASETS.map((d) => (
+                <label key={d} class={`rchoice__opt${dataset === d ? ' rchoice__opt--on' : ''}`}>
+                  <input
+                    type="radio"
+                    name="export-dataset"
+                    value={d}
+                    checked={dataset === d}
+                    data-testid={`export-dataset-${d}`}
+                    onChange={() => set({ dataset: d })}
+                  />
+                  <span>{t(`reports.dataset_${d}`)}</span>
+                </label>
+              ))}
+            </div>
+            <p class="field__hint" data-testid="export-dataset-hint">
+              {dataset === 'staff'
+                ? t('reports.exportDatasetStaffHint')
+                : c.format === 'xlsx'
+                  ? t('reports.exportDatasetXlsxHint')
+                  : t('reports.exportDatasetCsvHint')}
+            </p>
+          </fieldset>
+        )}
         <fieldset class="rexport__group">
           <legend class="field__label">{t('reports.exportLanguage')}</legend>
           <p class="field__hint">{t('reports.exportLanguageHint')}</p>
@@ -269,6 +314,7 @@ const STATE_TONE: Record<string, BadgeTone> = {
 function filtersSummary(job: ExportJob, names: Map<string, string>): string {
   const f = job.filters;
   const parts: string[] = [];
+  if (f.dataset === 'staff') parts.push(t('reports.dataset_staff'));
   for (const key of ['country_id', 'branch_id'] as const) {
     const id = f[key];
     if (typeof id === 'string') parts.push(names.get(id) ?? t('reports.scopeUnknown'));
@@ -386,6 +432,11 @@ export function ExportJobs({ names }: ExportJobsProps) {
                   {job.row_count !== null && (
                     <span>{t('reports.rows', { count: job.row_count })}</span>
                   )}
+                  {typeof job.stats.staff_rows === 'number' && (
+                    <span data-testid="export-job-staff-rows">
+                      {t('reports.staffRows', { count: job.stats.staff_rows })}
+                    </span>
+                  )}
                   {job.bytes !== null && <span>{fmt.bytes(job.bytes)}</span>}
                   {job.state === 'done' && job.expires_at && (
                     <span>{t('reports.availableUntil', { date: fmt.date(job.expires_at) })}</span>
@@ -394,6 +445,8 @@ export function ExportJobs({ names }: ExportJobsProps) {
                 {job.state === 'done' && isObj(job.stats.fallback) && (
                   <p class="rnote" data-testid="export-fallback">
                     {t('reports.fallbackCsv')}
+                    {job.stats.fallback.staff_omitted === true &&
+                      ` ${t('reports.fallbackStaffOmitted')}`}
                   </p>
                 )}
                 {job.state === 'failed' && (

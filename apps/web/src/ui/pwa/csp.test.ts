@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildCsp, cspDirectives, originOf, sentryIngestOrigin, wsOrigin } from './csp';
+import { buildCsp, cspDirectives, cspHash, originOf, sentryIngestOrigin, wsOrigin } from './csp';
 
 const production = {
   supabaseUrl: 'https://abcd.supabase.co',
@@ -94,6 +94,21 @@ describe('Content-Security-Policy', () => {
       'connect-src ' + "'self' blob: http://127.0.0.1:54321 ws://127.0.0.1:54321",
     );
     expect(policy).not.toContain('upgrade-insecure-requests');
+  });
+
+  it('allows the inline critical CSS by hash only, never by unsafe-inline', async () => {
+    // Reference value: Node's crypto.createHash('sha256').update(text).digest('base64').
+    const hash = await cspHash('body{margin:0}');
+    expect(hash).toBe("'sha256-IAdwN3biDCQ3brrgp1m8kBEsPQYyqfREKOEfeoREopc='");
+    expect(await cspHash('body{margin:1px}')).not.toBe(hash);
+    const d = cspDirectives({ ...production, styleHashes: [hash, hash] });
+    expect(d['style-src']).toEqual(["'self'", hash]);
+    expect(buildCsp({ ...production, styleHashes: [hash] }, 'meta')).not.toContain('unsafe-inline');
+    // In dev a hash would disable 'unsafe-inline', which Vite's injected <style> elements need.
+    expect(cspDirectives({ ...local, dev: true, styleHashes: [hash] })['style-src']).toEqual([
+      "'self'",
+      "'unsafe-inline'",
+    ]);
   });
 
   it('relaxes only what the Vite dev server needs', () => {

@@ -274,7 +274,8 @@ describe('migration runner — local v2 data', () => {
       branch_id: PEMBA,
       build_year: 2018,
       created_at: '2025-02-03T04:05:06.000Z',
-      review_note: 'salary currency TZS assumed',
+      migration_note: 'salary currency TZS assumed',
+      review_note: null,
     });
     // offline entry time travels with the insert
     const insert = (
@@ -282,6 +283,9 @@ describe('migration runner — local v2 data', () => {
     )[0]!;
     expect(insert.fields.created_at).toBe('2025-02-03T04:05:06.000Z');
     expect(insert.fields.external_id).toBe('v2:v2-staff-1');
+    // the salary-currency flag travels as migration_note (client-writable, migration 0073)
+    expect(insert.fields.migration_note).toBe('salary currency TZS assumed');
+    expect(insert.fields.review_note ?? null).toBeNull();
 
     // locality "قرية جديدة" was proposed and queued BEFORE the project
     const locality = await db.localities.get(project!.locality_id!);

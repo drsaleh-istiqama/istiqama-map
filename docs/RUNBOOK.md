@@ -21,6 +21,7 @@
 9. [أدلة الحوادث](#9-أدلة-الحوادث)
 10. [المراقبة](#10-المراقبة)
 11. [مراجع سريعة](#11-مراجع-سريعة)
+12. [Supabase compatibility notes — ملاحظات التوافق مع Supabase الحقيقي](#12-supabase-compatibility-notes--ملاحظات-التوافق-مع-supabase-الحقيقي)
 
 ### الأهداف
 
@@ -522,3 +523,107 @@ psql -d postgres -c 'drop database imap_restore' -c 'drop database imap_restore_
 | `docs/contracts/sync.md` §5.2، §8            | `scope_epoch` و`reset`، دوال الصيانة                                     |
 | `docs/contracts/people-admin.md` §6، §7      | إلغاء الجلسات، لوحة حالة المزامنة                                        |
 | `docs/contracts/reports-import-export.md` §6 | الاحتفاظ بالصور                                                          |
+
+## 12. Supabase compatibility notes — ملاحظات التوافق مع Supabase الحقيقي
+
+مراجعة 2026-10-05 لكل الترحيلات (0001–0075) مقابل Supabase المستضاف والذاتي الاستضافة، ومقارنة
+`scripts/local-stack/supabase-shim.sql` بمخطط Supabase الحقيقي. الفرق الجوهري: محلياً تُطبَّق الترحيلات
+وتُشغَّل pgTAP بالمستخدم الأعلى `postgres` (superuser)، أما على Supabase فالدور `postgres` **ليس**
+superuser (له `CREATEROLE` و`CREATEDB` و`BYPASSRLS`)، والمستخدم الأعلى `supabase_admin` لا نملكه.
+كل بند أدناه إما أُصلح في SQL، أو تُحقِّق منه أنه لا يختلف، أو هو فرق قائم يجب فحصه في أول نشر على
+`staging` / أول تشغيل CI.
+
+### 12.1 أُصلح في SQL (الترحيل 0074)
+
+- **`private.sync_rebase()` بعد الاسترجاع (§7):** كان يعتمد على
+  `set local session_replication_role = replica` — معامل superuser، فيفشل على مشروع Supabase جديد بـ
+  `permission denied to set parameter`. الآن يحاوله أولاً، وعند `insufficient_privilege` يعطّل مالكُ
+  الجداول (`postgres`) المشغّلات المفعّلة بـ `ALTER TABLE … DISABLE TRIGGER` ثم يعيدها في المعاملة نفسها؛
+  النتيجة تذكر `"mode"` (`replica` أو `alter_table`). مُختبَر في pgTAP 25 (§H) بفرض المسار البديل
+  (`app.sync_rebase_mode = 'alter'`).
+
+### 12.2 تُحقِّق منه — لا فرق
+
+- **search_path:** الـ shim يضبط `ALTER DATABASE … SET search_path` (محلي فقط). كل الدوال الـ 189 في
+  `public` و`private` تثبّت `search_path` في تعريفها (الاستعلام: لا دالة SQL/plpgsql بلا
+  `proconfig search_path=`)، فلا تعتمد على إعداد القاعدة أو الدور.
+- **الامتيازات الافتراضية:** كل دالة في `public` قابلة للتنفيذ من `authenticated` لها `GRANT EXECUTE`
+  صريح في الترحيلات، وكل جدول يقرؤه `authenticated` له `GRANT` صريح (0011) — لا شيء يعتمد على
+  `ALTER DEFAULT PRIVILEGES` الخاصة بالمنصة. كائنات تُنشأ يدوياً من الـ Dashboard (بدور آخر) خارج هذه
+  الضمانة: أنشئ كل شيء بترحيل.
+- **PostgREST overloads:** لا اسم دالة مكرر في `public` (لا غموض في `/rpc/<name>`).
+- **دوال STABLE لا تكتب:** الدوال العامة STABLE (`my_context`، `locate_point`، `tile_projects`،
+  `project_duplicates`، `admin_area_shapes`، `export_columns`، `import_preview`، `import_template`،
+  `photos_to_purge`، `server_info`) لا تكتب ولا تستدعي كاتباً (لا `rate_limit` ولا سجلات)، فتعمل في
+  معاملة PostgREST للقراءة فقط (GET).
+- **pg_cron:** الترحيلان 0058 و0070 يتحققان من `pg_available_extensions` ويلتقطان أي خطأ؛ على Supabase
+  تُجدول المهام باسم `postgres` بلا JWT، و`private.require_service_role()` يقبل غياب الدور. يجب أن تكون
+  القاعدة هي `cron.database_name` (`postgres` على Supabase — هي قاعدة الترحيلات).
+- **مخطط `auth`:** الترحيلات لا تقرأ من GoTrue إلا مطالبات JWT (`sub`، `role`، `aal`، `iat`،
+  `session_id`) عبر `auth.uid()`/`auth.jwt()`، والجدولين `auth.sessions`/`auth.refresh_tokens` (في
+  `private.end_auth_sessions` فقط، بأعمدة موجودة في GoTrue: `user_id` من نوع uuid في الأول و`varchar`
+  في الثاني). لا مشغّلات على جداول `auth`.
+- **سياسات `storage.objects`:** الترحيل 0015 ينشئ سياسات فقط (`create policy` مسموح لـ `postgres` على
+  Supabase) ويحدّث `storage.buckets`؛ لا `ALTER TABLE storage.objects` (تفعيل RLS والمشغّلات والملكية في
+  الـ shim وحده). `file_size_limit`/`allowed_mime_types` تُضبط فقط إن وُجد العمودان.
+- **BYPASSRLS:** جداول `public` بـ `FORCE ROW LEVEL SECURITY`، والدوال SECURITY DEFINER يملكها دور
+  الترحيلات؛ هذا يعمل لأن `postgres` على Supabase له `BYPASSRLS`. إن طُبِّقت الترحيلات بدور بلا
+  `BYPASSRLS` يرفض الترحيل 0070 (`harden_private_schema`) المتابعة برسالة صريحة بدل أن ترى الدوال
+  جداول فارغة.
+
+### 12.3 فروق قائمة — قد تنجح محلياً وتفشل على Supabase
+
+1. **pgTAP بغير superuser.** `supabase test db` في CI يتصل بـ `postgres` (ليس superuser في صور Supabase
+   الحديثة). ما قد يفشل هناك وحده: `tests.create_user()` يكتب في `auth.users`/`auth.identities`،
+   و`tests.fixture_storage()` (ملف 15) يكتب في `storage.objects` — مسموح لـ `postgres` في صور CLI الحالية
+   لكنه غير مضمون في كل إصدار؛ استبدال `private.current_xid()`/`safe_xid()` داخل المعاملة (الملفات 16، 17،
+   22، 23، 25) يحتاج أن يكون `postgres` مالك الدالتين (هو كذلك حين تطبّق CLI الترحيلات).
+   `sync_rebase` في الملفين 23 و25 صار يعمل بالمسارين. **افحص هذا في أول تشغيل CI** (`docs/CI.md`).
+2. **statement_timeout.** على Supabase: `authenticated` = 8 ث و`anon` = 3 ث (الـ shim يكررها). pgTAP يستخدم
+   `SET ROLE` فلا يرى هذه المهل أبداً. وجُرِّب محلياً أن `SET statement_timeout` في تعريف الدالة **لا** يمدّ
+   مهلة جملة جارية في PostgreSQL (دالة بـ 10 ث قُطعت عند مهلة الجلسة 1 ث). الدوال الطويلة
+   (`import_stage` 180 ث، `import_commit`/`import_rollback` 300 ث، `refresh_reports` 10 دقائق) تعتمد إذن على
+   أن PostgREST ≥ 12.1 «يرفع» `statement_timeout` من إعدادات الدالة إلى المعاملة (`db-hoisted-tx-settings`،
+   مفعّل افتراضياً). Supabase المستضاف (PostgREST 12.2+) والبيئة المحلية (16.4) كذلك؛ **في الاستضافة الذاتية
+   تأكد أن صورة PostgREST ≥ v12.1**، وإلا قُطع استيراد دفعة كبيرة وأول مزامنة لنطاق كبير جداً عند 8 ث. ولا
+   تضع هذه الدوال خلف Supavisor بوضع `session` بإعدادات مختلفة. الاستدعاء المباشر (psql، pg_cron) بدور
+   `postgres` بلا مهلة.
+3. **GET مقابل POST.** كل دالة VOLATILE تكتب (محدّد المعدل، نبضة الجهاز، السجلات): `sync_pull`،
+   `sync_push`، `search`، `projects_page`، `dashboard`، `report_*`، `user_display_names`… — تُستدعى بـ POST
+   فقط (افتراضي `supabase-js`)؛ GET يفتح معاملة للقراءة فقط فتفشل بـ
+   `cannot execute INSERT in a read-only transaction`. `tile_projects` يعيد النطاق
+   `"application/vnd.mapbox-vector-tile"` ويحتاج PostgREST ≥ 12 وترويسة `Accept` مطابقة.
+4. **ترويسة `x-device-id` خارج PostgREST.** `private.device_id()` يقرأ `request.headers` (صيغة JSON في
+   PostgREST ≥ 10). Storage API لا يضمن تمرير ترويسات العميل إلى `request.headers` (بحسب الإصدار، ولا
+   يمر الطلب بالبوابة المحلية التي تحاكيه)، فداخل سياسات `storage.objects` قد يكون الجهاز مجهولاً: إلغاء **الحساب** (`sessions_revoked_at` عبر `iat`، أو تعطيله)
+   نافذ في Storage، أما إلغاء **جهاز واحد** فلا يمنع تنزيل الصور حتى تنتهي صلاحية JWT ذلك الجهاز (ساعة)؛
+   إلغاء الجلسات (`admin_revoke_sessions` بلا جهاز) هو الإجراء الكامل (§9.1).
+5. **حذف مستخدم من Supabase Auth.** الأعمدة `created_by`/`updated_by`/… تشير إلى `auth.users(id)` بلا
+   `ON DELETE`؛ حذف مستخدم كتب أي صف من الـ Dashboard أو `auth.admin.deleteUser` يفشل بخرق FK. الإجراء
+   الصحيح تعطيل الحساب (`admin_set_user_active`) — لا حذف.
+6. **إنهاء جلسات Auth.** `private.end_auth_sessions` يحذف من `auth.sessions`/`auth.refresh_tokens` بدور
+   `postgres`. إن سحبت المنصة صلاحية DML على جداول `auth` يعيد `NULL` (لا خطأ)، و`admin_end_auth_sessions`
+   يرفع `PT503`، فتلجأ دالة Edge `admin` إلى Auth Admin API. **افحص على staging:** إلغاء جلسات مستخدم ثم
+   محاولة `refresh_token` له.
+7. **Storage القابل للاستئناف.** الـ shim لا يحوي جداول Storage الحديثة (`storage.s3_multipart_uploads`،
+   `storage.prefixes`) والبوابة المحلية تحاكي TUS؛ رفع الصور بـ TUS الحقيقي وسياسات `INSERT`/`UPDATE` على
+   `storage.objects` (upsert يحتاج `SELECT` + `UPDATE`) يُجرَّبان أول مرة على staging.
+8. **امتداد مثبت مسبقاً في مخطط آخر.** الترحيل 0001 ينشئ `postgis`/`pg_trgm`/`unaccent`/`pgcrypto`
+   `with schema extensions` مع `if not exists`، والدوال تشير صراحة إلى `extensions.geometry`،
+   `extensions.gin_trgm_ops`، `extensions.unaccent`، `extensions.st_x/st_y`. مشروع فُعّل فيه PostGIS من
+   الـ Dashboard في `public` يجعل هذه الإشارات تفشل. **قبل أول `db push`:**
+   `select extname, extnamespace::regnamespace from pg_extension;` — يجب أن تكون الأربعة في `extensions`.
+9. **`ALTER DATABASE … SET app.rate_limit = 'off'`** (تعليق الترحيل 0040، لاختبارات الحمل): يحتاج مالك
+   القاعدة؛ لا يُستعمل على Supabase ولا يلزم هناك (يُطفأ محدّد المعدل محلياً فقط).
+10. **pg_cron محلياً غير موجود:** المهام المجدولة (التقارير، `sync_prune`، `sync_rejections_cleanup`،
+    `expire_export_jobs`) لم تعمل قط تحت pg_cron الحقيقي؛ بعد أول نشر:
+    `select jobname, schedule, active from cron.job;` و`cron.job_run_details` بعد 15 دقيقة.
+
+| ما يُفحص في أول نشر                    | الأمر / المكان                                                              |
+| -------------------------------------- | --------------------------------------------------------------------------- |
+| مخطط الامتدادات (§12.3/8)              | `select extname, extnamespace::regnamespace from pg_extension;`             |
+| `BYPASSRLS` لدور الترحيلات             | `select rolsuper, rolbypassrls from pg_roles where rolname = current_user;` |
+| مهام pg_cron (§12.3/10)                | `select jobname, active from cron.job;`                                     |
+| `sync_rebase` على مشروع الاسترجاع (§7) | `select private.sync_rebase();` ← `"mode"` = `replica` أو `alter_table`     |
+| مهلة الاستيراد الطويل (§12.3/2)        | استيراد ≥ 5000 صف عبر الواجهة؛ `import_commit` لا يُقطع عند 8 ث             |
+| إنهاء جلسات Auth (§12.3/6)             | `admin_end_auth_sessions` عبر service role ثم refresh مرفوض                 |

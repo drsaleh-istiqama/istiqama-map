@@ -21,21 +21,34 @@
     <link rel="icon" href="/favicon.ico" sizes="32x32" />
     <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <!-- Critical CSS of the splash below: src/ui/critical.css, inlined + hashed into the CSP by vite.config.ts -->
+    <!--critical-css-->
   </head>
   <body>
     <div id="app">
-      <!-- Shown until the application renders; styled by src/ui/base.css (no inline styles: strict CSP) -->
-      <div class="boot" aria-hidden="true">
-        <svg width="72" height="72" viewBox="0 0 512 512">
-          <rect width="512" height="512" rx="112" fill="#0f2545" />
-          <path
-            d="M256 424C256 424 134 300 134 214A122 122 0 0 1 378 214C378 300 256 424 256 424Z"
-            fill="#c8a24a"
-          />
-          <circle cx="256" cy="212" r="74" fill="#0f2545" />
-          <circle cx="256" cy="212" r="50" fill="#c8a24a" />
-          <circle cx="274" cy="200" r="42" fill="#0f2545" />
-        </svg>
+      <!--
+        Static splash = the first paint (brief §5). Styled only by the inlined critical CSS (no
+        inline style attributes: strict CSP); replaced by the first render of the application.
+        vite.config.ts fills the placeholders: title = locales/ar.json auth.app_title (or
+        VITE_APP_NAME), description = the description meta tag, loading = auth.loading.
+      -->
+      <div class="splash">
+        <div class="splash__card">
+          <svg class="splash__logo" viewBox="0 0 512 512" aria-hidden="true" focusable="false">
+            <rect width="512" height="512" rx="112" fill="#0f2545" />
+            <path
+              d="M256 424C256 424 134 300 134 214A122 122 0 0 1 378 214C378 300 256 424 256 424Z"
+              fill="#c8a24a"
+            />
+            <circle cx="256" cy="212" r="74" fill="#0f2545" />
+            <circle cx="256" cy="212" r="50" fill="#c8a24a" />
+            <circle cx="274" cy="200" r="42" fill="#0f2545" />
+          </svg>
+          <h1 class="splash__title"><!--app-title--></h1>
+          <p class="splash__text"><!--app-description--></p>
+          <span class="splash__bar" aria-hidden="true"></span>
+          <p class="splash__sr" role="status"><!--app-loading--></p>
+        </div>
       </div>
     </div>
     <noscript>

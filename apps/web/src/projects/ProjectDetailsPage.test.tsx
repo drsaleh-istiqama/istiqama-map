@@ -348,6 +348,32 @@ describe('review actions', () => {
     expect(await screen.findByTestId('details-review-note')).toBeTruthy();
   });
 
+  it('migration note (v2 salary-currency flag): shown, with the reviewer hint for reviewers only', async () => {
+    await seedProject({
+      record_state: 'submitted',
+      migration_note: 'Salaries were given the currency TZS; check it',
+    });
+    useRole('branch_supervisor');
+    await openDetails();
+    const note = await screen.findByTestId('details-migration-note');
+    expect(note.textContent).toContain('Migration note');
+    expect(note.textContent).toContain('Salaries were given the currency TZS; check it');
+    expect(screen.getByTestId('details-migration-note-hint')).toBeTruthy();
+    cleanup();
+
+    useRole('field_collector');
+    await openDetails();
+    expect((await screen.findByTestId('details-migration-note')).textContent).toContain('TZS');
+    expect(screen.queryByTestId('details-migration-note-hint')).toBeNull();
+  });
+
+  it('no migration note → no notice (blank counts as none)', async () => {
+    await seedProject({ record_state: 'submitted', migration_note: '  ' });
+    useRole('branch_supervisor');
+    await openDetails();
+    expect(screen.queryByTestId('details-migration-note')).toBeNull();
+  });
+
   it('a collector sees no review actions, but may submit his draft', async () => {
     await seedProject({ record_state: 'draft', created_by: USER_A });
     useRole('field_collector');

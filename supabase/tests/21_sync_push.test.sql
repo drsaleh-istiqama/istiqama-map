@@ -698,15 +698,17 @@ select is(
   (select count(*)::int from public.sync_conflicts c
    where c.table_name = 'community_sensitive' and c.row_id = pg_temp.nid(9) and c.state = 'open'
      and c.client_op_id = ('00000000-0000-7000-8000-' || lpad('111', 12, '0'))::uuid),
-  2, 'both differing fields are stored as open conflicts for a country manager');
+  1, 'the differing field another device filled in is stored as an open conflict for a country manager');
+-- migration 0074: omani_families was left empty by the device that inserted the
+-- row, so filling it in is not a conflict (the answer stays the constant above)
 select is(
   (select row(s.ibadi_families, s.omani_families)::text from public.community_sensitive s where s.id = pg_temp.nid(9)),
-  row(15, null::integer)::text, 'the stored restricted values are untouched until a manager decides');
+  row(15, 2)::text, 'the conflicting stored value is untouched until a manager decides; the empty field is filled in');
 select is(
   (select array_agg(c.field || ':' || c.server_value::text || ':' || c.client_value::text order by c.field)
    from public.sync_conflicts c where c.table_name = 'community_sensitive' and c.row_id = pg_temp.nid(9)),
-  array['ibadi_families:15:20', 'omani_families:null:2'],
-  'the conflict rows keep both values for whoever may see restricted data');
+  array['ibadi_families:15:20'],
+  'the conflict row keeps both values for whoever may see restricted data');
 
 insert into res
 select 'g3', pg_temp.push(tests.id('u_col_pemba'), 'dev-a', jsonb_build_array(

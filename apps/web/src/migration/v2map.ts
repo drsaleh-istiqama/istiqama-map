@@ -30,7 +30,8 @@
  *    when exactly one staff/manager entry of the input bears that name; its entries that no
  *    entry bears become persons of their own;
  *  - salary > 0 → `staff_compensation` in the country's default currency, flagged for review
- *    in `review_note` (OWNER_DECISIONS item أ);
+ *    in `migration_note` (OWNER_DECISIONS item أ; migration 0073 — `review_note` is a
+ *    reviewer field);
  *  - photos (`photos[]` and the legacy `photo`) must be `data:image/(jpeg|png|webp|gif);base64`
  *    URLs (v2 parity 5.10); at most 10 per project; category and caption kept.
  */
@@ -972,7 +973,7 @@ export function mapV2(data: V2Data, ctx: MapContext): MigrationPlan {
     }
 
     if (currencies.size > 0) {
-      project.review_note = ctx.texts.salaryReviewNote([...currencies].sort());
+      project.migration_note = ctx.texts.salaryReviewNote([...currencies].sort());
     }
 
     // --- photos -------------------------------------------------------------------------

@@ -6,7 +6,10 @@
  *   metrics          FCP / LCP / TBT / CLS of the login page (cold load) and of the map page
  *                    (returning field user: service-worker caches warm, PIN lock → map ready)
  *                    under applied mobile throttling profiles (metrics.ts), median of N runs,
- *                    plus an ESTIMATED Lighthouse performance score (scoring.ts)
+ *                    plus an ESTIMATED Lighthouse performance score (scoring.ts); the login
+ *                    page also reports when the real sign-in form appears ("sign-in form"),
+ *                    because the static splash of index.html is the first paint and LCP
+ *                    (docs/CI.md §6.3)
  *   installability   Chrome's own installability verdict + manifest / icons / service worker /
  *                    offline start URL (installability.ts) — the former Lighthouse PWA category
  *   accessibility    axe-core with Lighthouse's rule set + estimated score, design-token
@@ -241,12 +244,31 @@ async function persistent(dir: string, extra: BrowserContextOptions = {}): Promi
 
 interface RunResult extends LoadMetrics {
   unlockToMapReadyMs?: number;
+  /** Login page: navigation start → the e-mail field of the real sign-in form is in the DOM. */
+  signInReadyMs?: number;
   basemap?: string;
 }
+
+/**
+ * Records when the interactive sign-in form appears. Since the static splash of index.html is
+ * the first paint (and usually the LCP element), FCP/LCP no longer say when the user can type:
+ * this is reported next to them so the splash cannot hide a slow sign-in screen.
+ */
+const SIGN_IN_READY_SCRIPT = `(() => {
+  const mark = () => {
+    if (window.__signInReady == null && document.querySelector('[data-testid="login-email"]')) {
+      window.__signInReady = performance.now();
+      observer.disconnect();
+    }
+  };
+  const observer = new MutationObserver(mark);
+  observer.observe(document, { subtree: true, childList: true });
+})();`;
 
 async function measureLogin(browser: Browser, profile: ThrottleProfile): Promise<RunResult> {
   const context = await newContext(browser, MOBILE);
   await context.addInitScript(OBSERVER_SCRIPT);
+  await context.addInitScript(SIGN_IN_READY_SCRIPT);
   const page = await context.newPage();
   const cdp = await context.newCDPSession(page);
   await applyThrottling(cdp, profile);
@@ -255,8 +277,11 @@ async function measureLogin(browser: Browser, profile: ThrottleProfile): Promise
   await page.getByTestId('login-email').waitFor({ timeout: 60_000 });
   await waitQuiet(page);
   const metrics = await readMetrics(page, stop());
+  const ready = await page.evaluate(
+    () => (window as unknown as { __signInReady?: number }).__signInReady ?? null,
+  );
   await context.close();
-  return metrics;
+  return { ...metrics, ...(ready !== null ? { signInReadyMs: Math.round(ready) } : {}) };
 }
 
 async function measureMap(dir: string, profile: ThrottleProfile): Promise<RunResult> {
@@ -291,6 +316,7 @@ interface Summary {
     cls: number;
     load: number | null;
     unlockToMapReadyMs?: number;
+    signInReadyMs?: number;
     transferKB: number;
     requests: number;
   };
@@ -309,6 +335,7 @@ function summarize(pageName: string, profile: string, runs: RunResult[]): Summar
   const tbt = med((r) => r.tbt) ?? 0;
   const cls = med((r) => r.cls) ?? 0;
   const unlock = med((r) => r.unlockToMapReadyMs);
+  const signIn = med((r) => r.signInReadyMs);
   return {
     page: pageName,
     profile,
@@ -320,6 +347,7 @@ function summarize(pageName: string, profile: string, runs: RunResult[]): Summar
       cls,
       load: med((r) => r.load),
       ...(unlock !== null ? { unlockToMapReadyMs: unlock } : {}),
+      ...(signIn !== null ? { signInReadyMs: signIn } : {}),
       transferKB: Math.round((med((r) => r.transferBytes) ?? 0) / 1024),
       requests: med((r) => r.requests) ?? 0,
     },
@@ -444,6 +472,7 @@ async function main(): Promise<void> {
               (m.unlockToMapReadyMs !== undefined
                 ? ` · unlock→map ready ${m.unlockToMapReadyMs} ms`
                 : '') +
+              (m.signInReadyMs !== undefined ? ` · sign-in form ${m.signInReadyMs} ms` : '') +
               ` · ${m.requests} requests / ${m.transferKB} kB · est. performance ${s.estimatedPerformance ?? '—'}` +
               `
   LCP element: ${[...new Set(runs.map((r) => r.lcpElement))].join(' | ')}`,

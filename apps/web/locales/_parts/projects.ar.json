@@ -342,6 +342,7 @@
   "col_external_id": "المرجع الخارجي",
   "col_location_source": "مصدر الموقع",
   "col_review_note": "ملاحظة المراجع",
+  "col_migration_note": "ملاحظة الترحيل",
   "col_teacher_housing": "سكن المعلمين",
   "col_imam_housing": "سكن الإمام",
   "col_guest_housing": "سكن الضيوف",
@@ -404,5 +405,8 @@
   "mergeState_rejected": "مرفوض",
   "mergeState_reverted": "أُلغي الدمج",
   "uploadState_pending": "بانتظار الرفع",
-  "uploadState_uploaded": "مرفوعة"
+  "uploadState_uploaded": "مرفوعة",
+  "migrationNoteTitle": "ملاحظة الترحيل من الإصدار السابق",
+  "migrationNoteHint": "تحقّق منها قبل اعتماد السجل.",
+  "migrationNoteFlag": "ملاحظة ترحيل"
 }

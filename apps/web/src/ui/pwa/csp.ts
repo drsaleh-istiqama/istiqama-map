@@ -15,6 +15,20 @@ export interface CspInput {
   sentryDsn?: string;
   /** Vite dev server: HMR needs a websocket and injected <style> elements. */
   dev?: boolean;
+  /**
+   * CSP source expressions (`'sha256-…'`) of the inline <style> elements of index.html — the
+   * critical CSS of the splash (src/ui/critical.css). Ignored in dev, where a hash would switch
+   * off the 'unsafe-inline' that the dev server needs.
+   */
+  styleHashes?: string[];
+}
+
+/** `'sha256-<base64>'` source expression of an inline element's exact text content. */
+export async function cspHash(text: string): Promise<string> {
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  let binary = '';
+  for (const byte of new Uint8Array(digest)) binary += String.fromCharCode(byte);
+  return `'sha256-${btoa(binary)}'`;
 }
 
 export type CspDirectives = Record<string, string[]>;
@@ -60,7 +74,10 @@ export function cspDirectives(input: CspInput): CspDirectives {
     // Production CSS is extracted into hashed files. Preact and MapLibre set element styles
     // through the CSSOM (element.style), which CSP does not restrict, so no 'unsafe-inline'.
     // The Vite dev server injects <style> elements for HMR, hence the dev-only exception.
-    'style-src': input.dev ? ["'self'", "'unsafe-inline'"] : ["'self'"],
+    // The one inline <style> of production (the splash's critical CSS) is allowed by its hash.
+    'style-src': input.dev
+      ? ["'self'", "'unsafe-inline'"]
+      : unique(["'self'", ...(input.styleHashes ?? [])]),
     // blob: local photo previews and MapLibre images; data: MapLibre's tiny inline images.
     'img-src': unique(["'self'", 'blob:', 'data:', supabase, tiles]),
     'font-src': ["'self'"],

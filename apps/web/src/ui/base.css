@@ -154,13 +154,7 @@ ol {
   transform: none;
 }
 
-/* Static splash of index.html, replaced by the first render */
-.boot {
-  display: grid;
-  place-items: center;
-  min-block-size: 100vh;
-  min-block-size: 100dvh;
-}
+/* The static splash of index.html is styled by critical.css (inlined), not here. */
 
 /* While a dialog is open the page behind it must not scroll */
 html.has-modal,

@@ -272,5 +272,18 @@
   "unnamedUser": "بلا اسم",
   "unread": "غير مقروء:",
   "urgentItems": "الأكثر إلحاحًا",
-  "withoutBranch": "بلا فرع"
+  "withoutBranch": "بلا فرع",
+  "exportDataset": "الجدول",
+  "dataset_projects": "المشاريع",
+  "dataset_staff": "الكادر",
+  "exportDatasetXlsxHint": "يحتوي ملف Excel على ورقة «المشاريع» وورقة ثانية «الكادر» بالأشخاص العاملين في هذه المشاريع.",
+  "exportDatasetCsvHint": "ملف CSV جدول واحد: اختر «الكادر» لتصدير العاملين في ملف مستقل.",
+  "exportDatasetStaffHint": "صف لكل تكليف قائم في المشاريع المختارة: الاسم والدور والتواريخ وبيانات الشخص، والراتب لمن تسمح صلاحيته فقط.",
+  "staffRows_zero": "بلا صفوف كادر",
+  "staffRows_one": "صف كادر واحد",
+  "staffRows_two": "صفّا كادر",
+  "staffRows_few": "{count} صفوف كادر",
+  "staffRows_many": "{count} صفًّا للكادر",
+  "staffRows_other": "{count} صف كادر",
+  "fallbackStaffOmitted": "ولم تُضمَّن ورقة الكادر؛ صدّر «الكادر» في ملف مستقل."
 }

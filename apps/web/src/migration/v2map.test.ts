@@ -159,6 +159,7 @@ describe('mapV2 — the v2 sample projects', () => {
       expect(pp.bundle.project.country_id).toBe(TZ);
       expect(pp.bundle.project.builder).toBe('الاستقامة');
       expect(pp.bundle.project.review_note).toBeNull();
+      expect(pp.bundle.project.migration_note).toBeNull();
       expect(pp.projectId).toBe(ctx.ids[`project:${pp.key}`]);
     }
   });
@@ -615,7 +616,10 @@ describe('mapV2 — staff, people and salaries', () => {
     });
     expect(comp[0]!.project_staff_id).toBe(pp.bundle.staff[0]!.id);
     expect(comp[1]).toMatchObject({ monthly_amount: 80000, currency: 'TZS' });
-    expect(pp.bundle.project.review_note).toBe('REVIEW salary currency TZS');
+    // the flag goes to migration_note (client-writable, migration 0073), never review_note,
+    // which is a reviewer field the server ignores from a collector
+    expect(pp.bundle.project.migration_note).toBe('REVIEW salary currency TZS');
+    expect(pp.bundle.project.review_note).toBeNull();
     expect(codes(plan).filter((c) => c === 'salary_currency_assumed')).toHaveLength(2);
     expect(codes(plan)).toContain('value_invalid'); // the negative salary
     expect(plan.counts.salaries).toBe(2);
@@ -649,7 +653,7 @@ describe('mapV2 — staff, people and salaries', () => {
     expect(plan.projects[0]!.bundle.project.country_id).toBe(XX);
     expect(plan.projects[0]!.bundle.staff[0]!.compensation).toBeUndefined();
     expect(codes(plan)).toContain('salary_no_currency');
-    expect(plan.projects[0]!.bundle.project.review_note).toBeNull();
+    expect(plan.projects[0]!.bundle.project.migration_note).toBeNull();
   });
 
   it('the same name in two projects is TWO persons + a merge suggestion (never merged)', () => {

@@ -109,11 +109,25 @@ function Header({ details }: { details: ProjectDetails }) {
   );
 }
 
-function Notices({ details }: { details: ProjectDetails }) {
+function Notices({ details, actor }: { details: ProjectDetails; actor: Actor }) {
   const p = details.bundle.project;
   const state = syncStateOf(details);
+  const migrationNote = p.migration_note?.trim() ?? '';
   return (
     <>
+      {migrationNote !== '' && (
+        // The v2 migration flag (e.g. salaries given the country's default currency,
+        // OWNER_DECISIONS item أ; migration 0073) — reviewers check it before approving.
+        <div class="pdetails__notice" role="note" data-testid="details-migration-note">
+          <h3>{t('projects.migrationNoteTitle')}</h3>
+          <p dir="auto">{migrationNote}</p>
+          {actor.review && (
+            <p class="muted" data-testid="details-migration-note-hint">
+              {t('projects.migrationNoteHint')}
+            </p>
+          )}
+        </div>
+      )}
       {p.record_state === 'returned' && (
         <div class="pdetails__notice" role="note" data-testid="details-review-note">
           <h3>{t('projects.returnedNoticeTitle')}</h3>
@@ -242,7 +256,7 @@ export function ProjectDetailsView({ details, actor }: { details: ProjectDetails
   return (
     <article class="pdetails" data-testid="project-details" data-id={p.id}>
       <Header details={details} />
-      <Notices details={details} />
+      <Notices details={details} actor={actor} />
       <Actions details={details} actor={actor} />
       <BasicSection details={details} />
       <LocationSection project={p} />

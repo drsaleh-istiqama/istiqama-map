@@ -261,7 +261,9 @@ different), `state text not null default 'pending'` (`pending|merged|rejected|re
 **`staff_compensation`** (S, RESTRICTED) — `project_staff_id` → project_staff (not null),
 `monthly_amount numeric(14,2) not null` ≥ 0, `currency char(3) not null`
 (`^[A-Z]{3}$`, constraint `staff_compensation_currency_format_ck`, and a **managed** code —
-`private.currency_is_managed`, trigger `staff_compensation_currency_tg`, migration 0072: one of
+`private.currency_is_managed`, triggers `staff_compensation_currency_tg` (update of a live row)
+and `staff_compensation_currency_ins_tg` (every insert, soft-deleted too, so that the blind-write
+probe row is checked — migration 0075), migration 0072: one of
 the brief's `TZS|KES|UGX|RWF|BIF|MZN|OMR|USD`, **or** some country's `default_currency`, **or**
 a currency with a live `fx_rates` row — so a country added from the admin console pays
 salaries in its own currency without a migration, brief §0. An unmanaged code fails with

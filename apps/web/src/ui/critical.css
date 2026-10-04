@@ -1,0 +1,104 @@
+/*
+ * Critical CSS of the static splash in index.html (brief §5: FCP < 2.5 s on 3G).
+ *
+ * vite.config.ts inlines this file into <head> as a <style> element (minified) and adds its
+ * SHA-256 to the CSP `style-src` — no 'unsafe-inline'. It is the ONLY render-blocking style of
+ * the first paint: every other stylesheet is loaded with the application chunk, so keep this
+ * file tiny (< 2 kB) and never use url() here (Vite rewrites asset URLs after the hash is taken).
+ *
+ * The splash deliberately uses system fonts: Tajawal arrives with the application and must not
+ * re-render (and re-measure) splash text. Colours are the corporate tokens of tokens.css.
+ */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+body {
+  margin: 0;
+  background: #f6f7f9;
+  color: #1b2433;
+  font-family:
+    'Segoe UI',
+    Tahoma,
+    system-ui,
+    -apple-system,
+    sans-serif;
+  line-height: 1.6;
+}
+.splash {
+  box-sizing: border-box;
+  min-block-size: 100vh;
+  min-block-size: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+.splash__card {
+  box-sizing: border-box;
+  inline-size: 100%;
+  max-inline-size: 26rem;
+  padding: 1.5rem 1.25rem;
+  background: #fff;
+  border: 1px solid #e4e7ec;
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 2px rgb(16 24 40 / 6%);
+  text-align: center;
+}
+.splash__logo {
+  display: block;
+  inline-size: 64px;
+  block-size: 64px;
+  margin: 0 auto 0.75rem;
+}
+.splash__title {
+  margin: 0 0 0.5rem;
+  font-size: 1.35rem;
+  color: #0f2545;
+}
+.splash__text {
+  margin: 0 0 1.25rem;
+  font-size: 1.125rem;
+}
+.splash__bar {
+  display: block;
+  position: relative;
+  overflow: hidden;
+  block-size: 4px;
+  border-radius: 2px;
+  background: #e4e7ec;
+}
+.splash__bar::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  inline-size: 40%;
+  border-radius: 2px;
+  background: #c8a24a;
+  animation: splash-bar 1.4s ease-in-out infinite;
+}
+/* index.html is dir="rtl": the bar starts at the right edge and sweeps right → left. */
+@keyframes splash-bar {
+  from {
+    transform: translateX(150%);
+  }
+  to {
+    transform: translateX(-250%);
+  }
+}
+.splash__sr {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) {
+  .splash__bar::after {
+    animation: none;
+    inline-size: 100%;
+  }
+}

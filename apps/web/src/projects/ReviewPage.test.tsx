@@ -82,6 +82,29 @@ describe('access', () => {
 });
 
 describe('(a) submitted records', () => {
+  it('flags a record that carries a v2 migration note (migration 0073)', async () => {
+    await seedProjects();
+    await applyServerRows('projects', [
+      serverProject({
+        id: P2,
+        name_ar: 'مسجد ٢',
+        name_latin: 'Masjid Two',
+        record_state: 'submitted',
+        country_id: COUNTRY,
+        version: 2,
+        migration_note: 'Salaries were given the currency TZS; check it',
+      }),
+    ]);
+    render(<ReviewPage />);
+    await waitFor(() => expect(screen.getAllByTestId('review-row')).toHaveLength(2));
+    const rowOf = (id: string): HTMLElement =>
+      screen.getAllByTestId('review-row').find((r) => r.getAttribute('data-id') === id)!;
+    const flag = await within(rowOf(P2)).findByTestId('review-migration-note');
+    expect(flag.textContent).toBe('Migration note');
+    expect(flag.getAttribute('title')).toContain('TZS');
+    expect(within(rowOf(P1)).queryByTestId('review-migration-note')).toBeNull();
+  });
+
   it('lists the submitted records; approve and return from the queue', async () => {
     await seedProjects();
     render(<ReviewPage />);

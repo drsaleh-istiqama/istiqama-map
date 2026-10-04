@@ -272,5 +272,18 @@
   "unnamedUser": "No name",
   "unread": "Unread:",
   "urgentItems": "Most urgent",
-  "withoutBranch": "No branch"
+  "withoutBranch": "No branch",
+  "exportDataset": "Table",
+  "dataset_projects": "Projects",
+  "dataset_staff": "Staff",
+  "exportDatasetXlsxHint": "The Excel file holds the Projects sheet and a second Staff sheet with the people working in these projects.",
+  "exportDatasetCsvHint": "A CSV file holds one table: choose Staff to export the staff as a separate file.",
+  "exportDatasetStaffHint": "One row per current assignment in the selected projects: name, role, dates and the person's details; salaries only where your access allows.",
+  "staffRows_zero": "No staff rows",
+  "staffRows_one": "{count} staff row",
+  "staffRows_two": "{count} staff rows",
+  "staffRows_few": "{count} staff rows",
+  "staffRows_many": "{count} staff rows",
+  "staffRows_other": "{count} staff rows",
+  "fallbackStaffOmitted": "The Staff sheet was left out; export Staff as a separate file."
 }

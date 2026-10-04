@@ -264,7 +264,22 @@ Whole-call errors (HTTP error, nothing applied — retry the same batch later, i
      ignored, so a queue of edits recorded against the same base never conflicts with
      itself). Disjoint → write (`merged`). A field changed on both sides to different
      values → one `sync_conflicts` row per field (`state: open`), that field is left
-     untouched, the remaining fields are written (`conflict`).
+     untouched, the remaining fields are written (`conflict`). An **insert** by another
+     device counts only the fields it filled in (non-null values, location included): a
+     field it left empty is written, not a conflict (migration 0074; e.g. the same 1:1
+     child created on two devices conflicts only where both entered different values).
+   - `base_version` > current version (cannot come from a client of this server — only
+     after the database was restored to an older state) → treated as an unknown base
+     (`0`): every field another device wrote is a conflict; nothing is overwritten
+     silently (migration 0074).
+   - `base_version` must be absent, `null` (= 0) or a non-negative integer (JSON number or a
+     string of digits); anything else (`"abc"`, `1.5`, `true`, `-1`, objects, values
+     above 2147483647) → `rejected/invalid_base_version`.
+   - When the caller writes a field again, **his own** open conflicts on that field are
+     withdrawn (soft-deleted; the tombstone reaches the reviewers): his newer value
+     supersedes the older proposal. Conflicts of other users stay open (migration 0074).
+   - There is no undelete through `sync_push`: `deleted_at` is ignored, and an upsert of a
+     soft-deleted row is `rejected/row_deleted`.
 7. **Delete** = soft delete (`deleted_at`). Unknown or already deleted row → `applied`
    (no-op). (A blind delete of a restricted row is addressed by its natural key instead,
    §4.4.) Otherwise: role class of `delete`, then the **workflow rules of §4.3** for the
@@ -302,6 +317,12 @@ A collector's client should therefore offer "delete" only for his `draft` / `ret
 projects and his `proposed` localities; other deletes come back `rejected`.
 
 **`notifications`** — only the owner, only `read_at`.
+
+**`project_photos.upload_state`** — only `pending → uploaded` (the client sets `uploaded`
+after both objects are stored). `uploaded → pending` → `rejected/invalid_transition`
+(guard `sync_guard_project_photos`, migration 0074). The server does not check that the
+objects exist; at most 10 live photos per project also holds for concurrent pushes
+(`photo_limit_exceeded`; two-session proof `supabase/tests/concurrency/photo_limit_race.sh`).
 
 **`donors`** — any writer may insert a donor (it is visible to its creator from then on).
 Updating or deleting an existing donor requires that the caller can **see** it (§5.5: global
@@ -528,9 +549,20 @@ and stamps `state`, `resolved_by`, `resolved_at` on the conflict (which syncs to
 Allowed for a reviewer of the row the conflict is about; conflicts on restricted tables
 additionally need restricted access to the project's country (and the read is logged);
 conflicts on rows without country/branch (donors) need a global reviewer.
+
+`"client"` is validated like a `sync_push` write of that value by the reviewer
+(migration 0074): the table guard runs (person / donor visibility of links); a project
+`locality_id` that was merged meanwhile is replaced by the surviving locality; and the
+**stored** row must stay in the reviewer's write and review scope (`out_of_scope` — a
+location conflict re-derives `country_id`/`admin_area_id`, a `branch_id` conflict moves the
+record), its branch must belong to its country (`branch_country_mismatch`) and a project's
+locality to the project's country (`locality_country_mismatch`). On any of these the
+conflict stays `open` and nothing is written; `"server"` always closes it.
 Errors: `PT404 conflict_not_found`, `PT403 out_of_scope`, `PT409 conflict_already_resolved`,
 `PT409 row_deleted` (choice `client` on a deleted row — close it with `server`),
-`PT409 row_missing`, `PT422 invalid_choice`, `PT429` (120 / minute).
+`PT409 row_missing`, `PT422 invalid_choice`, `PT422 branch_country_mismatch`,
+`PT422 locality_country_mismatch`, guard errors (`PT403 person_not_available`,
+`PT403 donor_not_available`, …), `PT429` (120 / minute).
 
 A location conflict has `field = "geom"` with `server_value` / `client_value` =
 `{"lon": …, "lat": …}`.
@@ -583,6 +615,11 @@ A location conflict has `field = "geom"` with `server_value` / `client_value` =
 | `private.sync_rotate_epoch()`                                                           | force every client to resync from scratch                                                                                                                                                                                                              |
 | `private.sync_rebase()`                                                                 | **after restoring a logical dump (`pg_dump`) into a new cluster**: `sync_xid` values of the old cluster are "in the future" for the new one and would never be pulled. Re-stamps all rows and rotates the epoch. Not needed after PITR or `pg_upgrade` |
 
+`sync_rebase()` bypasses the triggers with `session_replication_role`; where the role may not
+set it (the non-superuser `postgres` of a managed Supabase project) it falls back to
+`ALTER TABLE … DISABLE/ENABLE TRIGGER` on the enabled user triggers (migration 0074). The
+result says `"mode": "replica"` or `"alter_table"` (docs/RUNBOOK.md §12).
+
 Measured on the development machine with 100k projects / 500k persons / 500k staff /
 1M photos (single caller, 500 rows per page): idle or small incremental pull ≈ 2 ms;
 first-sync pages ≈ 20–45 ms on average (p95 ≤ 100 ms) for branch, country and global
@@ -597,7 +634,20 @@ Known limits: (1) conflict detection needs `audit_log` rows of the row since `ba
 its own scope when its project moves to another branch; (3) localities/admin areas that
 change country are not reported as `gone`; (4) donors that leave the caller's visibility
 are not reported as `gone` (§5.5); (5) `created_at` sent by a device whose clock is in the
-past is stored as sent (only the future is clamped).
+past is stored as sent (only the future is clamped); (6) re-stamping children (scope move,
+a project entering `approved`) bumps their `version`/`updated_at`/`updated_by` without a data
+change — it writes no `audit_log` row, so it never causes a conflict, only `applied` on the
+next stale edit; (7) a conflict that another user's newer write made stale stays open with
+its old `server_value`; the reviewer sees the current value through pull before choosing
+`"client"`; (8) the server does not verify that the Storage objects of an `uploaded` photo
+exist.
+
+Review 2026-10-05 (migration 0074, pgTAP `25_sync_review`): pull paging was checked with
+`p_limit` 1, 2, 3, 7, 13 against one 1000-row page for collector, supervisor, country
+manager, HQ, viewers (country / global) and a Kenyan collector, first round and incremental
+round with tombstones and a restricted change: the same rows, none twice; a project moved
+out of scope between two pages of a round leaves the round together with its re-stamped
+children and is listed under `gone` in the next round.
 
 ### People columns of public tables (owner_name)
 

@@ -342,6 +342,7 @@
   "col_external_id": "Kumbukumbu ya nje",
   "col_location_source": "Chanzo cha mahali",
   "col_review_note": "Maelezo ya mkaguzi",
+  "col_migration_note": "Maelezo ya uhamishaji",
   "col_teacher_housing": "Makazi ya walimu",
   "col_imam_housing": "Makazi ya imamu",
   "col_guest_housing": "Makazi ya wageni",
@@ -404,5 +405,8 @@
   "mergeState_rejected": "Imekataliwa",
   "mergeState_reverted": "Imetenguliwa",
   "uploadState_pending": "Inasubiri kupakiwa",
-  "uploadState_uploaded": "Imepakiwa"
+  "uploadState_uploaded": "Imepakiwa",
+  "migrationNoteTitle": "Maelezo ya uhamishaji (kutoka toleo la awali)",
+  "migrationNoteHint": "Yahakiki kabla ya kuidhinisha rekodi.",
+  "migrationNoteFlag": "Maelezo ya uhamishaji"
 }

@@ -30,7 +30,11 @@ Read this instead of the SQL. Source files:
   call `private.can_see_restricted()` / `restricted_*()` **and** `private.log_restricted()`.
   The same holds for the two side doors that carry restricted values: `audit_log` rows of the
   restricted tables and `sync_conflicts` rows whose `table_name` is a restricted table are
-  invisible to direct SQL for everybody.
+  invisible to direct SQL for everybody — and so are the `audit_log` rows of `sync_conflicts`
+  about a restricted table (their row images carry `server_value`/`client_value`; policy
+  `audit_log_select_hq`, migration 0075). Derived signals count as restricted data too: open
+  conflicts on restricted tables are counted only for callers with restricted access
+  (`sync_status`), and the merge undo trail never names salary rows.
 - **Scope rule (Appendix A.3).** A role grant is `(role, scope_type, scope_id)`:
   `global` matches every row, `country` matches rows whose `country_id = scope_id`, `branch`
   matches rows whose `branch_id = scope_id`. Nothing else is inferred (a country scope does

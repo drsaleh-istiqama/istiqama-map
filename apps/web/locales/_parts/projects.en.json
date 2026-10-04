@@ -342,6 +342,7 @@
   "col_external_id": "External reference",
   "col_location_source": "Location source",
   "col_review_note": "Reviewer's note",
+  "col_migration_note": "Migration note",
   "col_teacher_housing": "Teacher housing",
   "col_imam_housing": "Imam housing",
   "col_guest_housing": "Guest housing",
@@ -404,5 +405,8 @@
   "mergeState_rejected": "Rejected",
   "mergeState_reverted": "Undone",
   "uploadState_pending": "Waiting for upload",
-  "uploadState_uploaded": "Uploaded"
+  "uploadState_uploaded": "Uploaded",
+  "migrationNoteTitle": "Migration note (from the previous version)",
+  "migrationNoteHint": "Check it before approving the record.",
+  "migrationNoteFlag": "Migration note"
 }

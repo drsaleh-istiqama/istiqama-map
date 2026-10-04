@@ -272,5 +272,18 @@
   "unnamedUser": "Bila jina",
   "unread": "Haijasomwa:",
   "urgentItems": "Za dharura zaidi",
-  "withoutBranch": "Bila tawi"
+  "withoutBranch": "Bila tawi",
+  "exportDataset": "Jedwali",
+  "dataset_projects": "Miradi",
+  "dataset_staff": "Wafanyakazi",
+  "exportDatasetXlsxHint": "Faili la Excel lina karatasi ya Miradi na karatasi ya pili ya Wafanyakazi wanaofanya kazi katika miradi hii.",
+  "exportDatasetCsvHint": "Faili la CSV lina jedwali moja: chagua Wafanyakazi kuwatoa katika faili tofauti.",
+  "exportDatasetStaffHint": "Safu moja kwa kila wadhifa uliopo katika miradi iliyochaguliwa: jina, wadhifa, tarehe na taarifa za mtu; mishahara pale tu ruhusa yako inaporuhusu.",
+  "staffRows_zero": "Hakuna safu za wafanyakazi",
+  "staffRows_one": "Safu {count} ya wafanyakazi",
+  "staffRows_two": "Safu {count} za wafanyakazi",
+  "staffRows_few": "Safu {count} za wafanyakazi",
+  "staffRows_many": "Safu {count} za wafanyakazi",
+  "staffRows_other": "Safu {count} za wafanyakazi",
+  "fallbackStaffOmitted": "Karatasi ya Wafanyakazi haikujumuishwa; toa Wafanyakazi katika faili tofauti."
 }

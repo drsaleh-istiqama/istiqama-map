@@ -264,6 +264,11 @@ export interface ProjectRow extends StdColumns {
   /** Server-maintained search text. */
   search_norm: string;
   import_batch_id: Uuid | null;
+  /**
+   * Flag written by the v2 migration (salaries given the country's default currency,
+   * OWNER_DECISIONS item أ); client-writable, cleared by a reviewer once checked (migration 0073).
+   */
+  migration_note: string | null;
   lon: number | null;
   lat: number | null;
 }

@@ -382,13 +382,17 @@ select 'n2', pg_temp.push(tests.id('u_sup_pemba'), 'dev-s', jsonb_build_array(
 select is(pg_temp.st('n1') || pg_temp.st('n2'), array['applied', 'conflict'],
   'second land record for the same project is redirected to the existing row');
 select is((pg_temp.r('n2', 0) ->> 'row_id')::uuid, pg_temp.nid(80), 'the canonical row id is returned');
-select is(pg_temp.r('n2', 0) -> 'server_values', '{"area_m2": 500, "owner_name": null}'::jsonb,
-  'server_values keeps an empty server value as null');
+-- migration 0074: an insert elsewhere counts only the fields it filled in, so
+-- owner_name (left empty by dev-a) is simply written; a null kept in
+-- server_values is asserted in file 25 (a field cleared by another device).
+select is(pg_temp.r('n2', 0) -> 'server_values', '{"area_m2": 500}'::jsonb,
+  'server_values: only the field the other device filled in differently');
 select is(
-  (select array_agg(c.field order by c.field) from public.sync_conflicts c
+  (select array_agg(c.field || '=' || coalesce(l.owner_name, '<null>') order by c.field)
+   from public.sync_conflicts c join public.project_land l on l.id = c.row_id
    where c.table_name = 'project_land' and c.row_id = pg_temp.nid(80)),
-  array['area_m2', 'owner_name'],
-  'every differing field becomes a conflict (equal values do not)');
+  array['area_m2=Waqf board'],
+  'a differing filled-in field becomes a conflict; a field the other device left empty is written (equal values neither)');
 select is(
   (select count(*)::int from public.project_land l where l.project_id = pg_temp.nid(1) and l.deleted_at is null), 1,
   'still exactly one live land record');

@@ -11,6 +11,9 @@
  *     that has a paid staff member: the document is right-to-left Arabic, the staff table is
  *     there, and neither the salary option nor any salary figure is shown — the server does
  *     not even send one.
+ *  3. The same collector exports XLSX in Arabic: the workbook has the «المشاريع» sheet and a
+ *     second «الكادر» sheet (export_staff_rows, migration 0073) with Arabic headers and no
+ *     salary column (no restricted access).
  *
  * Clean-up: the export job and its notification are soft-deleted (service role) and the TOTP
  * factor this run created for manager.tz is removed so other suites find the account as
@@ -46,6 +49,13 @@ const TOTP_STATE = join(ROOT, '.local', 'tmp', 'e2e-reports-totp-manager.tz.json
 const SHOTS = join(ROOT, '.local', 'screens');
 
 const ARABIC = /[؀-ۿ]/;
+/** Restricted staff columns (private.export_staff_column_defs, capability "restricted"). */
+const SALARY_HEADERS_AR = [
+  'الراتب الشهري',
+  'عملة الراتب',
+  'الراتب ساري منذ',
+  'الراتب الشهري (دولار أمريكي)',
+];
 const RECORD_STATES_AR = ['مسودة', 'مُرسل للمراجعة', 'معتمد', 'مُعاد للتعديل'];
 
 // ---------------------------------------------------------------------------------------------
@@ -350,6 +360,109 @@ test.describe('reports, export and print', () => {
       expect(seen.foreignRequests).toEqual([]);
       expect(unexpectedErrors(seen.consoleErrors)).toEqual([]);
     } finally {
+      await context.close().catch(() => undefined);
+    }
+  });
+
+  test('collector exports XLSX: a second «الكادر» sheet with Arabic headers and no salary column', async ({
+    browser,
+    request,
+  }) => {
+    const collectorId = await userIdOf(request, COLLECTOR);
+    const context = await browser.newContext({ acceptDownloads: true });
+    const page = await context.newPage();
+    const seen = await observe(context, page);
+    const startedAt = new Date().toISOString();
+    try {
+      await signIn(page, request, COLLECTOR);
+      await appNavigate(page, '/reports');
+      await expect(page.getByTestId('reports-page')).toBeVisible();
+      await page.getByTestId('reports-export').click();
+      const dialog = page.getByTestId('export-dialog');
+      await expect(dialog).toBeVisible();
+      // people scope: the table choice is offered; projects (default) → staff as second sheet
+      await expect(dialog.getByTestId('export-dataset')).toBeVisible();
+      await expect(dialog.getByTestId('export-dataset-projects')).toBeChecked();
+      await expect(dialog.getByTestId('export-salary-note')).toHaveAttribute(
+        'data-restricted',
+        'false',
+      );
+      await dialog.getByTestId('export-format-xlsx').check();
+      await dialog.getByTestId('export-lang-ar').check();
+      await dialog.getByTestId('export-submit').click();
+      await expect(dialog).toBeHidden({ timeout: 30_000 });
+
+      const job = page.getByTestId('export-job-row').first();
+      await expect(job).toHaveAttribute('data-state', 'done', { timeout: 180_000 });
+      const jobId = (await job.getAttribute('data-id')) as string;
+      const [serverJob] = await serviceSelect<{ state: string; stats: Record<string, unknown> }>(
+        request,
+        `export_jobs?select=state,stats&id=eq.${jobId}`,
+      );
+      expect(serverJob?.state).toBe('done');
+      expect(typeof serverJob?.stats.staff_rows).toBe('number');
+
+      const downloadPromise = page.waitForEvent('download', { timeout: 60_000 });
+      await job.getByTestId('export-download').click();
+      const download = await downloadPromise;
+      expect(download.suggestedFilename()).toMatch(/\.xlsx$/i);
+      const workbook = XLSX.read(readFileSync(await download.path()), { type: 'buffer' });
+      expect(workbook.SheetNames).toEqual(['المشاريع', 'الكادر']);
+
+      const sheetRows = (name: string): unknown[][] =>
+        XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[name] as XLSX.WorkSheet, {
+          header: 1,
+          raw: false,
+          defval: '',
+        });
+      const staff = sheetRows('الكادر');
+      const header = (staff[0] ?? []).map(String);
+      expect(header.length).toBeGreaterThan(10);
+      for (const h of header) expect(h).toMatch(ARABIC);
+      expect(header[0]).toBe('رمز المشروع');
+      expect(header).toContain('الدور');
+      expect(header).toContain('الهاتف');
+      for (const salary of SALARY_HEADERS_AR) expect(header).not.toContain(salary);
+      expect(header.some((h) => h.includes('الراتب'))).toBe(false);
+      // the collector's PEMBA projects have staff (seed): rows with Arabic role labels
+      const dataRows = staff.slice(1).filter((r) => r.some((v) => String(v) !== ''));
+      expect(dataRows.length).toBeGreaterThan(0);
+      expect(dataRows.length).toBe(serverJob?.stats.staff_rows);
+      const roleCol = header.indexOf('الدور');
+      for (const r of dataRows) expect(String(r[roleCol] ?? '')).toMatch(ARABIC);
+      // nor in the projects sheet
+      const projectsHeader = (sheetRows('المشاريع')[0] ?? []).map(String);
+      expect(projectsHeader.some((h) => h.includes('الراتب') || h.includes('رواتب'))).toBe(false);
+
+      expect(seen.cspViolations).toEqual([]);
+      expect(seen.foreignRequests).toEqual([]);
+      expect(unexpectedErrors(seen.consoleErrors)).toEqual([]);
+    } finally {
+      const now = new Date().toISOString();
+      const removed = await serviceUpdate<{ storage_path: string | null }>(
+        request,
+        `export_jobs?user_id=eq.${collectorId}&created_at=gte.${startedAt}&deleted_at=is.null`,
+        { deleted_at: now },
+      ).catch(() => [] as Array<{ storage_path: string | null }>);
+      const files = removed.map((j) => j.storage_path).filter((p): p is string => !!p);
+      if (files.length > 0) {
+        const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? localEnv().SUPABASE_SERVICE_ROLE_KEY;
+        await request
+          .delete(`${SUPABASE_URL}/storage/v1/object/exports`, {
+            headers: {
+              apikey: key!,
+              Authorization: `Bearer ${key}`,
+              'Content-Type': 'application/json',
+            },
+            data: { prefixes: files },
+          })
+          .catch(() => undefined);
+      }
+      await serviceUpdate(
+        request,
+        `notifications?user_id=eq.${collectorId}&created_at=gte.${startedAt}&deleted_at=is.null`,
+        { deleted_at: now },
+      ).catch(() => undefined);
       await context.close().catch(() => undefined);
     }
   });

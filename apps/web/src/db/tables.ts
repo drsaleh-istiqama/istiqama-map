@@ -181,6 +181,7 @@ export const TABLE_COLUMNS = {
     'completeness',
     'search_norm',
     'import_batch_id',
+    'migration_note',
     'lon',
     'lat',
   ]),

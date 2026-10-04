@@ -2,7 +2,8 @@
  * Tajawal, self-hosted from node_modules/@fontsource/tajawal (brief §1: no Google Fonts).
  * Only the three weights the UI uses, woff2 only, Arabic + Latin subsets split by
  * unicode-range so a browser downloads just the subset a page needs. `font-display: swap`
- * keeps text visible while the font loads; index.html preloads Arabic 400 and 700.
+ * keeps text visible while the font loads; index.html preloads Arabic 400 only (the body text
+ * of the sign-in screen) — the other faces load with this stylesheet, after the first paint.
  */
 
 /* Arabic */
