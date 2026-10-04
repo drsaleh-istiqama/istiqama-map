@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { can, me, session } from '../../auth';
+import { setLocalSession } from '../../db';
 import { isLocale, savedLocale, setLocale, t } from '../../i18n';
 import { navigate, setScrollContainer, useRoute } from '../../routes';
 import { startSync, stopSync } from '../../sync';
@@ -21,6 +22,7 @@ export const DESKTOP_QUERY = '(min-width: 900px)';
 interface ContextLike {
   user_id?: string;
   profile?: { preferred_language?: string | null } | null;
+  capabilities?: { can_see_restricted?: boolean } | null;
 }
 
 /**
@@ -37,6 +39,7 @@ export function Shell() {
 
   const context = me.value as ContextLike | null;
   const userId = context?.user_id ?? null;
+  const canSeeRestricted = context?.capabilities?.can_see_restricted === true;
   const profileLanguage = context?.profile?.preferred_language ?? null;
   const signedIn = Boolean(session.value);
 
@@ -66,6 +69,32 @@ export function Shell() {
   useEffect(() => {
     if (userId) void loadAppSettings();
   }, [userId]);
+
+  // Who uses this device, for the local database: rows written offline get `created_by`
+  // (the "mine" filter, the device-side duplicate flag) and restricted rows stay in
+  // `restricted_local` unless the user may read them (docs/contracts/web.md §3.4). The value
+  // is stored, so an offline start after a reload keeps it.
+  useEffect(() => {
+    if (userId) setLocalSession({ userId, canSeeRestricted }).catch(() => undefined);
+  }, [userId, canSeeRestricted]);
+
+  // Safety net for interrupted sessions: photos saved on this device whose upload was never
+  // queued (the app closed right after saving) join the upload queue. Lazy: the photos module
+  // is not part of the initial bundle.
+  useEffect(() => {
+    if (!userId) return;
+    import('../../photos/persist')
+      .then((photos) => photos.reconcilePhotoUploads())
+      .catch(() => undefined);
+  }, [userId]);
+
+  // Leaving the signed-in shell (sign-out, PIN lock): free this user's photo object URLs.
+  useEffect(
+    () => () => {
+      import('../../photos/urls').then((photos) => photos.clearPhotoUrls()).catch(() => undefined);
+    },
+    [],
+  );
 
   // First sign-in on this device: follow the language of the user's profile.
   useEffect(() => {

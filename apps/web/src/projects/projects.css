@@ -1,0 +1,739 @@
+/* Projects module: register, details card, maintenance, incomplete records, review queue.
+   Mobile first (2 GB Android phones), logical properties only, RTL by default. */
+
+/* ---------- Page frames ---------- */
+.ppage {
+  max-inline-size: var(--content-max);
+  margin-inline: auto;
+  padding: var(--sp-3);
+}
+/* A page whose body is a virtual list: fills the shell's main area. */
+.ppage--fill {
+  display: flex;
+  flex-direction: column;
+  block-size: 100%;
+  min-block-size: 0;
+}
+.ppage__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin-block-end: var(--sp-3);
+}
+.ppage__intro {
+  margin-block-end: var(--sp-3);
+  color: var(--c-muted);
+}
+
+/* ---------- Register ---------- */
+.plist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  flex: 1;
+  min-block-size: 0;
+}
+.plist__bar {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: stretch;
+}
+.plist__search {
+  flex: 1;
+  min-inline-size: 0;
+}
+.plist__search input {
+  inline-size: 100%;
+  min-block-size: var(--tap);
+}
+.plist__toggle {
+  flex: none;
+  min-block-size: var(--tap);
+}
+.plist__counter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--c-muted);
+}
+.plist__rows {
+  position: relative;
+  flex: 1;
+  min-block-size: 14rem;
+  border: 1px solid var(--c-line);
+  border-radius: var(--radius-lg);
+  background: var(--c-surface);
+  overflow: hidden;
+}
+
+.pfilters[hidden] {
+  display: none;
+}
+.pfilters {
+  padding: var(--sp-3);
+  border: 1px solid var(--c-line);
+  border-radius: var(--radius-lg);
+  background: var(--c-surface);
+}
+.pfilters__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 11rem), 1fr));
+  gap: var(--sp-2) var(--sp-3);
+}
+.pfilters__grid--quick {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.pfilters__item {
+  display: grid;
+  gap: var(--sp-1);
+}
+.pfilters__label {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+}
+.pfilters__item .select {
+  inline-size: 100%;
+  min-block-size: var(--tap);
+}
+.pfilters__switches {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+/* ---------- Register row (project card) ---------- */
+.pcard {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: center;
+  block-size: 100%;
+  padding-block: var(--sp-2);
+  padding-inline: var(--sp-3);
+  border-block-end: 1px solid var(--c-line);
+  cursor: pointer;
+}
+.vlist__row:hover .pcard,
+.vlist__row--active .pcard {
+  background: var(--c-surface-2);
+}
+.pcard__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  inline-size: 2.75rem;
+  block-size: 2.75rem;
+  border-radius: 50%;
+  background: var(--c-surface-2);
+  color: var(--c-navy);
+}
+.pcard__icon--active {
+  background: var(--c-active-soft);
+  color: var(--c-active-ink);
+}
+.pcard__icon--maintenance {
+  background: var(--c-maintenance-soft);
+  color: var(--c-maintenance-ink);
+}
+.pcard__icon--building {
+  background: var(--c-building-soft);
+  color: var(--c-building-ink);
+}
+.pcard__icon--inactive {
+  background: var(--c-inactive-soft);
+  color: var(--c-inactive-ink);
+}
+.pcard__body {
+  display: grid;
+  gap: 0.125rem;
+  min-inline-size: 0;
+  flex: 1;
+}
+.pcard__title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-inline-size: 0;
+}
+.pcard__name {
+  font-weight: var(--fw-bold);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pcard__code {
+  flex: none;
+  font-size: var(--fs-xs);
+  color: var(--c-muted);
+}
+.pcard__place {
+  font-size: var(--fs-sm);
+  color: var(--c-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pcard__meta {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--sp-1);
+  overflow: hidden;
+  font-size: var(--fs-xs);
+}
+.pcard__cmp {
+  color: var(--c-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Cover thumbnail (brief §6): fixed square inside the fixed row height, at the inline end. */
+.pthumb {
+  flex: none;
+  display: block;
+  inline-size: 4rem;
+  block-size: 4rem;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--c-surface-2);
+}
+.pthumb img {
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+}
+@media (max-width: 359px) {
+  .pcard__thumb {
+    inline-size: 3rem;
+    block-size: 3rem;
+  }
+}
+
+/* Sync markers */
+.pflags {
+  display: inline-flex;
+  gap: var(--sp-1);
+}
+.pflag {
+  display: inline-grid;
+  place-items: center;
+  min-inline-size: 1.375rem;
+  block-size: 1.375rem;
+  padding-inline: var(--sp-1);
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+}
+.pflag--dirty {
+  background: var(--c-building-soft);
+  color: var(--c-building-ink);
+}
+.pflag--conflict {
+  background: var(--c-maintenance-soft);
+  color: var(--c-maintenance-ink);
+}
+.pflag--failed {
+  background: var(--c-danger-soft);
+  color: var(--c-danger);
+}
+
+/* ---------- Search hits ---------- */
+.phits {
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--c-line);
+  border-radius: var(--radius-lg);
+  background: var(--c-gold-soft);
+  max-block-size: 40vh;
+  overflow: auto;
+}
+.phits__list,
+.phits__projects {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.phits__item + .phits__item {
+  margin-block-start: var(--sp-2);
+  padding-block-start: var(--sp-2);
+  border-block-start: 1px solid var(--c-line);
+}
+.phits__kind {
+  display: inline-block;
+  margin-inline-end: var(--sp-2);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  color: var(--c-gold-ink);
+}
+.phits__name {
+  font-weight: var(--fw-bold);
+}
+.phits__project,
+.phits__locality {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-block-size: var(--tap);
+  padding-inline: var(--sp-1);
+  border: 0;
+  background: none;
+  color: var(--c-navy);
+  font: inherit;
+  text-align: start;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  cursor: pointer;
+}
+.phits__note {
+  font-size: var(--fs-xs);
+  color: var(--c-maintenance-ink);
+}
+.phits__pending {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-sm);
+}
+
+/* ---------- Details card ---------- */
+.pdetails {
+  display: grid;
+  gap: var(--sp-3);
+}
+.pdetails__head {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-4);
+  border-radius: var(--radius-lg);
+  background: var(--c-navy);
+  color: var(--c-on-navy);
+}
+.pdetails__type {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--c-on-navy-muted);
+  font-size: var(--fs-sm);
+}
+.pdetails__name {
+  margin: 0;
+  font-size: var(--fs-xl);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.pdetails__place {
+  color: var(--c-on-navy-muted);
+}
+.pdetails__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: center;
+}
+.pdetails__code {
+  color: var(--c-gold);
+  font-weight: var(--fw-bold);
+}
+.pdetails__meter {
+  display: grid;
+  gap: var(--sp-1);
+  font-size: var(--fs-sm);
+  color: var(--c-on-navy-muted);
+}
+.pdetails__meter .meter {
+  background: rgba(255, 255, 255, 0.18);
+}
+.pdetails__meter .meter__fill {
+  background: var(--c-gold);
+}
+.pdetails__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.pdetails__actions .btn,
+.pdetails__actions a.btn {
+  min-block-size: var(--tap);
+}
+a.btn {
+  text-decoration: none;
+}
+.pdetails__notice {
+  padding: var(--sp-3);
+  border-radius: var(--radius);
+  border-inline-start: 4px solid var(--c-maintenance);
+  background: var(--c-maintenance-soft);
+  color: var(--c-text);
+}
+.pdetails__notice--info {
+  border-inline-start-color: var(--c-building);
+  background: var(--c-building-soft);
+}
+.pdetails__notice--danger {
+  border-inline-start-color: var(--c-danger);
+  background: var(--c-danger-soft);
+}
+.pdetails__notice h3 {
+  margin: 0 0 var(--sp-1);
+  font-size: var(--fs-md);
+}
+.pdetails__notice p {
+  margin: 0;
+}
+.psection {
+  padding: var(--sp-4);
+  border: 1px solid var(--c-line);
+  border-radius: var(--radius-lg);
+  background: var(--c-surface);
+}
+.psection > h2 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin: 0 0 var(--sp-3);
+  font-size: var(--fs-lg);
+}
+.psection__empty {
+  margin: 0;
+  color: var(--c-muted);
+}
+.pkv {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 14rem), 1fr));
+  gap: var(--sp-2) var(--sp-4);
+  margin: 0;
+}
+.pkv > div {
+  display: grid;
+  gap: 0.125rem;
+  padding-block: var(--sp-1);
+  border-block-end: 1px dashed var(--c-line);
+}
+.pkv dt {
+  font-size: var(--fs-sm);
+  color: var(--c-muted);
+}
+.pkv dd {
+  margin: 0;
+  font-weight: var(--fw-medium);
+  overflow-wrap: anywhere;
+}
+.ptags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.ptags li {
+  padding: 0.125rem var(--sp-2);
+  border-radius: 999px;
+  background: var(--c-surface-2);
+  font-size: var(--fs-sm);
+}
+.prows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-2);
+}
+.prow {
+  display: grid;
+  gap: var(--sp-1);
+  padding: var(--sp-3);
+  border: 1px solid var(--c-line);
+  border-radius: var(--radius);
+}
+.prow__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.prow__title {
+  font-weight: var(--fw-bold);
+}
+.prow__meta {
+  font-size: var(--fs-sm);
+  color: var(--c-muted);
+}
+.prow__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: center;
+}
+.prow__actions .select {
+  min-block-size: var(--tap);
+}
+.pnote {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--c-muted);
+}
+
+/* Forms inside sections (maintenance entry, return note) */
+.pform {
+  display: grid;
+  gap: var(--sp-3);
+  margin-block-start: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px dashed var(--c-line-strong);
+  border-radius: var(--radius);
+}
+.pform__row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 10rem), 1fr));
+  gap: var(--sp-3);
+}
+.pform textarea,
+.pdialog textarea {
+  inline-size: 100%;
+  min-block-size: 6rem;
+}
+
+/* ---------- Lists of other pages (maintenance, incomplete, review) ---------- */
+.mrow {
+  display: grid;
+  gap: 0.125rem;
+  block-size: 100%;
+  padding-block: var(--sp-2);
+  padding-inline: var(--sp-3);
+  border-block-end: 1px solid var(--c-line);
+  cursor: pointer;
+  align-content: center;
+}
+.vlist__row:hover .mrow,
+.vlist__row--active .mrow {
+  background: var(--c-surface-2);
+}
+.mrow__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-inline-size: 0;
+}
+.mrow__title {
+  font-weight: var(--fw-bold);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mrow__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mrow__meta {
+  font-size: var(--fs-sm);
+  color: var(--c-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prio--urgent {
+  background: var(--c-danger-soft);
+  color: var(--c-danger);
+}
+
+/* Fixed-height rows of the review queue and the incomplete records (virtual lists, brief §5).
+   Every line keeps to one row of text so the row height never changes. */
+.pfill {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-block-size: 0;
+}
+.ppage--fill > .ptabs {
+  flex: none;
+}
+.pvbox {
+  position: relative;
+  border: 1px solid var(--c-line);
+  border-radius: var(--radius-lg);
+  background: var(--c-surface);
+  overflow: hidden;
+}
+.rrow {
+  display: grid;
+  align-content: start;
+  gap: var(--sp-1);
+  block-size: 100%;
+  padding-block: var(--sp-2);
+  padding-inline: var(--sp-3);
+  border-block-end: 1px solid var(--c-line);
+  overflow: hidden;
+  cursor: pointer;
+}
+.vlist__row:hover .rrow,
+.vlist__row--active .rrow {
+  background: var(--c-surface-2);
+}
+.rrow__head,
+.rrow__line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-inline-size: 0;
+  overflow: hidden;
+}
+.rrow__line {
+  gap: var(--sp-1);
+  font-size: var(--fs-sm);
+}
+.rrow__line > * {
+  flex: none;
+}
+.rrow__line > .rrow__text {
+  flex: 0 1 auto;
+}
+.rrow__name {
+  min-inline-size: 0;
+  font-weight: var(--fw-bold);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rrow__code {
+  flex: none;
+  font-size: var(--fs-xs);
+  color: var(--c-muted);
+}
+.rrow__text {
+  min-inline-size: 0;
+  font-size: var(--fs-sm);
+  color: var(--c-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rrow__actions {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: var(--sp-2);
+  align-items: center;
+}
+.rrow__actions .btn {
+  min-block-size: var(--tap);
+}
+.rrow__end {
+  flex: none;
+  margin-inline-start: auto;
+}
+/* What is missing: at most two lines of tags (the full list stays in the DOM and the title). */
+.rrow__missing {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-1);
+  min-inline-size: 0;
+  max-block-size: 3.5rem;
+  overflow: hidden;
+}
+.rrow__label {
+  flex: none;
+  font-size: var(--fs-sm);
+  color: var(--c-muted);
+}
+.rrow__missing .ptags li {
+  font-size: var(--fs-xs);
+}
+.vlist__row:hover .rrow .ptags li,
+.vlist__row--active .rrow .ptags li {
+  background: var(--c-surface);
+}
+
+.ptabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-block-end: var(--sp-3);
+}
+.ptabs .chip {
+  font-weight: var(--fw-medium);
+}
+.pcount {
+  display: inline-grid;
+  place-items: center;
+  min-inline-size: 1.5rem;
+  padding-inline: var(--sp-1);
+  border-radius: 999px;
+  background: var(--c-gold);
+  color: var(--c-navy-900);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+}
+.pvalues {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: var(--sp-2);
+}
+.pvalue {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius);
+  background: var(--c-surface-2);
+}
+.pvalue__label {
+  display: block;
+  font-size: var(--fs-xs);
+  color: var(--c-muted);
+}
+.pvalue__text {
+  font-weight: var(--fw-bold);
+  overflow-wrap: anywhere;
+}
+
+/* Touch targets: at least 44 px everywhere in this module (2 GB Android phones). */
+.ppage .btn--sm,
+.plist .btn--sm {
+  min-block-size: var(--tap);
+}
+.prow a,
+.pdetails a {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-block-size: var(--tap);
+}
+
+.pstack {
+  display: grid;
+  gap: var(--sp-3);
+}
+.psection__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin: 0 0 var(--sp-3);
+  font-size: var(--fs-lg);
+}
+.pdetails__sync {
+  font-size: var(--fs-sm);
+  color: var(--c-on-navy-muted);
+}
+.pdetails__sync[data-state='failed'],
+.pdetails__sync[data-state='conflict'] {
+  color: var(--c-gold);
+  font-weight: var(--fw-bold);
+}
+
+@media (min-width: 900px) {
+  .ppage {
+    padding: var(--sp-4);
+  }
+}
+
+@media print {
+  .pdetails__actions,
+  .plist__bar {
+    display: none !important;
+  }
+}

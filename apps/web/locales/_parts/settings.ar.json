@@ -15,8 +15,6 @@
   "pendingPhotos": "صور لم تُرفع بعد",
   "wifiOnlyLabel": "رفع الصور عبر Wi-Fi فقط",
   "wifiOnlyHint": "يوفّر باقة البيانات: تبقى الصور على الجهاز حتى تتصل بشبكة Wi-Fi.",
-  "mapPacksTitle": "حزم الخرائط دون اتصال",
-  "mapPacksPlaceholder": "ستظهر هنا حزم الخرائط التي يمكن تنزيلها للعمل دون اتصال.",
   "v2ImportTitle": "ترحيل بيانات الإصدار السابق",
   "v2ImportPlaceholder": "ستظهر هنا أداة ترحيل بيانات الإصدار 2 من هذا الجهاز أو من ملف JSON.",
   "securityTitle": "الأمان",

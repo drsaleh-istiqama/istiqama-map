@@ -81,6 +81,15 @@ vi.mock('../ui/pwa/register', async (original) => ({
   ...((await original()) as Record<string, unknown>),
   purgeUserCaches: mocks.purgeCaches,
 }));
+// The pack manager has its own tests (src/map/PacksSection.test.tsx); here we only check
+// that Settings mounts it.
+vi.mock('../map/PacksSection', async () => {
+  const { h } = await import('preact');
+  return {
+    default: () =>
+      h('section', { 'data-testid': 'settings-map-packs', 'data-mock': 'packs-section' }),
+  };
+});
 
 import * as auth from '../auth';
 import { locale, setLocale } from '../i18n';
@@ -204,10 +213,12 @@ describe('storage and Wi-Fi only', () => {
   });
 });
 
-describe('placeholders for other teams', () => {
-  it('keeps clearly marked sections for map packs and the v2 import', () => {
+describe('sections owned by other teams', () => {
+  it('mounts the offline map packs manager and keeps the v2 import placeholder', () => {
     render(<SettingsPage />);
-    expect(screen.getByTestId('settings-map-packs').textContent).toContain('Offline map packs');
+    expect(screen.getByTestId('settings-map-packs').getAttribute('data-mock')).toBe(
+      'packs-section',
+    );
     expect(screen.getByTestId('settings-v2-import').textContent).toContain('previous version');
   });
 });

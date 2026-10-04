@@ -1,4 +1,5 @@
 import { t } from '../i18n';
+import PacksSection from '../map/PacksSection';
 import { AboutSection } from './AboutSection';
 import { LanguageSection } from './LanguageSection';
 import { SecuritySection } from './SecuritySection';
@@ -6,8 +7,11 @@ import { StorageSection } from './StorageSection';
 import './settings.css';
 
 /**
- * Settings (route `/settings`): language, storage and Wi-Fi-only uploads, PIN and sign-out,
- * about. Two sections are placeholders that other teams fill in.
+ * Settings (route `/settings`): language, storage and Wi-Fi-only uploads, offline map packs,
+ * PIN and sign-out, about. The v2 import section is a placeholder the migration team fills in.
+ *
+ * `PacksSection` (src/map) renders its own `<section data-testid="settings-map-packs">`; it
+ * imports only types from `pmtiles`, so it stays inside this lazy route chunk.
  */
 export default function SettingsPage() {
   return (
@@ -15,19 +19,7 @@ export default function SettingsPage() {
       <LanguageSection />
       <StorageSection />
 
-      {/* ============================================================================
-          PLACEHOLDER — MAP TEAM: offline map packs (brief §4.7).
-          Replace the paragraph with the pack manager (list of `map_packs`, size before
-          download, progress, delete). Keep the <section> and its test id.
-          ============================================================================ */}
-      <section
-        class="card card--placeholder"
-        aria-labelledby="settings-map-packs"
-        data-testid="settings-map-packs"
-      >
-        <h2 id="settings-map-packs">{t('settings.mapPacksTitle')}</h2>
-        <p class="muted">{t('settings.mapPacksPlaceholder')}</p>
-      </section>
+      <PacksSection />
 
       {/* ============================================================================
           PLACEHOLDER — MIGRATION TEAM: v2 → v3 import (brief §10).

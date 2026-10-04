@@ -1,0 +1,526 @@
+/* Map module — page, map overlays, pick mode, project card, offline packs.
+   RTL-first, logical properties only; touch targets ≥ 44 px; the MapLibre canvas itself is LTR. */
+
+/* ---------- Page layout ---------- */
+/* Phone: [Map | List] switch, then the list's search bar above the map (map tab) or the whole
+   list (list tab). Wide screens: list column beside the map. */
+.mappage {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  block-size: 100%;
+  min-block-size: 22rem;
+}
+.mappage--wide {
+  grid-template-rows: minmax(0, 1fr);
+}
+.mappage__tabs {
+  display: flex;
+  gap: var(--sp-2);
+  padding-inline: var(--sp-3);
+  padding-block: var(--sp-2);
+}
+.mappage__tabs .btn {
+  flex: 1;
+  min-block-size: var(--tap);
+}
+.mappage__body {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  min-block-size: 0;
+}
+.mappage__body--list {
+  grid-template-rows: minmax(0, 1fr);
+}
+.mappage--wide .mappage__body {
+  grid-template-columns: 24rem minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+}
+.mappage__list {
+  display: flex;
+  min-block-size: 0;
+  padding-inline: var(--sp-3);
+  padding-block-end: var(--sp-2);
+}
+.mappage--wide .mappage__list {
+  padding: 0;
+}
+/* Map tab on phones: keep the search bar, the filters and the counter; hide the rows. */
+.mappage__list--bar .plist__rows {
+  display: none;
+}
+/* The list takes the width of the page, never the width of its longest text (a long Swahili
+   placeholder pushed the filters past the screen edge). */
+.mappage__list > .plist {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+}
+.mappage__map {
+  position: relative;
+  min-block-size: 0;
+  overflow: hidden;
+}
+.mappage--wide .mappage__map {
+  border: 1px solid var(--c-line);
+  border-radius: var(--radius-lg);
+}
+/* Hidden with visibility (not display): the map keeps its size and its WebGL context. */
+.mappage__map--hidden {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  /* MapLibre's controls set their own visibility: opacity hides them too. */
+  opacity: 0;
+  pointer-events: none;
+}
+.mapcard__dot {
+  flex: none;
+  inline-size: 0.875rem;
+  block-size: 0.875rem;
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 0 3px var(--c-line-strong);
+}
+
+/* ---------- Map view and overlays ---------- */
+.mapview {
+  /* The compact attribution (OpenStreetMap / Protomaps) has the bottom row at the inline end to
+     itself; the legend and "my location" sit one row higher, so nothing covers it. */
+  --map-attrib-size: 24px;
+  --map-controls-bottom: calc(var(--map-attrib-size) + 2 * var(--sp-2));
+  position: relative;
+  inline-size: 100%;
+  block-size: 100%;
+  min-block-size: 18rem;
+  background: #e2dfda;
+}
+@media (pointer: coarse) {
+  .mapview {
+    --map-attrib-size: var(--tap);
+  }
+}
+/* The project card covers the bottom of the map (phones; MapView sets the attribute and the
+   height it covers): legend and "my location" float just above it, the attribution stays under
+   it and the card shows the attribution text instead (.mapcard__attrib) — nothing wide sits in
+   the strip of map where the selected project is drawn. */
+.mapview[data-cover='bottom'] {
+  --map-controls-bottom: var(--map-cover-bottom, 0px);
+}
+/* Two classes: MapLibre's own `.maplibregl-map { position: relative }` must not win. */
+.mapview > .mapview__canvas {
+  position: absolute;
+  inset: 0;
+}
+.mapview__cover {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(246, 247, 249, 0.85);
+  z-index: 3;
+}
+.mapview__cover--fatal p {
+  max-inline-size: 22rem;
+  padding: var(--sp-4);
+  text-align: center;
+}
+.mapview__top {
+  position: absolute;
+  inset-block-start: var(--sp-2);
+  inset-inline-start: var(--sp-2);
+  /* Room for MapLibre's zoom buttons, which sit at the inline end. */
+  inset-inline-end: 3.5rem;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  pointer-events: none;
+}
+.mapview__top > * {
+  pointer-events: auto;
+}
+.mapview__notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  max-inline-size: 36rem;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius);
+  background: var(--c-warning-bg);
+  color: #fff;
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+.mapview__notice-link {
+  color: #fff;
+  font-weight: var(--fw-bold);
+  text-decoration: underline;
+}
+.mapview__notice-link:focus-visible {
+  outline-color: #fff;
+}
+.mapview__heat {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: var(--elev);
+}
+.mapview__heat-title {
+  display: flex;
+  justify-content: center;
+  padding-inline: var(--sp-1);
+  color: var(--c-muted);
+}
+.mapview__chip {
+  min-block-size: var(--tap);
+  padding-inline: var(--sp-3);
+  border: 1px solid var(--c-line-strong);
+  border-radius: 999px;
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+.mapview__chip--on {
+  border-color: var(--c-maintenance-ink);
+  background: var(--c-maintenance-soft);
+  color: var(--c-maintenance-ink);
+  font-weight: var(--fw-bold);
+}
+.mapview__legend {
+  position: absolute;
+  inset-block-end: var(--map-controls-bottom);
+  inset-inline-start: var(--sp-2);
+  z-index: 2;
+  max-inline-size: calc(100% - var(--tap) - 3 * var(--sp-2));
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: var(--elev);
+  font-size: var(--fs-xs);
+}
+.mapview__legend-toggle {
+  min-block-size: var(--tap);
+  min-inline-size: var(--tap);
+  padding-inline: var(--sp-1);
+  border: 0;
+  background: none;
+  color: var(--c-text);
+  font: inherit;
+  font-weight: var(--fw-bold);
+  cursor: pointer;
+}
+.mapview__legend-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-3);
+  margin: 0;
+  padding: 0 var(--sp-1) var(--sp-1);
+  list-style: none;
+}
+.mapview__legend-items li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.mapview__swatch {
+  inline-size: 0.75rem;
+  block-size: 0.75rem;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px var(--c-line-strong);
+}
+.mapview__swatch--cluster {
+  background: var(--c-navy);
+}
+.mapview__swatch--pending {
+  border-color: var(--c-gold);
+  background: var(--c-surface);
+  box-shadow: none;
+}
+.mapview__heat-ramp {
+  inline-size: 2rem;
+  block-size: 0.5rem;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #fde7b0, #f6b24a, #d9661f, #9a2a0a);
+}
+.mapview__locate {
+  position: absolute;
+  inset-block-end: var(--map-controls-bottom);
+  inset-inline-end: var(--sp-2);
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  inline-size: var(--tap);
+  block-size: var(--tap);
+  border: 1px solid var(--c-line-strong);
+  border-radius: var(--radius);
+  background: var(--c-surface);
+  color: var(--c-navy);
+  box-shadow: var(--elev);
+  cursor: pointer;
+}
+.mapview__locate:hover {
+  background: var(--c-surface-2);
+}
+/* MapLibre controls: bigger hit areas on phones. The canvas is dir="ltr", so inside it the
+   logical sides are the physical ones MapLibre uses. */
+.mapview .maplibregl-ctrl-group button {
+  inline-size: 36px;
+  block-size: 36px;
+}
+.mapview .maplibregl-ctrl-attrib.maplibregl-compact {
+  margin: var(--sp-2);
+}
+@media (pointer: coarse) {
+  .mapview .maplibregl-ctrl-group button {
+    inline-size: var(--tap);
+    block-size: var(--tap);
+  }
+  /* The attribution's (i) button: 44 px like every other touch target. */
+  .mapview .maplibregl-ctrl-attrib.maplibregl-compact {
+    padding-block: calc((var(--tap) - 20px) / 2);
+    padding-inline-end: var(--tap);
+    border-radius: calc(var(--tap) / 2);
+  }
+  .mapview .maplibregl-ctrl-bottom-right > .maplibregl-ctrl-attrib.maplibregl-compact-show {
+    padding-block: calc((var(--tap) - 20px) / 2);
+    padding-inline: var(--sp-2) calc(var(--tap) + var(--sp-1));
+  }
+  .mapview .maplibregl-ctrl-bottom-left > .maplibregl-ctrl-attrib.maplibregl-compact-show {
+    padding-block: calc((var(--tap) - 20px) / 2);
+    padding-inline: calc(var(--tap) + var(--sp-1)) var(--sp-2);
+  }
+  .mapview .maplibregl-ctrl-attrib-button {
+    inline-size: var(--tap);
+    block-size: var(--tap);
+    border-radius: calc(var(--tap) / 2);
+    background-position: center;
+    background-repeat: no-repeat;
+  }
+}
+.mapview .maplibregl-canvas:focus-visible {
+  outline: 3px solid var(--c-focus);
+  outline-offset: -3px;
+}
+
+/* ---------- Selected project card ---------- */
+/* Phone: a compact bottom sheet. Head and main action never scroll away; only the facts scroll
+   when the card is short of room. MapView keeps the project in the map above it. */
+.mapcard {
+  position: absolute;
+  inset-inline: var(--sp-2);
+  inset-block-end: var(--sp-2);
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  max-block-size: 60%;
+  overflow: hidden;
+  padding: var(--sp-1) var(--sp-3) var(--sp-2);
+  border: 1px solid var(--c-line);
+  border-radius: var(--radius-lg);
+  background: var(--c-surface);
+  box-shadow: 0 4px 16px rgba(15, 37, 69, 0.18);
+}
+@media (min-width: 900px) {
+  /* At the inline end, below MapLibre's zoom buttons (the heat-map chips are at the start). */
+  .mapcard {
+    inset-inline: auto var(--sp-3);
+    inset-block: calc(var(--sp-3) + 5.5rem) auto;
+    inline-size: 22rem;
+    max-block-size: calc(100% - 5.5rem - 2 * var(--sp-3));
+    padding: var(--sp-3) var(--sp-4);
+  }
+}
+.mapcard__head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.mapcard__title {
+  flex: 1;
+  min-inline-size: 0;
+  font-size: var(--fs-lg);
+}
+.mapcard__body {
+  display: grid;
+  flex: 0 1 auto;
+  gap: var(--sp-1);
+  min-block-size: 0;
+  overflow: auto;
+}
+.mapcard__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+/* Phone: the facts on one wrapping line ("Code TZ-PN-000001  Area Bopwe  Capacity 350"). */
+.mapcard .mapcard__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-4);
+  font-size: var(--fs-sm);
+}
+.mapcard__facts > div {
+  display: flex;
+  gap: var(--sp-1);
+  min-inline-size: 0;
+}
+@media (min-width: 900px) {
+  .mapcard .mapcard__facts {
+    display: grid;
+  }
+  .mapcard__facts > div {
+    display: contents;
+  }
+}
+/* Phone: the card covers the map's attribution control, so it carries the attribution itself. */
+.mapcard__attrib {
+  flex: none;
+  margin: 0;
+  color: var(--c-muted);
+  font-size: var(--fs-xs);
+  text-align: end;
+}
+@media (min-width: 900px) {
+  .mapcard__attrib {
+    display: none;
+  }
+}
+.mapcard__actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.mapcard__actions .btn {
+  min-block-size: var(--tap);
+}
+
+/* ---------- Pick mode ---------- */
+.picker {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: var(--c-bg);
+}
+.picker:focus {
+  outline: none;
+}
+.picker__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2) var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
+  border-block-end: 2px solid var(--c-gold);
+  background: var(--c-surface);
+}
+.picker__text {
+  display: grid;
+  gap: var(--sp-1);
+  min-inline-size: 0;
+}
+.picker__text strong {
+  color: var(--c-navy);
+}
+.picker__text span {
+  color: var(--c-muted);
+  font-size: var(--fs-sm);
+}
+.picker__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-2);
+  inline-size: 100%;
+}
+.picker__actions .btn {
+  min-block-size: var(--tap);
+}
+.picker__actions .btn--ghost {
+  grid-column: 1 / -1;
+}
+@media (min-width: 700px) {
+  .picker__actions {
+    display: flex;
+    inline-size: auto;
+  }
+}
+.picker__map {
+  position: relative;
+  min-block-size: 0;
+}
+.picker__crosshair {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: 50%;
+  z-index: 1;
+  inline-size: 1.5rem;
+  block-size: 1.5rem;
+  margin-block-start: -0.75rem;
+  margin-inline-start: -0.75rem;
+  pointer-events: none;
+  background:
+    linear-gradient(var(--c-navy), var(--c-navy)) center / 2px 100% no-repeat,
+    linear-gradient(var(--c-navy), var(--c-navy)) center / 100% 2px no-repeat;
+  opacity: 0.7;
+}
+
+/* ---------- Offline packs (Settings) ---------- */
+.packs__list {
+  display: grid;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pack {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--c-line);
+  border-radius: var(--radius);
+}
+.pack__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.pack__name {
+  font-weight: var(--fw-bold);
+}
+.pack__meta {
+  color: var(--c-muted);
+  font-size: var(--fs-sm);
+}
+.pack__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.pack__actions .btn {
+  min-block-size: var(--tap);
+}
+.pack__error {
+  color: var(--c-danger);
+  font-size: var(--fs-sm);
+}

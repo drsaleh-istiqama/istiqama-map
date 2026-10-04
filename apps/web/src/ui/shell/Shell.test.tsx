@@ -56,7 +56,37 @@ vi.mock('../../sync', async () => {
   };
 });
 
+/**
+ * The feature views (Unit 3) are real pages that read the local database and start the map
+ * engine; this file tests the shell only, so every feature route renders a marker instead.
+ */
+const stubs = vi.hoisted(() => ({
+  view: (name: string) => async () => {
+    const { h } = await import('preact');
+    return { default: () => h('div', { 'data-testid': `stub-${name}` }) };
+  },
+}));
+vi.mock('../../map/MapPage', stubs.view('map'));
+vi.mock('../../projects/ProjectsPage', stubs.view('projects'));
+vi.mock('../../projects/ProjectFormPage', stubs.view('project-form'));
+vi.mock('../../projects/ProjectDetailsPage', stubs.view('project-details'));
+vi.mock('../../projects/MaintenancePage', stubs.view('maintenance'));
+vi.mock('../../projects/IncompletePage', stubs.view('incomplete'));
+vi.mock('../../projects/ReviewPage', stubs.view('review'));
+vi.mock('../../people/PeoplePage', stubs.view('people'));
+
+const photoMocks = vi.hoisted(() => ({
+  setLocalSession: vi.fn(async (_next: unknown) => undefined),
+  reconcilePhotoUploads: vi.fn(async () => 0),
+  clearPhotoUrls: vi.fn(),
+}));
+vi.mock('../../photos/persist', () => ({
+  reconcilePhotoUploads: photoMocks.reconcilePhotoUploads,
+}));
+vi.mock('../../photos/urls', () => ({ clearPhotoUrls: photoMocks.clearPhotoUrls }));
+
 vi.mock('../../db', () => ({
+  setLocalSession: photoMocks.setLocalSession,
   listProjects: mocks.listProjects,
   getAppSetting: async (key: string, fallback: unknown) => mocks.cachedSettings[key] ?? fallback,
   saveAppSettings: async (rows: Array<{ key: string; value: unknown }>) => {
@@ -277,6 +307,32 @@ describe('<Shell> chrome', () => {
       expect(screen.getByTestId('account-name').textContent).toBe('سالم بن ناصر'),
     );
     expect(screen.getByTestId('account-role').textContent).toBe('Head office');
+  });
+
+  it('tells the local database who uses the device and reconciles photo uploads', async () => {
+    photoMocks.setLocalSession.mockClear();
+    photoMocks.reconcilePhotoUploads.mockClear();
+    photoMocks.clearPhotoUrls.mockClear();
+    const view = render(<Shell />);
+    expect(photoMocks.setLocalSession).not.toHaveBeenCalled();
+
+    me.value = {
+      user_id: 'u9',
+      profile: { full_name: 'Juma', preferred_language: 'en' },
+      roles: [],
+      assigned_roles: [],
+      capabilities: { can_see_restricted: true },
+    };
+    await waitFor(() =>
+      expect(photoMocks.setLocalSession).toHaveBeenCalledWith({
+        userId: 'u9',
+        canSeeRestricted: true,
+      }),
+    );
+    await waitFor(() => expect(photoMocks.reconcilePhotoUploads).toHaveBeenCalledTimes(1));
+
+    view.unmount();
+    await waitFor(() => expect(photoMocks.clearPhotoUrls).toHaveBeenCalledTimes(1));
   });
 
   it('shows a neutral placeholder while the user context is unknown', () => {

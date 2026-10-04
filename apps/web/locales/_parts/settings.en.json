@@ -15,8 +15,6 @@
   "pendingPhotos": "Photos not uploaded yet",
   "wifiOnlyLabel": "Upload photos on Wi-Fi only",
   "wifiOnlyHint": "Saves mobile data: photos stay on the device until you connect to Wi-Fi.",
-  "mapPacksTitle": "Offline map packs",
-  "mapPacksPlaceholder": "Map packs you can download for offline work will appear here.",
   "v2ImportTitle": "Move data from the previous version",
   "v2ImportPlaceholder": "The tool that moves version 2 data from this device or from a JSON file will appear here.",
   "securityTitle": "Security",

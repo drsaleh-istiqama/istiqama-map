@@ -11,72 +11,12 @@
  *
  * The account's profile language is left as seeded (the last switch selects it again).
  */
-import {
-  expect,
-  test,
-  type APIRequestContext,
-  type BrowserContext,
-  type Page,
-} from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
+import { observe, PIN, readOtp } from './helpers';
 
-const SUPABASE_URL =
-  process.env.E2E_SUPABASE_URL ?? process.env.VITE_SUPABASE_URL ?? 'http://127.0.0.1:54321';
 const EMAIL = process.env.E2E_EMAIL ?? 'collector.pemba@example.org';
 /** Seeded preferred_language of the account (supabase/seed.staging.sql). */
 const PROFILE_LANGUAGE = process.env.E2E_PROFILE_LANGUAGE ?? 'sw';
-const PIN = '482916';
-const ALLOWED_HOSTS = new Set(['127.0.0.1']);
-
-interface Observed {
-  consoleErrors: string[];
-  cspViolations: string[];
-  foreignRequests: string[];
-}
-
-/** Collects console errors, CSP violations and off-origin requests of pages AND the service worker. */
-async function observe(context: BrowserContext, page: Page): Promise<Observed> {
-  const seen: Observed = { consoleErrors: [], cspViolations: [], foreignRequests: [] };
-  context.on('request', (request) => {
-    const url = new URL(request.url());
-    if (url.protocol === 'data:' || url.protocol === 'blob:') return;
-    if (!ALLOWED_HOSTS.has(url.hostname)) seen.foreignRequests.push(request.url());
-  });
-  page.on('console', (message) => {
-    if (message.type() === 'error')
-      seen.consoleErrors.push(`${message.text()} @ ${message.location().url || '?'}`);
-  });
-  page.on('pageerror', (error) => seen.consoleErrors.push(`pageerror: ${error.message}`));
-  await context.exposeBinding('__e2eCspViolation', (_source, text: string) => {
-    seen.cspViolations.push(text);
-  });
-  await context.addInitScript(() => {
-    document.addEventListener('securitypolicyviolation', (event) => {
-      const report = (window as unknown as { __e2eCspViolation?: (text: string) => void })
-        .__e2eCspViolation;
-      report?.(`${event.effectiveDirective} blocked ${event.blockedURI || '(inline)'}`);
-    });
-  });
-  return seen;
-}
-
-/** The fake OTP provider keeps the last code per identifier (loopback only). */
-async function readOtp(request: APIRequestContext, identifier: string): Promise<string> {
-  let code = '';
-  await expect
-    .poll(
-      async () => {
-        const response = await request.get(
-          `${SUPABASE_URL}/dev/otp?identifier=${encodeURIComponent(identifier)}`,
-        );
-        if (!response.ok()) return '';
-        code = String(((await response.json()) as { code?: unknown }).code ?? '');
-        return code;
-      },
-      { message: `no OTP code for ${identifier} at ${SUPABASE_URL}/dev/otp`, timeout: 15_000 },
-    )
-    .toMatch(/^\d{6}$/);
-  return code;
-}
 
 /**
  * Settings → language. The choice is also saved to the profile (fire and forget): wait for

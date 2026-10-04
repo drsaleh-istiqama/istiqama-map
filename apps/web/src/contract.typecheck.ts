@@ -17,6 +17,12 @@ import type * as Normalize from './lib/normalize';
 import type * as Prefs from './lib/prefs';
 import type * as Similarity from './lib/similarity';
 import type * as Uuid from './lib/uuidv7';
+import type { ComponentType } from 'preact';
+import type * as MapApi from './map';
+import type MapView from './map/MapView';
+import type PersonPicker from './people/PersonPicker';
+import type * as Photos from './photos';
+import type * as Labels from './projects/labels';
 import type * as Routes from './routes';
 import type * as Sync from './sync';
 import type * as Ui from './ui';
@@ -278,6 +284,95 @@ export type _Auth = [
     >
   >,
   Assert<Fits<typeof Auth.deviceId, () => string>>,
+];
+
+// --- §3.7 src/photos -----------------------------------------------------------------------------
+type PhotoRowC = Db.Row<'project_photos'>;
+export type _Photos = [
+  Assert<
+    Fits<
+      typeof Photos.compressPhoto,
+      (file: Blob) => Promise<{
+        full: Blob;
+        thumb: Blob;
+        width: number;
+        height: number;
+        takenAt: string | null;
+        mime: 'image/webp' | 'image/jpeg';
+      }>
+    >
+  >,
+  Assert<
+    Fits<
+      typeof Photos.addPhoto,
+      (
+        projectId: string,
+        file: Blob,
+        meta?: { category?: string; caption?: string },
+      ) => Promise<PhotoRowC>
+    >
+  >,
+  Assert<
+    Fits<
+      typeof Photos.photoUrl,
+      (photo: PhotoRowC, kind: 'thumb' | 'full') => Promise<string | null>
+    >
+  >,
+  Assert<
+    Fits<
+      typeof Photos.PhotoEditor,
+      ComponentType<{
+        projectId: string;
+        photos: PhotoRowC[];
+        onChange: (photos: PhotoRowC[]) => void;
+        max?: number;
+      }>
+    >
+  >,
+];
+
+// --- §3.8 src/map --------------------------------------------------------------------------------
+export type _Map = [
+  Assert<
+    Fits<
+      typeof MapApi.pickLocation,
+      (initial: Geo.LonLat | null) => Promise<(Geo.LonLat & { source: 'map' }) | null>
+    >
+  >,
+  Assert<Fits<typeof MapApi.flyToProject, (p: Geo.LonLat) => void>>,
+  Assert<Fits<typeof MapApi.fitToFilter, (filter: Db.ProjectFilter) => Promise<void>>>,
+  Assert<
+    Fits<
+      typeof MapView,
+      ComponentType<{
+        filter: Db.ProjectFilter;
+        onSelectProject?: (id: string, properties: Record<string, unknown>) => void;
+      }>
+    >
+  >,
+];
+
+// --- §5 Unit 3 shared pieces ---------------------------------------------------------------------
+export type _Unit3Shared = [
+  Assert<Fits<typeof Labels.typeLabel, (code: string) => string>>,
+  Assert<Fits<typeof Labels.statusLabel, (code: string) => string>>,
+  Assert<Fits<typeof Labels.recordStateLabel, (code: string) => string>>,
+  Assert<
+    Fits<
+      typeof PersonPicker,
+      ComponentType<{
+        value: string | null;
+        onChange: (
+          sel:
+            | { personId: string }
+            | { newPerson: { name_ar: string; name_latin?: string; phone_e164?: string } },
+        ) => void;
+        adminAreaId?: string | null;
+        role?: string | null;
+        testId?: string;
+      }>
+    >
+  >,
 ];
 
 // --- §3.9 routes ---------------------------------------------------------------------------------
