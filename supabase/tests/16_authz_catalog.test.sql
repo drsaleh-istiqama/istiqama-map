@@ -8,15 +8,20 @@
 --   * every policy targets role authenticated; field tables have SELECT
 --     policies only;
 --   * the Appendix A.3 helpers exist with the agreed signatures and are
---     STABLE + SECURITY DEFINER with a pinned search_path.
+--     STABLE + SECURITY DEFINER with a pinned search_path;
+--   * schema private (migration 0070): RLS enabled and forced on every table,
+--     no policy, no privilege for the API roles on tables, views or sequences;
+--   * public.server_info() (migration 0070) and the retention cron jobs.
 --
 -- A NEW TABLE IN SCHEMA public MAKES THIS FILE FAIL until it is classified in
 -- docs/contracts/authz.md and added to the lists below. That is intended.
+-- A NEW TABLE IN SCHEMA private MAKES THIS FILE FAIL until its migration
+-- enables and forces RLS (or ends with: select private.harden_private_schema();).
 -- =============================================================================
 begin;
 set local search_path = public, extensions, tests;
 
-select plan(60);
+select plan(84);
 
 -- Relations of schema public that do not belong to an extension.
 create temporary view _public_rels as
@@ -106,6 +111,71 @@ select is_empty(
        and has_table_privilege(r.rolname, c.oid, p.priv)
      order by 1, 2 $$,
   'API roles hold no privilege on any table or view of schema private');
+
+select is_empty(
+  $$ select c.relname, r.rolname
+     from pg_class c
+     join pg_namespace n on n.oid = c.relnamespace
+     cross join (values ('anon'), ('authenticated')) as r (rolname)
+     where n.nspname = 'private' and c.relkind = 'S'
+       and (has_sequence_privilege(r.rolname, c.oid, 'USAGE') or has_sequence_privilege(r.rolname, c.oid, 'SELECT')
+         or has_sequence_privilege(r.rolname, c.oid, 'UPDATE'))
+     order by 1, 2 $$,
+  'API roles hold no privilege on any sequence of schema private');
+
+-- Schema private (migration 0070): closed twice. No privilege, and RLS forced
+-- without any policy, so a grant made by mistake would still show nothing.
+select is_empty(
+  $$ select c.relname
+     from pg_class c
+     join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'private' and c.relkind in ('r', 'p')
+       and not (c.relrowsecurity and c.relforcerowsecurity)
+       and not exists (
+         select 1 from pg_depend d
+         where d.classid = 'pg_class'::regclass and d.objid = c.oid and d.deptype = 'e')
+     order by 1 $$,
+  'RLS is enabled AND forced on every table of schema private');
+
+select is_empty(
+  $$ select tablename, policyname from pg_policies where schemaname = 'private' order by 1, 2 $$,
+  'schema private has no policy at all (only SECURITY DEFINER code, whose owner bypasses RLS, reads it)');
+
+select is(private.harden_private_schema(), 0,
+  'private.harden_private_schema() finds nothing left to harden after the migrations');
+
+grant select on private.sync_tables to authenticated, service_role;
+set local role authenticated;
+select is((select count(*)::int from private.sync_tables), 0,
+  'even with a SELECT grant, authenticated sees no row of a private table (forced RLS, no policy)');
+set local role service_role;
+select cmp_ok((select count(*)::int from private.sync_tables), '>', 0,
+  'a BYPASSRLS role with the same grant reads it: this is how the owner of the SECURITY DEFINER functions gets through');
+reset role;
+revoke select on private.sync_tables from authenticated, service_role;
+
+-- A table added later is repaired by re-running the function.
+create table private._hardening_probe (id integer primary key);
+grant select, insert on private._hardening_probe to authenticated;
+select is(private.harden_private_schema(), 2,
+  'harden_private_schema() turns two switches on for a new private table (enable + force)');
+select is(
+  (select array[c.relrowsecurity, c.relforcerowsecurity,
+                has_table_privilege('authenticated', c.oid, 'SELECT'),
+                has_table_privilege('authenticated', c.oid, 'INSERT')]
+   from pg_class c where c.oid = 'private._hardening_probe'::regclass),
+  array[true, true, false, false],
+  'the new table ends up with RLS enabled + forced and without the stray grant');
+drop table private._hardening_probe;
+
+select is(
+  array[has_function_privilege('anon', 'private.harden_private_schema()', 'EXECUTE'),
+        has_function_privilege('authenticated', 'private.harden_private_schema()', 'EXECUTE'),
+        has_function_privilege('service_role', 'private.harden_private_schema()', 'EXECUTE'),
+        has_function_privilege('anon', 'private.schema_version()', 'EXECUTE'),
+        has_function_privilege('authenticated', 'private.schema_version()', 'EXECUTE')],
+  array[false, false, false, false, false],
+  'no API role can execute harden_private_schema(); anon and authenticated cannot execute schema_version()');
 
 -- Really anonymous: every table refuses, whatever the privilege catalog says.
 select tests.login_anon();
@@ -280,6 +350,135 @@ select is_empty(
        select 1 from pg_trigger g
        where g.tgrelid = ('public.' || t)::regclass and g.tgname = 't01_append_only' and g.tgenabled <> 'D') $$,
   'the log tables carry an enabled append-only trigger');
+
+-- -----------------------------------------------------------------------------
+-- 7. server_info() (migration 0070): diagnostics for any signed-in user
+-- -----------------------------------------------------------------------------
+select is(
+  (select p.prosecdef::text || '/' || p.provolatile::text || '/' || p.prorettype::regtype::text || '/'
+          || (exists (select 1 from unnest(coalesce(p.proconfig, '{}')) c where c like 'search_path=%'))::text
+   from pg_proc p where p.oid = 'public.server_info()'::regprocedure),
+  'true/s/jsonb/true',
+  'server_info(): SECURITY DEFINER, STABLE, returns jsonb, pinned search_path');
+
+select is(
+  array[has_function_privilege('anon', 'public.server_info()', 'EXECUTE'),
+        has_function_privilege('authenticated', 'public.server_info()', 'EXECUTE'),
+        has_function_privilege('service_role', 'public.server_info()', 'EXECUTE')],
+  array[false, true, true],
+  'server_info(): executable by authenticated and service_role, not by anon');
+
+select is(
+  (select array_agg(k order by k) from jsonb_object_keys(public.server_info()) as k),
+  array['app_environment', 'postgis_version', 'schema_version', 'server_time'],
+  'server_info(): returns exactly app_environment, postgis_version, schema_version, server_time');
+
+-- app_environment: the app_settings row app.environment when it is a JSON string, else "production".
+select is(
+  public.server_info() ->> 'app_environment',
+  coalesce((select s.value #>> '{}' from public.app_settings s
+            where s.key = 'app.environment' and s.deleted_at is null and jsonb_typeof(s.value) = 'string'),
+           'production'),
+  'server_info(): app_environment reflects this database (the setting, or "production" without it)');
+
+insert into public.app_settings (id, key, value, is_public)
+values (private.ref_uuid('setting:app.environment'), 'app.environment', '"staging"'::jsonb, true)
+on conflict (key) do update set value = excluded.value, deleted_at = null;
+select is(public.server_info() ->> 'app_environment', 'staging',
+  'server_info(): app_environment is "staging" when the staging seed wrote the setting');
+
+update public.app_settings set deleted_at = now() where key = 'app.environment';
+select is(public.server_info() ->> 'app_environment', 'production',
+  'server_info(): a soft-deleted setting counts as absent ("production")');
+
+update public.app_settings set deleted_at = null, value = '123'::jsonb where key = 'app.environment';
+select is(public.server_info() ->> 'app_environment', 'production',
+  'server_info(): a value that is not a JSON string is ignored ("production")');
+
+-- schema_version: 14 digits; the newest of private.schema_version() and the migrations
+-- recorded by the Supabase CLI (the Docker-less local stack has no such table).
+select ok(
+  public.server_info() ->> 'schema_version' ~ '^[0-9]{14}$'
+  and (public.server_info() ->> 'schema_version') collate "C" >= private.schema_version() collate "C"
+  and private.schema_version() ~ '^[0-9]{14}$',
+  'server_info(): schema_version is a 14-digit migration version, never older than private.schema_version()');
+
+create temporary table _fake_migrations (created boolean not null) on commit drop;
+do $fake$
+begin
+  if to_regclass('supabase_migrations.schema_migrations') is null then
+    create schema supabase_migrations;
+    create table supabase_migrations.schema_migrations (version text primary key);
+    insert into supabase_migrations.schema_migrations (version)
+    values ('20261003007000'), ('29990101000000'), ('not-a-version'), ('3');
+    insert into _fake_migrations values (true);
+  else
+    insert into _fake_migrations values (false);
+  end if;
+end
+$fake$;
+
+select is(
+  public.server_info() ->> 'schema_version',
+  (select greatest(private.schema_version() collate "C", max(m.version::text collate "C"))
+   from supabase_migrations.schema_migrations m where m.version::text ~ '^[0-9]{14}$'),
+  'server_info(): schema_version is the newest of the constant and supabase_migrations.schema_migrations');
+
+select case
+  when (select created from _fake_migrations) then
+    is(public.server_info() ->> 'schema_version', '29990101000000',
+       'server_info(): a newer recorded migration wins; malformed versions are ignored')
+  else
+    skip('supabase_migrations.schema_migrations is real here: no fake versions are inserted', 1)
+end;
+
+select cmp_ok(
+  abs(extract(epoch from ((public.server_info() ->> 'server_time')::timestamptz - clock_timestamp()))),
+  '<', 5::numeric,
+  'server_info(): server_time is the current server clock');
+
+select is(public.server_info() ->> 'postgis_version', postgis_lib_version(),
+  'server_info(): postgis_version is the PostGIS library version');
+
+set local role authenticated;
+select is(
+  (select count(*)::int from jsonb_object_keys(public.server_info())), 4,
+  'server_info(): callable through the API role authenticated');
+reset role;
+
+select tests.login_anon();
+select throws_ok('select public.server_info()', '42501', null, 'server_info(): refused for anon');
+select tests.logout();
+
+-- -----------------------------------------------------------------------------
+-- 8. Retention jobs (migration 0070). Checked only where pg_cron works and the
+--    jobs of this database are visible to the test role (reference: the report
+--    refresh job scheduled by migration 0058).
+-- -----------------------------------------------------------------------------
+-- cron.job cannot be named in static SQL: the schema does not exist without pg_cron.
+create function pg_temp.cron_jobnames()
+returns setof text
+language plpgsql
+as $f$
+begin
+  if to_regclass('cron.job') is null then
+    return;
+  end if;
+  return query execute 'select j.jobname::text from cron.job j where j.jobname is not null';
+end
+$f$;
+
+select case
+  when to_regclass('cron.job') is null then
+    skip('pg_cron is not installed: sync retention must be scheduled externally', 1)
+  when not exists (
+    select 1 from pg_temp.cron_jobnames() as j (jobname) where j.jobname = 'istiqama-refresh-reports') then
+    skip('pg_cron jobs of the migrations are not visible here', 1)
+  else
+    ok((select count(*) = 2 from pg_temp.cron_jobnames() as j (jobname)
+        where j.jobname in ('istiqama-sync-prune', 'istiqama-sync-rejections-cleanup')),
+       'pg_cron: istiqama-sync-prune and istiqama-sync-rejections-cleanup are scheduled')
+end;
 
 select * from finish();
 rollback;

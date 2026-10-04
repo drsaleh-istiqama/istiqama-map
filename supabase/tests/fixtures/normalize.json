@@ -1,0 +1,302 @@
+[
+  {
+    "name": "empty string",
+    "input": "",
+    "expected": ""
+  },
+  {
+    "name": "only spaces",
+    "input": "   ",
+    "expected": ""
+  },
+  {
+    "name": "ASCII is lower-cased",
+    "input": "MASJID AL-NOOR",
+    "expected": "masjid al-noor"
+  },
+  {
+    "name": "ASCII punctuation and digits are kept",
+    "input": "Shule ya Msingi (Qur'an) - No. 2, Wete!",
+    "expected": "shule ya msingi (qur'an) - no. 2, wete!"
+  },
+  {
+    "name": "Swahili apostrophe is kept",
+    "input": "Kijiji cha Ng'ambo",
+    "expected": "kijiji cha ng'ambo"
+  },
+  {
+    "name": "project code",
+    "input": "TZ-PN-000123",
+    "expected": "tz-pn-000123"
+  },
+  {
+    "name": "phone number with spaces",
+    "input": "+255 712 345 678",
+    "expected": "+255 712 345 678"
+  },
+  {
+    "name": "runs of spaces collapse, both ends are trimmed",
+    "input": "  Msikiti   wa    Ijumaa  ",
+    "expected": "msikiti wa ijumaa"
+  },
+  {
+    "name": "tashkeel is removed (schema.md example)",
+    "input": "  \u0645\u064E\u0633\u0652\u062C\u0650\u062F\u064F   \u0627\u0644\u0646\u0651\u064F\u0648\u0631 ",
+    "expected": "\u0645\u0633\u062C\u062F \u0627\u0644\u0646\u0648\u0631"
+  },
+  {
+    "name": "only tanween gives the empty string",
+    "input": "\u064B\u064C\u064D",
+    "expected": ""
+  },
+  {
+    "name": "tashkeel range bounds U+064B and U+065F",
+    "input": "\u0628\u064B\u0633\u065F\u0645",
+    "expected": "\u0628\u0633\u0645"
+  },
+  {
+    "name": "superscript alef U+0670 is removed",
+    "input": "\u0631\u062D\u0645\u0670\u0646",
+    "expected": "\u0631\u062D\u0645\u0646"
+  },
+  {
+    "name": "Quranic annotation marks U+06D6..U+06ED are removed",
+    "input": "\u0628\u06D6\u0633\u06E1\u0645\u06ED",
+    "expected": "\u0628\u0633\u0645"
+  },
+  {
+    "name": "marks U+0653..U+0656 on a letter that does not compose",
+    "input": "\u0628\u0653\u0628\u0654\u0628\u0655\u0628\u0656",
+    "expected": "\u0628\u0628\u0628\u0628"
+  },
+  {
+    "name": "tatweel is removed",
+    "input": "\u0645\u0640\u0640\u062D\u0645\u062F",
+    "expected": "\u0645\u062D\u0645\u062F"
+  },
+  {
+    "name": "only tatweel gives the empty string",
+    "input": "\u0640\u0640\u0640",
+    "expected": ""
+  },
+  {
+    "name": "tatweel on both sides of a space",
+    "input": "\u0645\u0640 \u0640\u062D",
+    "expected": "\u0645 \u062D"
+  },
+  {
+    "name": "alef with hamza above becomes alef",
+    "input": "\u0631\u0623\u0633",
+    "expected": "\u0631\u0627\u0633"
+  },
+  {
+    "name": "alef with hamza below becomes alef",
+    "input": "\u0625\u0633\u0644\u0627\u0645",
+    "expected": "\u0627\u0633\u0644\u0627\u0645"
+  },
+  {
+    "name": "alef with madda becomes alef",
+    "input": "\u0627\u0644\u0642\u0631\u0622\u0646",
+    "expected": "\u0627\u0644\u0642\u0631\u0627\u0646"
+  },
+  {
+    "name": "alef, yeh and teh marbuta folding (schema.md example)",
+    "input": "\u0623\u062D\u0645\u062F \u0625\u0628\u0631\u0627\u0647\u064A\u0645 \u0622\u0644 \u0645\u0648\u0633\u0649 \u0641\u0627\u0637\u0645\u0629",
+    "expected": "\u0627\u062D\u0645\u062F \u0627\u0628\u0631\u0627\u0647\u064A\u0645 \u0627\u0644 \u0645\u0648\u0633\u064A \u0641\u0627\u0637\u0645\u0647"
+  },
+  {
+    "name": "waw with hamza is kept",
+    "input": "\u0645\u0633\u0624\u0648\u0644",
+    "expected": "\u0645\u0633\u0624\u0648\u0644"
+  },
+  {
+    "name": "yeh with hamza is kept, teh marbuta becomes heh",
+    "input": "\u0642\u0627\u0626\u0645\u0629",
+    "expected": "\u0642\u0627\u0626\u0645\u0647"
+  },
+  {
+    "name": "hamza on the line is kept",
+    "input": "\u0633\u0645\u0627\u0621",
+    "expected": "\u0633\u0645\u0627\u0621"
+  },
+  {
+    "name": "waw with hamza inside a phrase (schema.md example)",
+    "input": "\u0645\u0624\u0633\u0633\u0629 \u0627\u0644\u062E\u064A\u0631",
+    "expected": "\u0645\u0624\u0633\u0633\u0647 \u0627\u0644\u062E\u064A\u0631"
+  },
+  {
+    "name": "alef maqsura becomes yeh",
+    "input": "\u0645\u0635\u0637\u0641\u0649",
+    "expected": "\u0645\u0635\u0637\u0641\u064A"
+  },
+  {
+    "name": "alef maqsura in a short word",
+    "input": "\u0639\u0644\u0649",
+    "expected": "\u0639\u0644\u064A"
+  },
+  {
+    "name": "teh marbuta becomes heh",
+    "input": "\u0645\u062F\u0631\u0633\u0629",
+    "expected": "\u0645\u062F\u0631\u0633\u0647"
+  },
+  {
+    "name": "NFC first: alef + combining hamza above folds to alef",
+    "input": "\u0627\u0654\u062D\u0645\u062F",
+    "expected": "\u0627\u062D\u0645\u062F"
+  },
+  {
+    "name": "NFC first: alef + combining madda folds to alef",
+    "input": "\u0627\u0653\u0644",
+    "expected": "\u0627\u0644"
+  },
+  {
+    "name": "NFC first: alef + combining hamza below folds to alef",
+    "input": "\u0627\u0655\u0633",
+    "expected": "\u0627\u0633"
+  },
+  {
+    "name": "NFC first: waw + combining hamza above composes and is kept",
+    "input": "\u0645\u0633\u0648\u0654\u0648\u0644",
+    "expected": "\u0645\u0633\u0624\u0648\u0644"
+  },
+  {
+    "name": "NFC first: yeh + combining hamza above composes and is kept",
+    "input": "\u0642\u0627\u064A\u0654\u062F",
+    "expected": "\u0642\u0627\u0626\u062F"
+  },
+  {
+    "name": "Farsi yeh and keheh are not folded",
+    "input": "\u06A9\u062A\u0627\u0628\u06CC",
+    "expected": "\u06A9\u062A\u0627\u0628\u06CC"
+  },
+  {
+    "name": "presentation forms are not decomposed (NFC, not NFKC)",
+    "input": "\uFEFB",
+    "expected": "\uFEFB"
+  },
+  {
+    "name": "Arabic punctuation is kept",
+    "input": "\u0645\u0633\u062C\u062F\u060C \u0645\u062F\u0631\u0633\u0629\u061B \u0645\u0627\u0630\u0627\u061F",
+    "expected": "\u0645\u0633\u062C\u062F\u060C \u0645\u062F\u0631\u0633\u0647\u061B \u0645\u0627\u0630\u0627\u061F"
+  },
+  {
+    "name": "Arabic-Indic digits are untouched",
+    "input": "\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669",
+    "expected": "\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669"
+  },
+  {
+    "name": "Extended Arabic-Indic digits are untouched",
+    "input": "\u06F0\u06F1\u06F2\u06F3\u06F4\u06F5\u06F6\u06F7\u06F8\u06F9",
+    "expected": "\u06F0\u06F1\u06F2\u06F3\u06F4\u06F5\u06F6\u06F7\u06F8\u06F9"
+  },
+  {
+    "name": "ASCII and Arabic-Indic digits side by side",
+    "input": "\u0645\u0633\u062C\u062F 12 \u0661\u0662",
+    "expected": "\u0645\u0633\u062C\u062F 12 \u0661\u0662"
+  },
+  {
+    "name": "every white-space character becomes one space",
+    "input": "  a\u0009b\u000Ac\u000D\u000Ad\u00A0e\u2003f\u3000g\u2009\u200Ah\u202Fi\u205Fj\u1680k\u0085l\u2028m\u2029n\u000Bo\u000Cp\u2000q ",
+    "expected": "a b c d e f g h i j k l m n o p q"
+  },
+  {
+    "name": "white space around Arabic text is trimmed",
+    "input": "\u0009\u000A \u0645\u0633\u062C\u062F \u00A0\u3000",
+    "expected": "\u0645\u0633\u062C\u062F"
+  },
+  {
+    "name": "zero width space is removed, not turned into a space",
+    "input": "a\u200Bb",
+    "expected": "ab"
+  },
+  {
+    "name": "Latin accents are stripped (schema.md example)",
+    "input": "  Msikiti   wa  \u00C9COLE S\u00E3o  \u00D1and\u00FA ",
+    "expected": "msikiti wa ecole sao nandu"
+  },
+  {
+    "name": "Latin-1 accented letters",
+    "input": "\u00C0\u00C1\u00C2\u00C3\u00C4\u00C5\u00C7\u00C8\u00C9\u00CA\u00CB\u00CC\u00CD\u00CE\u00CF\u00D1\u00D2\u00D3\u00D4\u00D5\u00D6\u00D9\u00DA\u00DB\u00DC\u00DD\u00E0\u00E1\u00E2\u00E3\u00E4\u00E5\u00E7\u00E8\u00E9\u00EA\u00EB\u00EC\u00ED\u00EE\u00EF\u00F1\u00F2\u00F3\u00F4\u00F5\u00F6\u00F9\u00FA\u00FB\u00FC\u00FD\u00FF",
+    "expected": "aaaaaaceeeeiiiinooooouuuuyaaaaaaceeeeiiiinooooouuuuyy"
+  },
+  {
+    "name": "macron (transliteration)",
+    "input": "Masjid al-N\u016Br",
+    "expected": "masjid al-nur"
+  },
+  {
+    "name": "dot below (transliteration)",
+    "input": "\u1E24asan \u1E62\u0101li\u1E25",
+    "expected": "hasan salih"
+  },
+  {
+    "name": "capital I with dot above",
+    "input": "\u0130stanbul",
+    "expected": "istanbul"
+  },
+  {
+    "name": "Vietnamese stacked accents",
+    "input": "Nguy\u1EC5n",
+    "expected": "nguyen"
+  },
+  {
+    "name": "letters with horn",
+    "input": "\u01A0\u01A1\u01AF\u01B0",
+    "expected": "oouu"
+  },
+  {
+    "name": "decomposed (NFD) Latin input",
+    "input": "Cafe\u0301 Mu\u0308nchen",
+    "expected": "cafe munchen"
+  },
+  {
+    "name": "stray combining marks are dropped",
+    "input": "x\u0301y\u0323",
+    "expected": "xy"
+  },
+  {
+    "name": "Latin combining mark on an Arabic letter is dropped",
+    "input": "\u0628\u0301",
+    "expected": "\u0628"
+  },
+  {
+    "name": "bidi marks LRM and RLM are removed",
+    "input": "\u200Fabc\u200E",
+    "expected": "abc"
+  },
+  {
+    "name": "zero width joiner and non-joiner are removed",
+    "input": "a\u200Cb\u200Dc",
+    "expected": "abc"
+  },
+  {
+    "name": "byte order mark is removed",
+    "input": "\uFEFF\u0645\u0633\u062C\u062F",
+    "expected": "\u0645\u0633\u062C\u062F"
+  },
+  {
+    "name": "bidi embeddings and isolates are removed",
+    "input": "\u202Aa\u202Bb\u202Cc\u202Dd\u202Ee\u2066f\u2067g\u2068h\u2069",
+    "expected": "abcdefgh"
+  },
+  {
+    "name": "mixed scripts in one string",
+    "input": "\u0645\u064E\u0633\u0652\u062C\u0650\u062F \u0627\u0644\u0646\u0651\u064F\u0648\u0631 / Masjid An-N\u016Br (TZ-PN-000123)",
+    "expected": "\u0645\u0633\u062C\u062F \u0627\u0644\u0646\u0648\u0631 / masjid an-nur (tz-pn-000123)"
+  },
+  {
+    "name": "characters outside the BMP are kept",
+    "input": "Masjid \uD83D\uDD4C Nur",
+    "expected": "masjid \uD83D\uDD4C nur"
+  },
+  {
+    "name": "backslash and quotes are kept",
+    "input": "A\\B \"c\" 'd'",
+    "expected": "a\\b \"c\" 'd'"
+  },
+  {
+    "name": "backslash between accented letters",
+    "input": "Caf\u00E9\\N\u016Br",
+    "expected": "cafe\\nur"
+  }
+]

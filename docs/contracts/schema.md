@@ -1,13 +1,19 @@
-# Core schema contract (migrations 0001–0009)
+# Core schema contract (migrations 0001–0009, hardening 0070)
 
 Reference for every other team. It describes the tables **as created** by
 `supabase/migrations/20261003000100 … 000900`. Read this instead of the SQL.
+§9 covers `20261003007000_integration_hardening.sql` (schema `private` lock-down, retention
+jobs, `server_info()`).
 
 - All tables are in schema `public` unless stated otherwise. Text enumerations are `text` + `CHECK`
-  (constraint name `<table>_<column>_ck`), never enum types.
-- RLS is **enabled and forced** on every table (no policies here → default deny until 0010+).
+  (constraint name `<table>_<column>_ck`, sometimes with a shortened column name:
+  `persons_phone_ck`, `project_land_area_ck`, `fx_rates_rate_ck`), never enum types.
+- RLS is **enabled and forced** on every table (no policies here → default deny until 0010+),
+  including every table of schema `private` (§9.1).
 - SECURITY DEFINER code must be owned by a role with `BYPASSRLS` (`postgres` on Supabase),
   otherwise the forced RLS also applies to it.
+- pgTAP: `supabase/tests/01_core_schema.test.sql` (triggers of this layer),
+  `02_reference_data.test.sql`, `03_normalize.test.sql` (generated, §2.1).
 
 ## 1. Standard columns
 
@@ -46,6 +52,8 @@ No standard columns: `audit_log, sync_applied_ops, restricted_access_log`, `priv
 | `private.deepest_admin_area(geometry)` | `table(id uuid, country_id uuid, level smallint)` | deepest live `admin_areas` row whose `geom` contains the point (`ST_Contains`); 0 rows when none |
 | `private.next_project_code(country_id uuid, admin_area_id uuid)` | `text` | consumes the per-country counter; owner only |
 | `private.project_completeness(p public.projects, p_skip_children boolean default false)` | `smallint` | §5; STABLE |
+| `private.harden_private_schema()` | `integer` | §9.1; owner only |
+| `private.schema_version()` | `text` | §9.3; 14-digit prefix of the newest migration, **bump it in every later migration** |
 
 ### 2.1 `private.norm` — canonical algorithm (mirror it exactly in `normalize.ts`)
 
@@ -74,6 +82,41 @@ Code points are written as `U+XXXX`; in a JS regex they become `\uXXXX` escapes.
 `norm(NULL)` is NULL, `norm('')` is `''`. Examples:
 `"  مَسْجِدُ   النُّور "` → `"مسجد النور"`; `"أحمد إبراهيم آل موسى فاطمة"` → `"احمد ابراهيم ال موسي فاطمه"`;
 `"مؤسسة الخير"` → `"مؤسسه الخير"`; `"  Msikiti   wa  ÉCOLE São  Ñandú "` → `"msikiti wa ecole sao nandu"`.
+
+**Shared fixture.** `supabase/tests/fixtures/normalize.json` is an array of
+`{ "name", "input", "expected" }` (60 cases; pure ASCII, every other character is a `\uXXXX`
+escape). `expected` was produced by `private.norm()` itself, so the file is the truth for both
+implementations:
+
+- SQL: `supabase/tests/03_normalize.test.sql` is **generated** from it (one `is()` per case plus
+  NULL, function properties and idempotence) — never edit it by hand.
+- TypeScript: the unit test of `apps/web/src/lib/normalize.ts` must loop over the same file
+  (`expect(norm(c.input)).toBe(c.expected)`, test title `c.name`). Both a plain implementation
+  of the steps above and the current `norm()` of the web app pass all 60 cases.
+
+```bash
+npx tsx scripts/gen-normalize-test.ts                      # JSON -> 03_normalize.test.sql
+npx tsx scripts/gen-normalize-test.ts --check              # CI guard: canonical JSON, SQL not stale
+npx tsx scripts/gen-normalize-test.ts --update --db imap_x # recompute "expected" in a database
+```
+
+To add a case, append `{ "name": "…", "input": "…", "expected": "" }` and run `--update`.
+Keep out of the fixture what is not guaranteed to be the same everywhere:
+
+- characters that `unaccent` rewrites although they have no canonical decomposition. Measured on
+  PostgreSQL 17: `ß→ss`, `æ→ae`, `œ→oe`, `Ø ø→o`, `Ð ð→d`, `Þ þ→th`, `đ→d`, `ł→l`, `ı→i`,
+  `Ɓ ɓ→b`, `’→'`, `—→-`, `«→<<`, `×→*`, `÷→/`, soft hyphen `U+00AD→-`. These rules come from the
+  `unaccent.rules` file of the server and may differ between PostgreSQL major versions (the brief
+  allows 15+), so a twin may mirror them (the web app does, for PostgreSQL 17) but the shared
+  fixture does not depend on them;
+- letters whose lower-casing depends on the database locale (Cyrillic, Greek, … — anything that
+  is not ASCII after step 2).
+
+Covered on purpose because they are easy to get wrong in the twin: NFC **before** the removal of
+marks (`و` + `U+0654` composes to `ؤ` and is kept; `ا` + `U+0654` composes to `أ` and folds to
+`ا`), no NFKC (the ligature `U+FEFB` stays), Farsi `ی`/`ک` are not folded, Arabic-Indic digits
+and Arabic punctuation are untouched, `U+200B` is removed rather than turned into a space,
+characters outside the BMP survive.
 
 Normalised columns hold **both scripts in one string** (`name_ar name_latin …`). Match a query
 with *word* similarity (`norm(q) <% col`, `word_similarity`, `strict_word_similarity`) or `LIKE`,
@@ -448,3 +491,68 @@ PL/pgSQL caches while a table is still empty (first rows of a bulk load) stay in
 | `23514` | constraint `<table>_<column>_ck` | enumerations, ranges, paths, `projects_geom_required_ck` |
 | `23505` | index/constraint name | `projects_code_key`, `projects_external_id_key`, `<table>_project_live_key`, `project_photos_cover_key`, `project_donors_live_key`, `staff_compensation_live_key`, `user_roles_live_key`, … |
 | `23502` / `23503` | — | missing required value / unknown reference |
+
+BEFORE triggers run before the CHECK constraints: a level-1 `admin_areas` row with a parent fails
+with `PT422 admin_area_parent_mismatch` (not with `admin_areas_parent_ck`). When several CHECKs
+fail at once PostgreSQL reports the first one by constraint name.
+
+## 9. Integration hardening (migration 0070)
+
+### 9.1 Schema `private` is closed twice
+
+Every table of schema `private` has RLS **enabled and forced** and **no policy**; `public`,
+`anon` and `authenticated` hold no privilege on any table, view, materialized view or sequence
+of the schema. The tables are reachable only by SECURITY DEFINER code, whose owner bypasses RLS
+(`postgres` has `BYPASSRLS` on Supabase; the superuser locally). A privilege granted by mistake
+therefore still shows no row.
+
+```sql
+private.harden_private_schema() returns integer   -- owner only, idempotent
+```
+
+walks `pg_class`, enables + forces RLS on every table of the schema, revokes everything from
+`public, anon, authenticated` on every relation and returns the number of RLS switches it had
+to turn on (0 = nothing to do). It refuses to force RLS on a table whose owner has neither
+`SUPERUSER` nor `BYPASSRLS` (the SECURITY DEFINER functions would silently read empty tables).
+
+**Adding a table to schema `private`:** either write `enable` + `force row level security` and
+the `revoke` yourself, or end the migration with `select private.harden_private_schema();`.
+pgTAP file 16 fails while a table of the schema is not hardened or the schema has a policy.
+Materialized views cannot have RLS; they rely on the missing privileges.
+
+### 9.2 Scheduled jobs (pg_cron)
+
+| Job | Schedule (UTC) | Command | Migration |
+|---|---|---|---|
+| `istiqama-refresh-reports` | every 15 min | `select public.refresh_reports()` | 0058 |
+| `istiqama-rate-limit-cleanup` | hourly, minute 7 | `select private.rate_limit_cleanup()` | 0058 |
+| `istiqama-expire-exports` | daily 02:23 | `select private.expire_export_jobs()` | 0058 |
+| `istiqama-sync-prune` | daily 02:41 | `select private.sync_prune()` — ledger `sync_applied_ops` and scope-move log, 180 days | 0070 |
+| `istiqama-sync-rejections-cleanup` | daily 02:53 | `select private.sync_rejections_cleanup()` — rejected-operation log, 30 days | 0070 |
+
+All are scheduled only when `pg_cron` can be enabled; otherwise the migrations print a notice
+and do nothing. The jobs run as the role that applied the migration, without an end-user JWT
+(required by the hard-delete guard, §6). The local gateway timers only cover
+`refresh_reports()` and the photo purge: on a stack without `pg_cron` the retention functions
+have to be called by an external scheduler over a database connection (schema `private` is not
+exposed through the REST API; EXECUTE is granted to the owner and `service_role` only). The
+90-day photo purge needs object storage and stays in the `purge-photos` Edge Function.
+
+### 9.3 `public.server_info()` → jsonb
+
+For the diagnostics / "about" screen. `STABLE`, `SECURITY DEFINER`, EXECUTE for `authenticated`
+and `service_role` (not `anon`); no further authorisation, no rate limit, never raises.
+
+```jsonc
+{ "app_environment": "staging",          // app_settings 'app.environment' when it is a non-empty JSON
+                                         // string, else "production" (reference-data.md §5)
+  "schema_version": "20261003007000",    // 14-digit prefix of the newest migration, as text
+  "server_time": "2026-10-03T15:43:38.093651+00:00",   // clock_timestamp()
+  "postgis_version": "3.6.2" }           // postgis_lib_version()
+```
+
+`schema_version` is the greater of `private.schema_version()` (a constant, **to be bumped by
+every later migration** with `create or replace function private.schema_version() …`) and the
+newest 14-digit `version` in `supabase_migrations.schema_migrations`. That table exists wherever
+the Supabase CLI applied the migrations (hosted, self-hosted, CI); the Docker-less local stack
+does not record migrations, so there the constant alone is reported.
