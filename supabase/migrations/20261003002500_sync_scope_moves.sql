@@ -9,7 +9,10 @@
 --   1. Users of the NEW scope receive the row itself (it changed), but not its
 --      children: their sync_xid is old, so no pull round would return them.
 --      -> the children of a re-scoped project are re-stamped (sync_xid only,
---         no data change), so they travel with the project.
+--         no data change), so they travel with the project. The donors of the
+--         project travel too without being touched: sync_pull delivers the
+--         donor of every project_donors row whose sync_xid is in the window
+--         (migration 0022, "DONORS"), and the links are re-stamped here.
 --
 --   2. Users of the OLD scope never hear about the row again and would keep a
 --      stale copy for ever.

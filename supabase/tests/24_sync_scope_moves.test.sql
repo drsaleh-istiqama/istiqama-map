@@ -5,7 +5,7 @@
 begin;
 set local search_path = public, extensions, tests;
 
-select plan(21);
+select plan(22);
 
 -- Deterministic transaction-id clock, see 23_sync_pull.test.sql.
 create or replace function private.current_xid() returns bigint language sql stable as
@@ -96,8 +96,9 @@ insert into res select 'ke0', pg_temp.pull_all(tests.id('u_mgr_ke'), null, 'aal2
 
 select ok(
   not (array[tests.id('p_pemba_2')] && pg_temp.t('tanga0', 'projects'))
-  and not (pg_temp.t('tanga0', 'project_photos') && array[tests.id('photo:p_pemba_2')]),
-  'before the move: the Tanga collector has neither the project nor its children');
+  and not (pg_temp.t('tanga0', 'project_photos') && array[tests.id('photo:p_pemba_2')])
+  and pg_temp.t('tanga0', 'donors') = array[tests.id('donor:p_tanga_1')],
+  'before the move: the Tanga collector has neither the project nor its children nor its donor');
 
 insert into res
 select 'audit0', to_jsonb((select count(*) from public.audit_log a
@@ -128,6 +129,8 @@ select is(
         array[tests.id('pdonor:p_pemba_2')], array[tests.id('staff:p_pemba_2')],
         array[tests.id('community:p_pemba_2')]],
   'new scope: all children of the project arrive with it (re-stamped, small pages)');
+select is(pg_temp.t('tanga1', 'donors'), array[tests.id('donor:p_pemba_2')],
+  'new scope: the donor of the project arrives with its (re-stamped) link although the donor row did not change');
 select is((select v -> 'gone' from res where k = 'tanga1'), '{}'::jsonb, 'new scope: nothing is gone');
 
 insert into res select 'pemba1', pg_temp.pull_all(tests.id('u_col_pemba'), (select v -> 'cursor' from res where k = 'pemba0'));

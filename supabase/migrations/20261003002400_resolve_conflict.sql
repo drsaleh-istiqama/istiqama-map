@@ -72,7 +72,7 @@ begin
   if not private.sync_can(c, 'review', reg.scope_kind, v_scope.country_id, v_scope.branch_id)
      -- rows without a country/branch (donors) are decided by global reviewers,
      -- the only ones who can see such a conflict
-     or (reg.scope_kind = 'global' and not c.review_all) then
+     or (reg.scope_kind in ('global', 'donor') and not c.review_all) then
     raise exception 'out_of_scope' using errcode = 'PT403',
       detail = 'Only a reviewer of the record''s country/branch may resolve this conflict.';
   end if;

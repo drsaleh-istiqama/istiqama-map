@@ -36,17 +36,48 @@
 --     (sync_xid, id) index of a million-row child table to pick the 2 % that
 --     belong to one branch would cost 10-50x more per page.
 --
+--   * donors of a caller who is not a global reader are paged by id (see below).
+--
 -- Scope: rows are filtered with the caller's scope arrays, fetched once
 -- (private.sync_ctx) and compared with = any(...) / inlined single values.
 -- No per-row function calls.
+--
+-- DONORS
+--
+-- A donor has no country or branch. sync_pull applies the rule of the RLS
+-- policy donors_select (migration 0013): a global reader gets every donor;
+-- everybody else gets the donors he created and the donors linked through
+-- project_donors (any link row, live or soft-deleted, as in the policy) to a
+-- project in his read scope.
+--
+-- A donor can become visible WITHOUT being written itself: somebody links an
+-- existing donor to a project of the caller, or a project that carries links
+-- is moved into the caller's scope. The donor's own sync_xid is old, so the
+-- window test on the donor would never deliver it. Instead of re-stamping
+-- donors on every link write (row locks on popular donors, version and
+-- updated_by churn without a data change), the link rows are used as the
+-- change signal: an incremental round returns
+--     (a) the visible donors whose own sync_xid is in the window, and
+--     (b) the donors of the project_donors rows in scope whose sync_xid is in
+--         the window (a new or edited link, or a link re-stamped because its
+--         project changed scope - migration 0025).
+-- Every way a link can appear in the caller's scope stamps the link row, so
+-- (b) covers every way a donor can become visible; a change of the caller's
+-- roles changes scope_epoch and restarts from scratch. The window is fixed for
+-- the round and rows only leave it, so paging by id is stable. donors precede
+-- project_donors in the registry: the donor arrives before (and in the same
+-- round as) the link that made it visible.
+-- A first round is driven by the caller's projects and own donors.
 --
 -- IDLE POLLS
 --
 -- Most calls are incremental rounds in which nothing (or one table) changed.
 -- private.sync_changed_tables(lo, hi) answers "which tables have any row in the
--- window" with one cached-plan statement (22 index probes); only those tables
--- are queried. The function is GENERATED from the registry by
--- private.sync_refresh(); call that again after changing private.sync_tables.
+-- window" with one cached-plan statement (23 index probes); only those tables
+-- are queried. donors count as changed when a project_donors row is in the
+-- window as well (see DONORS above). The function is GENERATED from the
+-- registry by private.sync_refresh(); call that again after changing
+-- private.sync_tables.
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
@@ -69,8 +100,13 @@ begin
   v_made := private.sync_ensure_indexes();
 
   select string_agg(
-           format('case when exists (select 1 from public.%I t where t.sync_xid >= p_lo and t.sync_xid < p_hi) then %L end',
-                  s.table_name, s.table_name),
+           format('case when exists (select 1 from public.%I t where t.sync_xid >= p_lo and t.sync_xid < p_hi)%s then %L end',
+                  s.table_name,
+                  -- a written link can make an old donor visible (see DONORS above)
+                  case when s.scope_kind = 'donor'
+                       then ' or exists (select 1 from public.project_donors l where l.sync_xid >= p_lo and l.sync_xid < p_hi)'
+                       else '' end,
+                  s.table_name),
            E',\n      ' order by s.pull_order),
          count(*)
     into v_cases, v_count
@@ -132,7 +168,10 @@ declare
   a_b          uuid[];
   v_any        boolean;
   v_by_parent  boolean;
+  v_by_id      boolean;
   v_join       text;
+  v_window     text;
+  v_link       text;
   v_pred       text;
   v_log        text;
   v_keyset     text;
@@ -167,6 +206,7 @@ begin
   --   t       pull_order of the table being read
   --   x, id   keyset position (sync_xid, id) of the last row sent, or
   --   k, id   keyset position (parent id, id) in a parent-ordered first round
+  --           (k = id for a table paged by id: donors of a scoped caller)
   --   e       scope_epoch the cursor was issued for
   -- ---------------------------------------------------------------------------
   if p_cursor is not null and jsonb_typeof(p_cursor) = 'object' then
@@ -243,14 +283,46 @@ begin
 
       v_join := '';
       v_log  := case when reg.audience = 'restricted' then 'true' else 'false' end;
+      -- rows of the round: the table's own sync_xid lies in the window
+      v_window := 't.sync_xid >= $1 and t.sync_xid < $2';
       -- first round of a scoped caller on a child table: page by (parent id, id)
       v_by_parent := v_lo = 0 and not a_all and reg.scope_kind in ('project', 'staff');
+      v_by_id := false;
 
       case reg.scope_kind
         when 'own' then
           v_pred := format('t.%I = $8', reg.scope_col);
         when 'global' then
           v_pred := case when v_any then 'true' else 'false' end;
+        when 'donor' then
+          -- Same rule as the RLS policy donors_select: every donor for a global
+          -- reader; otherwise the donors the caller created ($8) and the donors
+          -- linked through project_donors to a project in his read scope. A
+          -- caller without any role still gets the donors he created (the link
+          -- branch is "false" then), exactly like the policy.
+          if a_all then
+            v_pred := 'true';
+          else
+            -- the rows come from two sources (see DONORS in the header): page by id
+            v_by_id := true;
+            v_link := 'from public.project_donors pd join public.projects p on p.id = pd.project_id where '
+                      || private.sync_scope_pred('p', false, a_c, a_b);
+            if v_lo = 0 then
+              -- first round: driven by the caller's own donors and projects
+              v_pred := 't.id in (select d.id from public.donors d where d.created_by = $8'
+                        || ' union select pd.donor_id ' || v_link || ')';
+            else
+              -- incremental round: (a) visible donors written in the window,
+              -- (b) donors of the links in scope written in the window. The
+              -- window is part of the candidate list, not of the outer query.
+              v_window := 'true';
+              v_pred := 't.id in (select d.id from public.donors d'
+                        || ' where d.sync_xid >= $1 and d.sync_xid < $2'
+                        || ' and (d.created_by = $8 or exists (select 1 ' || v_link || ' and pd.donor_id = d.id))'
+                        || ' union select pd.donor_id ' || v_link
+                        || ' and pd.sync_xid >= $1 and pd.sync_xid < $2)';
+            end if;
+          end if;
         when 'country' then
           -- country ids reachable through the capability (already in the context
           -- for the two audiences that have country-scoped tables)
@@ -328,6 +400,8 @@ begin
           then format('and (t.%1$I, t.id) > ($10, $4) and %2$s.id >= $10',
                       reg.scope_col, case reg.scope_kind when 'staff' then 's' else 'p' end)
           else '' end;
+      elsif v_by_id then
+        v_keyset := case when v_k is not null then 'and t.id > $4' else '' end;
       else
         v_keyset := case when v_x is not null then 'and (t.sync_xid, t.id) > ($3, $4)' else '' end;
       end if;
@@ -340,7 +414,7 @@ begin
         || ' select %8$s as k1, t.id as rid, t.sync_xid as sx, %9$s as pk, %1$s as lg,'
         || '        (select to_jsonb(x) from (select %2$s) x) as j'
         || ' from public.%3$I t %4$s'
-        || ' where t.sync_xid >= $1 and t.sync_xid < $2 %5$s %6$s and %7$s'
+        || ' where %10$s %5$s %6$s and %7$s'
         || ' order by %8$s, t.id'
         || ' limit $5)'
         || ' select coalesce(jsonb_agg(j order by k1, rid), ''[]''::jsonb), count(*)::integer,'
@@ -357,8 +431,9 @@ begin
         -- a first round (lo = 0) feeds an empty local database: no tombstones needed
         case when v_lo = 0 then 'and t.deleted_at is null' else '' end,
         v_pred,
-        case when v_by_parent then format('t.%I', reg.scope_col) else 't.sync_xid' end,
-        case when v_by_parent then format('t.%I', reg.scope_col) else 'null::uuid' end);
+        case when v_by_parent then format('t.%I', reg.scope_col) when v_by_id then 't.id' else 't.sync_xid' end,
+        case when v_by_parent then format('t.%I', reg.scope_col) when v_by_id then 't.id' else 'null::uuid' end,
+        v_window);
 
       execute v_sql
         into v_rows, v_n, v_last_x, v_last_k, v_last_id, v_ids
@@ -397,7 +472,7 @@ begin
         -- page is full: continue in this table after the last row sent
         v_t  := reg.pull_order;
         v_id := v_last_id;
-        if v_by_parent then
+        if v_by_parent or v_by_id then
           v_k := v_last_k; v_x := null;
         else
           v_x := v_last_x; v_k := null;

@@ -5,7 +5,7 @@
 begin;
 set local search_path = public, extensions, tests;
 
-select plan(41);
+select plan(45);
 
 do $$ begin perform tests.fixture(); end $$;
 
@@ -52,6 +52,28 @@ select is(
 
 select is(private.sync_ensure_indexes(), 0, 'sync_ensure_indexes() is idempotent');
 
+select is(
+  (select array_agg(table_name order by table_name) from private.sync_tables where scope_kind = 'donor'),
+  array['donors'],
+  'registry: donors are not a global table (scope kind "donor": own + linked to a readable project)');
+
+select ok(
+  private.sync_has_index('public.donors'::regclass, array['created_by'])
+  and private.sync_has_index('public.project_donors'::regclass, array['donor_id'])
+  and private.sync_has_index('public.project_donors'::regclass, array['project_id']),
+  'the donor visibility rule is backed by indexes (creator, donor -> links, project -> links)');
+
+select is(
+  (select array_agg(table_name order by table_name) from private.sync_tables where guard is not null),
+  array['localities', 'person_merge_requests', 'project_donors', 'project_staff', 'projects'],
+  'registry: tables with a push guard (workflow / visibility of the linked row)');
+
+select is(
+  (select count(*)::int from private.sync_tables r
+   where r.guard is not null
+     and to_regprocedure(format('private.%I(private.sync_ctx, text, jsonb, jsonb, boolean)', r.guard)) is null),
+  0, 'every guard named by the registry exists with the binding signature');
+
 select ok(
   private.sync_select_list('projects') ~ 'st_x\(t\.geom\)' and private.sync_select_list('projects') !~ 't\.geom,'
   and private.sync_select_list('projects') !~ 'sync_xid',
@@ -65,7 +87,7 @@ select ok(
   not (private.sync_writable_columns('projects')
        && array['id', 'version', 'created_at', 'created_by', 'updated_at', 'updated_by', 'sync_xid', 'deleted_at',
                 'code', 'completeness', 'search_norm', 'import_batch_id', 'reviewed_by', 'reviewed_at', 'geom']),
-  'server-managed project columns are not client-writable');
+  'server-managed project columns are not client-writable (created_at only on insert, see 21_sync_push)');
 
 select is(private.sync_writable_columns('notifications'), array['read_at'],
   'notifications: only read_at is client-writable');

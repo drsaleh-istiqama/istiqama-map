@@ -23,7 +23,7 @@
 begin;
 set local search_path = public, extensions, tests;
 
-select plan(74);
+select plan(97);
 
 create or replace function private.current_xid() returns bigint language sql stable as
 $fn$ select current_setting('test.xid')::bigint $fn$;
@@ -144,6 +144,26 @@ $fn$
   where ch ->> 'table' = p_table and (x ->> 'id')::uuid = p_id;
 $fn$;
 
+-- sorted ids of the live donors p_user can read with direct SQL (RLS policy
+-- donors_select): the reference for what sync_pull may send
+create function pg_temp.rls_donors(p_user uuid, p_aal text default 'aal1') returns uuid[] language plpgsql as
+$fn$
+declare
+  v uuid[];
+begin
+  perform tests.login_as(p_user, p_aal, 'dev-pull');
+  select coalesce(array_agg(d.id order by d.id), '{}'::uuid[]) into v
+  from public.donors d
+  where d.deleted_at is null;
+  perform tests.logout();
+  return v;
+end;
+$fn$;
+
+-- ids of project_donors rows created by this file
+create function pg_temp.lid(p_n integer) returns uuid language sql immutable as
+$fn$ select ('00000000-0000-7000-9100-' || lpad(p_n::text, 12, '0'))::uuid $fn$;
+
 insert into public.devices (user_id, device_id, label)
 values (tests.id('u_col_pemba'), 'dev-pull', 'Collector phone');
 
@@ -178,9 +198,10 @@ select ok(
   and tests.ids('br_pemba', 'br_tanga', 'br_mombasa') <@ pg_temp.t('col', 'branches')
   and array[tests.id('option_value')] <@ pg_temp.t('col', 'option_values')
   and array[tests.id('fx_rate')] <@ pg_temp.t('col', 'fx_rates')
-  and array[tests.id('map_pack')] <@ pg_temp.t('col', 'map_packs')
-  and array[tests.id('donor_unlinked')] <@ pg_temp.t('col', 'donors'),
+  and array[tests.id('map_pack')] <@ pg_temp.t('col', 'map_packs'),
   'collector: global reference tables are sent');
+select is(pg_temp.t('col', 'donors'), tests.ids('donor:p_pemba_1', 'donor:p_pemba_2', 'donor_unlinked'),
+  'collector: the donors of his projects and the donor he created, no donor of another branch or country');
 select ok(
   tests.ids('tz_pemba_north', 'tz_tanga') <@ pg_temp.t('col', 'admin_areas')
   and not (array[tests.id('ke_mombasa')] && pg_temp.t('col', 'admin_areas')),
@@ -203,6 +224,8 @@ select ok(
   and not (pg_temp.t('colke', 'project_photos') && tests.ids('photo:p_pemba_1', 'photo:p_tanga_1'))
   and not (pg_temp.tables('colke') && array['staff_compensation', 'community_sensitive']),
   'Kenyan collector: no Tanzanian person or child row, and no salary at all');
+select is(pg_temp.t('colke', 'donors'), array[tests.id('donor:p_ke_1')],
+  'Kenyan collector: only the donor linked to his project, no Tanzanian donor name');
 
 -- =============================================================================
 -- 2. Branch supervisor: review tables, still no restricted data
@@ -298,6 +321,32 @@ select ok(
   and tests.ids('conflict:p_ke_1', 'lconflict:ke_mombasa') <@ pg_temp.t('hq', 'sync_conflicts')
   and tests.ids('ke_mombasa', 'tz_tanga') <@ pg_temp.t('hq', 'admin_areas'),
   'hq_admin at aal2: every country, restricted tables and review tables');
+
+-- =============================================================================
+-- 5b. Donors: sync_pull sends exactly the donors the RLS policy shows
+-- =============================================================================
+insert into res select 'col2', pg_temp.pull_all(tests.id('u_col_pemba2'), 1000);
+insert into res select 'tanga', pg_temp.pull_all(tests.id('u_col_tanga'), 1000);
+
+select is(pg_temp.t('col2', 'donors'), tests.ids('donor:p_pemba_1', 'donor:p_pemba_2'),
+  'second Pemba collector: the donors of the branch projects, not the unlinked donor of a colleague');
+select ok(
+  tests.ids('donor:p_pemba_1', 'donor:p_pemba_2', 'donor:p_tanga_1') <@ pg_temp.t('view', 'donors')
+  and not (pg_temp.t('view', 'donors') && tests.ids('donor:p_ke_1', 'donor_unlinked')),
+  'country viewer: donors linked to projects of his country only');
+select ok(
+  tests.ids('donor:p_pemba_1', 'donor:p_tanga_1', 'donor:p_ke_1', 'donor_unlinked') <@ pg_temp.t('viewg', 'donors')
+  and tests.ids('donor:p_pemba_1', 'donor:p_tanga_1', 'donor:p_ke_1', 'donor_unlinked') <@ pg_temp.t('hq', 'donors'),
+  'global readers (global viewer, hq_admin): every donor, linked or not');
+select is(
+  (select coalesce(array_agg(x.k order by x.k), '{}'::text[])
+   from (values ('col', 'u_col_pemba', 'aal1'), ('col2', 'u_col_pemba2', 'aal1'), ('tanga', 'u_col_tanga', 'aal1'),
+                ('colke', 'u_col_ke', 'aal1'), ('sup', 'u_sup_pemba', 'aal1'), ('mgr', 'u_mgr_tz', 'aal2'),
+                ('mgr1', 'u_mgr_tz', 'aal1'), ('view', 'u_viewer_tz', 'aal1'), ('viewg', 'u_viewer_global', 'aal1'),
+                ('hq', 'u_hq', 'aal2')) as x (k, u, aal)
+   where pg_temp.t(x.k, 'donors') is distinct from pg_temp.rls_donors(tests.id(x.u), x.aal)),
+  '{}'::text[],
+  'for every role and assurance level the donors of a first pull are exactly the donors RLS shows');
 
 -- =============================================================================
 -- 6. Row shape, lon/lat round trip, paging, limits, cursor
@@ -510,6 +559,131 @@ select is(pg_temp.t('y3', 'projects'), tests.ids('p_pemba_1', 'p_pemba_2'),
   '... and the rewritten rows arrive in the next round');
 
 -- =============================================================================
+-- 8b. Donors in incremental rounds
+--
+-- A donor becomes visible when somebody links it to a project of the caller.
+-- The donor row itself is not written (its sync_xid is old): the link row is
+-- the change signal, and the donor must arrive in the same round, before it.
+-- =============================================================================
+insert into res select 'dke0', pg_temp.pull_all(tests.id('u_col_ke'), 1000);
+insert into res select 'dp20', pg_temp.pull_all(tests.id('u_col_pemba2'), 1000);
+insert into res select 'dtg0', pg_temp.pull_all(tests.id('u_col_tanga'), 1000);
+insert into res select 'dhq0', pg_temp.pull_all(tests.id('u_hq'), 1000, null, 'aal2');
+
+do $$
+begin
+  perform pg_temp.clock(450);
+  -- the Tanga donor is linked to the Kenyan project
+  insert into public.project_donors (id, created_by, project_id, donor_id, year)
+  values (pg_temp.lid(1), tests.id('u_col_ke'), tests.id('p_ke_1'), tests.id('donor:p_tanga_1'), 2021);
+  -- a Pemba donor and the donor nobody linked yet are renamed
+  update public.donors set name_latin = 'Renamed ' || name_latin
+  where id in (tests.id('donor:p_pemba_1'), tests.id('donor_unlinked'));
+end $$;
+
+insert into res
+select 'dke1', pg_temp.pull_all(tests.id('u_col_ke'), 1, (select v -> 'cursor' from res where k = 'dke0'));
+select is((select v -> 'ids' from res where k = 'dke1'),
+  jsonb_build_object('donors', jsonb_build_array(tests.id('donor:p_tanga_1')),
+                     'project_donors', jsonb_build_array(pg_temp.lid(1))),
+  'a donor linked to a project in scope arrives with the new link although the donor row did not change (and no other donor does)');
+select is(
+  (select array_agg(ch ->> 'table' order by ord)
+   from jsonb_array_elements(
+          pg_temp.pull(tests.id('u_col_ke'), (select v -> 'cursor' from res where k = 'dke0'), 500) -> 'changes')
+        with ordinality as c(ch, ord)),
+  array['donors', 'project_donors'], '... in the same response, the donor before the link that needs it');
+
+insert into res
+select 'dp21', pg_temp.pull_all(tests.id('u_col_pemba2'), 500, (select v -> 'cursor' from res where k = 'dp20'));
+select is((select v -> 'ids' from res where k = 'dp21'),
+  jsonb_build_object('donors', jsonb_build_array(tests.id('donor:p_pemba_1'))),
+  'a renamed donor reaches the readers of its projects; the unlinked donor of a colleague stays invisible');
+
+insert into res
+select 'dcol1', pg_temp.pull_all(tests.id('u_col_pemba'), 1, (select v -> 'cursor' from res where k = 'y3'));
+select is((select v -> 'ids' from res where k = 'dcol1'),
+  jsonb_build_object('donors', to_jsonb(tests.ids('donor:p_pemba_1', 'donor_unlinked'))),
+  'the creator of an unlinked donor receives its changes (paged by id, one row per page)');
+
+insert into res
+select 'dtg1', pg_temp.pull_all(tests.id('u_col_tanga'), 500, (select v -> 'cursor' from res where k = 'dtg0'));
+select is((select v -> 'ids' from res where k = 'dtg1'), '{}'::jsonb,
+  'a link added to a project outside the caller''s scope sends him nothing (neither the link nor his own donor again)');
+
+insert into res
+select 'dhq1', pg_temp.pull_all(tests.id('u_hq'), 500, (select v -> 'cursor' from res where k = 'dhq0'), 'aal2');
+select ok(
+  pg_temp.t('dhq1', 'donors') = tests.ids('donor:p_pemba_1', 'donor_unlinked')
+  and pg_temp.t('dhq1', 'project_donors') = array[pg_temp.lid(1)],
+  'a global reader already has every donor: only donors that really changed are sent');
+
+-- a window that contains nothing but a link
+do $$
+begin
+  perform pg_temp.clock(460);
+  insert into public.project_donors (id, created_by, project_id, donor_id, year)
+  values (pg_temp.lid(2), tests.id('u_col_pemba'), tests.id('p_pemba_1'), tests.id('donor:p_ke_1'), 2022);
+end $$;
+
+select is(private.sync_changed_tables(pg_temp.base() + 460, pg_temp.base() + 461),
+  array['#22', 'donors', 'project_donors'],
+  'sync_changed_tables(): a written link marks donors as changed too');
+
+insert into res
+select 'dp22', pg_temp.pull_all(tests.id('u_col_pemba2'), 500, (select v -> 'cursor' from res where k = 'dp21'));
+select is((select v -> 'ids' from res where k = 'dp22'),
+  jsonb_build_object('donors', jsonb_build_array(tests.id('donor:p_ke_1')),
+                     'project_donors', jsonb_build_array(pg_temp.lid(2))),
+  'a round whose window contains only the link still delivers the donor');
+
+insert into res
+select 'dke2', pg_temp.pull_all(tests.id('u_col_ke'), 500, (select v -> 'cursor' from res where k = 'dke1'));
+select is((select v -> 'ids' from res where k = 'dke2'), '{}'::jsonb,
+  'the Kenyan collector hears nothing about his donor being linked in Tanzania');
+
+-- a soft-deleted donor arrives as a tombstone for those who had it
+do $$
+begin
+  perform pg_temp.clock(470);
+  update public.donors set deleted_at = now() where id = tests.id('donor:p_pemba_2');
+end $$;
+insert into res
+select 'dp23', pg_temp.pull(tests.id('u_col_pemba2'), (select v -> 'cursor' from res where k = 'dp22'), 500);
+select ok(
+  (select (x ->> 'deleted_at') is not null
+   from pg_temp.row_of((select v from res where k = 'dp23'), 'donors', tests.id('donor:p_pemba_2')) x),
+  'a soft-deleted donor arrives as a tombstone');
+
+-- after all of this a fresh device gets, again, exactly what RLS shows
+insert into res select 'dfresh_ke', pg_temp.pull_all(tests.id('u_col_ke'), 2, null, 'aal1', 'dev-new');
+insert into res select 'dfresh_p2', pg_temp.pull_all(tests.id('u_col_pemba2'), 2, null, 'aal1', 'dev-new');
+select is(pg_temp.t('dfresh_ke', 'donors'), tests.ids('donor:p_ke_1', 'donor:p_tanga_1'),
+  'first pull of a new device: the donor linked later is included');
+select is(pg_temp.t('dfresh_p2', 'donors'), tests.ids('donor:p_pemba_1', 'donor:p_ke_1'),
+  'first pull of a new device: linked donors without tombstones, small pages');
+select ok(
+  pg_temp.t('dfresh_ke', 'donors') = pg_temp.rls_donors(tests.id('u_col_ke'))
+  and pg_temp.t('dfresh_p2', 'donors') = pg_temp.rls_donors(tests.id('u_col_pemba2'))
+  and pg_temp.dups('dfresh_ke') = 0 and pg_temp.dups('dfresh_p2') = 0,
+  '... which is again exactly the set RLS shows, every donor once');
+
+-- A soft-deleted link. The RLS policy decides whether such a link still makes
+-- the donor visible; sync_pull must send exactly what the policy shows.
+do $$
+begin
+  perform pg_temp.clock(475);
+  update public.project_donors set deleted_at = now() where id = pg_temp.lid(1);
+end $$;
+insert into res
+select 'dke3', pg_temp.pull_all(tests.id('u_col_ke'), 500, (select v -> 'cursor' from res where k = 'dke2'));
+insert into res select 'dfresh_ke2', pg_temp.pull_all(tests.id('u_col_ke'), 1000, null, 'aal1', 'dev-new');
+select ok(
+  pg_temp.t('dke3', 'project_donors') = array[pg_temp.lid(1)]
+  and pg_temp.t('dfresh_ke2', 'donors') = pg_temp.rls_donors(tests.id('u_col_ke')),
+  'a soft-deleted link arrives as a tombstone, and a fresh pull afterwards still sends exactly the donors RLS shows');
+
+-- =============================================================================
 -- 9. Cursor validation, scope changes, revoked sessions
 -- =============================================================================
 select throws_ok(
@@ -548,10 +722,34 @@ select ok(
   (select (v ->> 'reset')::boolean from res where k = 'wider')
   and pg_temp.t('wider', 'projects') = tests.ids('p_pemba_1', 'p_pemba_2', 'p_tanga_1'),
   'the old cursor is reset and the wider scope (two branches) is pulled in full');
+select is(pg_temp.t('wider', 'donors'), pg_temp.rls_donors(tests.id('u_col_pemba')),
+  'two branch scopes: the donors of the full pull are again exactly the donors RLS shows');
+
+do $$
+begin
+  perform pg_temp.clock(480);
+  insert into public.project_donors (id, created_by, project_id, donor_id, year)
+  values (pg_temp.lid(3), tests.id('u_col_tanga'), tests.id('p_tanga_1'), tests.id('donor:p_ke_1'), 2023);
+end $$;
+insert into res
+select 'wider2', pg_temp.pull_all(tests.id('u_col_pemba'), 500, (select v -> 'cursor' from res where k = 'wider'));
+select is((select v -> 'ids' from res where k = 'wider2'),
+  jsonb_build_object('donors', jsonb_build_array(tests.id('donor:p_ke_1')),
+                     'project_donors', jsonb_build_array(pg_temp.lid(3))),
+  'two branch scopes, incremental round: the donor of a new link in the second branch arrives');
 
 -- unknown user without any role: nothing but his own rows
 insert into res select 'norole', pg_temp.pull_all(tests.create_user('norole@example.org', null, null, null), 1000);
 select is((select v -> 'ids' from res where k = 'norole'), '{}'::jsonb, 'a user without roles receives nothing');
+
+-- ... except, like under RLS, the donors he created himself (e.g. before his role was removed)
+insert into public.donors (id, created_by, name_latin)
+values (pg_temp.lid(9), tests._uuid('user:norole@example.org'), 'Donor of a user without role');
+insert into res select 'norole2', pg_temp.pull_all(tests._uuid('user:norole@example.org'), 1000);
+select ok(
+  (select v -> 'ids' from res where k = 'norole2') = jsonb_build_object('donors', jsonb_build_array(pg_temp.lid(9)))
+  and pg_temp.rls_donors(tests._uuid('user:norole@example.org')) = array[pg_temp.lid(9)],
+  'a user without roles still gets the donors he created, exactly as RLS shows them');
 
 -- sync epoch rotation = full resync for everybody
 do $$ begin perform private.sync_rotate_epoch(); end $$;

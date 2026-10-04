@@ -33,13 +33,13 @@ heartbeat, access log), so call them with POST, never GET.
 | 40  | `option_values`         | global                         | all             | –              | –              | –              | reference                                                           |
 | 50  | `fx_rates`              | global                         | all             | –              | –              | –              | reference                                                           |
 | 60  | `localities`            | country                        | all             | writer         | creator        | creator        | `lon`/`lat`; collectors only `proposed`                             |
-| 70  | `donors`                | global                         | all             | writer         | writer         | creator        |                                                                     |
+| 70  | `donors`                | donor (own + linked, §5.5)     | all             | writer         | writer         | creator        | update / delete only for a donor the caller can see                 |
 | 80  | `projects`              | row (`country_id`,`branch_id`) | all             | writer         | creator        | creator        | `lon`/`lat`; `record_state` workflow                                |
 | 90  | `project_land`          | project                        | all             | project_editor | project_editor | project_editor | natural key `project_id`                                            |
 | 100 | `project_facilities`    | project                        | all             | project_editor | project_editor | project_editor | natural key `project_id`                                            |
 | 110 | `project_maintenance`   | project                        | all             | writer         | creator        | creator        |                                                                     |
 | 120 | `project_photos`        | project                        | all             | writer         | creator        | creator        | paths default server-side                                           |
-| 130 | `project_donors`        | project                        | all             | project_editor | project_editor | project_editor |                                                                     |
+| 130 | `project_donors`        | project                        | all             | project_editor | project_editor | project_editor | donor must be visible to the caller                                 |
 | 140 | `persons`               | row                            | **people**      | writer         | writer         | creator        | never merged automatically                                          |
 | 150 | `project_staff`         | project                        | **people**      | project_editor | project_editor | project_editor | person must be visible to the caller                                |
 | 160 | `community_profiles`    | project                        | all             | project_editor | project_editor | project_editor | natural key `project_id`                                            |
@@ -54,6 +54,9 @@ heartbeat, access log), so call them with POST, never GET.
 (country-scoped roles + the countries of branch-scoped roles). `row`: the Appendix A.3 rule
 (global matches all, country scope matches `country_id`, branch scope matches `branch_id`).
 `project` / `staff` / `person`: the same rule applied to the parent project / person.
+`donor`: donors have no country or branch — a row is in scope when the caller is a global
+reader, created the donor, or can read a project the donor is linked to (§5.5). This is the
+rule of the RLS policy on `donors`; `sync_pull` and `sync_push` apply exactly the same one.
 
 **Audience.** `all` = any role (read triple) · `people` = any role except `viewer` ·
 `review` = branch_supervisor, country_manager, hq_admin · `restricted` = country_manager
@@ -138,7 +141,8 @@ counters is `report_device_status()` (see `people-admin.md` §7); `sync_push` st
    "id": "<uuidv7>",             // row id generated on the device
    "kind": "upsert" | "delete",
    "base_version": 0,            // version of the row the edit was made on; 0 = created on this device
-   "fields": { "name_ar": "…", "lon": 39.7, "lat": -5.05 },   // upsert: changed fields only (all fields on insert)
+   "fields": { "name_ar": "…", "lon": 39.7, "lat": -5.05,    // upsert: changed fields only (all fields on insert)
+               "created_at": "2026-10-01T07:12:00Z" },       // insert only: when the row was created on the device
    "client_ts": "2026-10-03T10:00:00Z" }]                    // informational
 
 // response: one result per op, in input order
@@ -160,13 +164,20 @@ see natural keys), `ignored_fields` (names in `fields` that are not columns).
 
 ### 4.1 Status → what the client does
 
-| Status      | Meaning                                                                                                                | Client                                                                                                                                                                                                                       |
-| ----------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `applied`   | written (or nothing to change)                                                                                         | drop the op; set the local row `version` to `version` unless a newer local edit is pending                                                                                                                                   |
-| `merged`    | written although other devices changed other fields meanwhile                                                          | same as `applied`; the merged row arrives with the next pull                                                                                                                                                                 |
-| `conflict`  | the fields in `conflict_fields` were **not** written (same field changed elsewhere), the other fields were             | drop the op; overwrite the local copy of each conflicting field with `server_values[field]` (location: `{"geom": {"lon", "lat"}}`); the reviewer decides, the result arrives through pull                                    |
-| `duplicate` | this `op_id` was applied before                                                                                        | drop the op; treat like `original_status`                                                                                                                                                                                    |
-| `rejected`  | nothing was written; the op is not in the ledger (only counted in `private.sync_rejections` for the sync-status board) | move the op to `failed_ops` ("needs attention"); keep going. The same `op_id` may be sent again after the cause is fixed. `parent_missing` normally means wrong order or a rejected parent: retry after the parent succeeded |
+| Status      | Meaning                                                                                                               | Client                                                                                                                                                                                                                       |
+| ----------- | --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `applied`   | written (or nothing to change)                                                                                        | drop the op; set the local row `version` to `version` unless a newer local edit is pending                                                                                                                                   |
+| `merged`    | written although other devices changed other fields meanwhile                                                         | same as `applied`; the merged row arrives with the next pull                                                                                                                                                                 |
+| `conflict`  | the fields in `conflict_fields` were **not** written (same field changed elsewhere), the other fields were            | drop the op; overwrite the local copy of each conflicting field with `server_values[field]` (location: `{"geom": {"lon", "lat"}}`); the reviewer decides, the result arrives through pull                                    |
+| `duplicate` | this `op_id` was applied before                                                                                       | drop the op; treat like `original_status`                                                                                                                                                                                    |
+| `rejected`  | nothing was written; the op is not in the ledger (only logged in `private.sync_rejections` for the sync-status board) | move the op to `failed_ops` ("needs attention"); keep going. The same `op_id` may be sent again after the cause is fixed. `parent_missing` normally means wrong order or a rejected parent: retry after the parent succeeded |
+
+Every `rejected` result (including `invalid_op` and `op_id_taken`) is logged once with user,
+device, op id, table, row id and error code (`private.log_sync_rejection`, written outside the
+rolled-back sub-transaction). `sync_status()` reports the count of the last 7 days as
+`rejected_7d` per user and per device (`people-admin.md` §7);
+`private.sync_rejections_cleanup()` removes log rows older than 30 days. Whole-call errors
+are not logged there. pgTAP file 21 asserts the whole chain (push → log → `rejected_7d`).
 
 Whole-call errors (HTTP error, nothing applied — retry the same batch later, it is idempotent):
 
@@ -184,7 +195,8 @@ Whole-call errors (HTTP error, nothing applied — retry the same batch later, i
    `duplicate` (an op id used by another user → `rejected/op_id_taken`). Rejected ops are
    not stored.
 2. **Server-managed columns are ignored silently**: `id` (on update), `version`,
-   `created_at`, `created_by`, `updated_at`, `updated_by`, `sync_xid`, `deleted_at`
+   `created_at` (on update; on insert see rule 4), `created_by`, `updated_at`, `updated_by`,
+   `sync_xid`, `deleted_at`
    (deletion only through `kind: "delete"`), geometry columns (send `lon`/`lat`), and per
    table: projects `code`, `completeness`, `search_norm`, `import_batch_id`, `reviewed_by`,
    `reviewed_at`; localities `name_norm`, `approved_by`, `approved_at`; donors `name_norm`;
@@ -203,6 +215,14 @@ Whole-call errors (HTTP error, nothing applied — retry the same batch later, i
      (`branch_country_mismatch`).
    - `localities`: `country_id` defaults from the caller's single country.
    - children: the parent must exist (`parent_missing`) and be live (`parent_deleted`).
+   - **`created_at`** (every table): an insert may carry the time at which the row was
+     created on the device (ISO 8601 **with** offset or `Z`). It is stored as sent, so the
+     offline entry time survives a late sync. A value more than 5 minutes ahead of the
+     server clock is replaced by the server time; a missing, `null`, blank or infinite value
+     means "now"; anything that is not a timestamp rejects the op (`invalid_value`). There
+     is no lower bound: a device whose clock is in the past stores that past time. On
+     update (also when an insert is redirected to an existing row by a natural key)
+     `created_at` is ignored — it never changes after the insert.
 5. **Natural keys.** For `project_land`, `project_facilities`, `community_profiles`,
    `community_sensitive` (one live row per `project_id`) and `staff_compensation` (one
    live row per `project_staff_id` + `effective_from`, send both): an insert whose key
@@ -251,6 +271,17 @@ insert as `pending`, `pending → rejected` (stamped). `merged` / `reverted` onl
 
 **`notifications`** — only the owner, only `read_at`.
 
+**`donors`** — any writer may insert a donor (it is visible to its creator from then on).
+Updating or deleting an existing donor requires that the caller can **see** it (§5.5: global
+reader, creator, or reader of a project it is linked to); otherwise `rejected/out_of_scope`
+— no conflict is recorded and no stored value is returned. Delete additionally needs the
+creator or a reviewer (`not_owner`).
+
+**`project_donors`** — `donor_id` (on insert, and when an update changes it) must point to a
+donor that exists (`parent_missing`), is not deleted and is visible to the caller
+(`donor_not_available`). A donor created in the same batch is visible to its creator, so
+"new donor + link" works in one push (donor first).
+
 ### 4.4 Restricted tables (`staff_compensation`, `community_sensitive`)
 
 Any writer with the parent project in scope may insert/update **blind**: results never
@@ -270,7 +301,7 @@ country manager decides.
 `parent_deleted`, `row_deleted`, `id_taken`, `op_id_taken`, `immutable_field`,
 `invalid_coordinates`, `branch_country_mismatch`, `invalid_record_state`,
 `forbidden_transition`, `invalid_transition`, `invalid_status`, `locality_locked`,
-`person_not_available`; from table triggers: `photo_limit_exceeded`,
+`person_not_available`, `donor_not_available`; from table triggers: `photo_limit_exceeded`,
 `photo_project_immutable`, `invalid_option_value`, …; database constraints:
 `unique_violation`, `fk_violation`, `not_null_violation`, `check_violation`
 (with `constraint`), `invalid_value` (type/format), `internal_error`.
@@ -316,7 +347,7 @@ everybody's incremental changes — keep server-side transactions short.
 
 Paging order is an implementation detail of the opaque cursor: `(sync_xid, id)` in
 incremental rounds; in a first round child tables of a scoped user are paged by
-`(parent id, id)`.
+`(parent id, id)`; `donors` of a caller who is not a global reader are paged by `id`.
 
 ### 5.2 `scope_epoch` and `reset`
 
@@ -344,10 +375,51 @@ own scope and move only when their `country_id`/`branch_id` is changed).
 restricted tables of their countries; every page containing restricted rows writes one
 `restricted_access_log` row per table (`context = 'sync_pull'`; conflicts about restricted
 rows: `'sync_pull:sync_conflicts'`). Without any effective role only the caller's own
-notifications are returned.
+notifications and the donors he created are returned (the same rows RLS shows him).
 
 Errors: `PT401`, `PT403 session_revoked`, `PT422 invalid_cursor`, `PT429` (600 calls / minute
 / user).
+
+### 5.5 Donors
+
+Donors have no country or branch. `sync_pull` sends **exactly the donors the RLS policy
+`donors_select` shows** (pgTAP compares the two sets for every role):
+
+| Caller                                            | Donors received                                                                            |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| global reader (`hq_admin` at aal2, global viewer) | all                                                                                        |
+| everybody else                                    | donors he created + donors linked by a `project_donors` row to a project in his read scope |
+| no effective role                                 | donors he created                                                                          |
+
+"Linked" means any `project_donors` row, live or soft-deleted, to any project in scope, live
+or soft-deleted — the policy does not look at `deleted_at`, and neither does sync. A Kenyan
+collector therefore never receives a donor that is linked only to Tanzanian projects.
+
+**How a donor that becomes visible later arrives.** A donor can become visible without
+being written itself: somebody links an existing donor to one of the caller's projects, or a
+project that carries links is moved into the caller's scope. The donor's own `sync_xid` is
+old, so the window test on the donor alone would never deliver it. The server does **not**
+re-stamp donors on link writes (that would take a row lock on popular donors for every link
+and bump their `version` / `updated_by` without a data change). Instead the link rows are
+the change signal. An incremental round returns
+
+- (a) the visible donors whose own `sync_xid` is in the window, and
+- (b) the donors of the `project_donors` rows in the caller's scope whose `sync_xid` is in
+  the window (new or edited link; link re-stamped because its project changed scope, §5.3).
+
+Every way a link can appear in a caller's scope writes (stamps) the link row, so (b) covers
+every way a donor can become visible; a change of roles changes `scope_epoch` and restarts
+the pull. `donors` precede `project_donors` in the registry, so the donor arrives in the
+same round as, and before, the link that needs it. A first round is driven by the caller's
+projects and own donors.
+
+Consequences for the client:
+
+- a donor row may arrive although its `version` did not change (b); apply it as any other
+  row (idempotent upsert);
+- there is no `gone` list for donors: a donor that is no longer linked to a project in scope
+  (link re-pointed, project moved away) stays on the device until the next full resync and
+  no longer receives updates; edits of such a donor come back `rejected/out_of_scope`.
 
 ---
 
@@ -386,7 +458,9 @@ A location conflict has `field = "geom"` with `server_value` / `client_value` =
 4. `base_version` = the `version` the local row had when the edit was made (0 for rows
    created on the device and not yet acknowledged). After `applied`/`merged` store the
    returned `version` (if `row_id` is present, drop the local row instead).
-5. Send only changed fields on update; send `lon` and `lat` together.
+5. Send only changed fields on update; send `lon` and `lat` together. On insert send
+   `created_at` = the time the row was created on the device (UTC, ISO 8601 with `Z`); never
+   send it on update.
 6. Handle each status as in §4.1; `rejected` ops go to `failed_ops` and never block the
    queue.
 7. Push before pull in every cycle (so that the pull returns the merged rows), then page
@@ -417,8 +491,14 @@ Measured on the development machine with 100k projects / 500k persons / 500k sta
 1M photos (single caller, 500 rows per page): idle or small incremental pull ≈ 2 ms;
 first-sync pages ≈ 20–45 ms on average (p95 ≤ 100 ms) for branch, country and global
 scopes; `sync_push` ≈ 3–5 ms per operation (50 ops ≈ 0.2 s).
+Donor rule, measured with 40k projects / 6k donors / 80k links: a first-sync page of 500
+donors ≈ 20 ms for a branch with 2k projects, ≈ 30–55 ms for a scope of 20k projects
+(the candidate list is rebuilt per page from the caller's links), ≈ 5 ms for a global
+reader; an incremental round with a new link and a changed donor ≈ 4–8 ms.
 
 Known limits: (1) conflict detection needs `audit_log` rows of the row since `base_version`
 — do not prune the audit log younger than the longest offline period; (2) a person keeps
 its own scope when its project moves to another branch; (3) localities/admin areas that
-change country are not reported as `gone`.
+change country are not reported as `gone`; (4) donors that leave the caller's visibility
+are not reported as `gone` (§5.5); (5) `created_at` sent by a device whose clock is in the
+past is stored as sent (only the future is clamped).

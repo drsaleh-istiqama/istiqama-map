@@ -39,6 +39,10 @@ create table private.sync_tables (
   --   person    via <scope_col> -> persons
   --   own       the row belongs to the caller (<scope_col> = auth.uid())
   --   conflict  sync_conflicts: scope of the row the conflict is about
+  --   donor     donors: no scope columns of their own. Visible to global
+  --             readers, to their creator, and through project_donors ->
+  --             projects in the read scope (the rule of the RLS policy
+  --             donors_select, migration 0013)
   scope_kind     text not null,
   scope_col      text,
 
@@ -68,7 +72,7 @@ create table private.sync_tables (
   guard          text,                            -- private.<guard>(ctx, op, old, fields, reviewer)
 
   constraint sync_tables_scope_kind_ck check (
-    scope_kind in ('global', 'country', 'row', 'project', 'staff', 'person', 'own', 'conflict')),
+    scope_kind in ('global', 'country', 'row', 'project', 'staff', 'person', 'own', 'conflict', 'donor')),
   constraint sync_tables_scope_col_ck check (
     (scope_kind in ('project', 'staff', 'person', 'own')) = (scope_col is not null)),
   constraint sync_tables_audience_ck check (audience in ('all', 'people', 'restricted', 'review')),
@@ -98,7 +102,9 @@ values
   ('fx_rates',               50, 'global',   null,               'all',        'none',           'none',           'none'),
   -- localities: collectors propose, reviewers approve
   ('localities',             60, 'country',  null,               'all',        'writer',         'creator',        'creator'),
-  ('donors',                 70, 'global',   null,               'all',        'writer',         'writer',         'creator'),
+  -- donors: any writer may add one; changing or deleting one needs the donor to
+  -- be visible to the caller (created by him or linked to a project he reads)
+  ('donors',                 70, 'donor',    null,               'all',        'writer',         'writer',         'creator'),
   ('projects',               80, 'row',      null,               'all',        'writer',         'creator',        'creator'),
   -- children that describe the project: same rule as editing the project
   ('project_land',           90, 'project',  'project_id',       'all',        'project_editor', 'project_editor', 'project_editor'),
@@ -157,9 +163,9 @@ where table_name = 'person_merge_requests';
 update private.sync_tables set writable_cols = array['read_at']
 where table_name = 'notifications';
 
--- Workflow guards (defined in migration 0022).
+-- Workflow guards (defined in migration 0023).
 update private.sync_tables set guard = 'sync_guard_' || table_name
-where table_name in ('projects', 'localities', 'project_staff', 'person_merge_requests');
+where table_name in ('projects', 'localities', 'project_staff', 'project_donors', 'person_merge_requests');
 
 -- -----------------------------------------------------------------------------
 -- Sync epoch. It is part of scope_epoch, so rotating it makes every client wipe
@@ -342,8 +348,10 @@ begin
     return true;
   end if;
 
-  if p_kind = 'global' then
+  if p_kind in ('global', 'donor') then
     -- no row scope: any holder of the capability, wherever it is scoped
+    -- (existing donors additionally have to be visible to the caller:
+    -- private.sync_donor_visible, migration 0023)
     return cardinality(v_c) > 0 or cardinality(v_b) > 0;
   elsif p_kind = 'country' then
     return coalesce(p_country = any (v_cs), false);
@@ -407,7 +415,9 @@ comment on function private.sync_select_list(text, text) is
 -- Columns a client may set through sync_push: no standard/server-managed
 -- columns, no generated columns, no geometry (points travel as lon/lat), none of
 -- the registry's protected_cols, and only writable_cols when the registry
--- restricts the table.
+-- restricts the table. One standard column is accepted outside this list:
+-- created_at on INSERT only (the offline entry time, see sync_apply_op in
+-- migration 0023); on update it stays server-managed like the others.
 create or replace function private.sync_writable_columns(p_table text)
 returns text[]
 language sql
@@ -484,6 +494,7 @@ $$;
 --   (country_id | branch_id, sync_xid, id) first sync of a scoped user without
 --                                          walking the whole table
 --   (<parent fk>)                          scope join for child tables
+--   donors (created_by), project_donors (donor_id)  the donor visibility rule
 --   audit_log (table_name, row_id, row_version)  field-level merge in sync_push
 -- -----------------------------------------------------------------------------
 create or replace function private.sync_has_index(p_table regclass, p_cols text[])
@@ -552,6 +563,9 @@ begin
       v_sets := v_sets || array[r.scope_col || ',sync_xid,id'];
     elsif r.scope_kind in ('project', 'staff', 'person') then
       v_sets := v_sets || array[r.scope_col];
+    elsif r.scope_kind = 'donor' then
+      -- "created by the caller" branch of the donor rule
+      v_sets := v_sets || array['created_by'];
     end if;
 
     foreach v_set in array v_sets loop
@@ -570,6 +584,13 @@ begin
   if to_regclass('public.audit_log') is not null
      and not private.sync_has_index('public.audit_log'::regclass, array['table_name', 'row_id', 'row_version']) then
     create index audit_log_sync_row_idx on public.audit_log (table_name, row_id, row_version);
+    v_made := v_made + 1;
+  end if;
+
+  -- "linked to a project in scope" branch of the donor rule: donor -> links
+  if exists (select 1 from private.sync_tables s where s.scope_kind = 'donor')
+     and not private.sync_has_index('public.project_donors'::regclass, array['donor_id']) then
+    create index project_donors_sync_donor_id on public.project_donors (donor_id);
     v_made := v_made + 1;
   end if;
 

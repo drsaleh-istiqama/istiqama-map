@@ -9,7 +9,7 @@
 begin;
 set local search_path = public, extensions, tests;
 
-select plan(59);
+select plan(65);
 
 -- Deterministic transaction-id clock (explained in 23_sync_pull.test.sql): the
 -- whole file is one transaction, so sync_pull would otherwise never see the
@@ -452,6 +452,55 @@ select 'w2', pg_temp.resolve(tests.id('u_sup_pemba'),
   (select c.id from public.sync_conflicts c
    where c.table_name = 'project_land' and c.row_id = pg_temp.nid(80) and c.field = 'area_m2'), 'server');
 select is((select v ->> 'state' from res where k = 'w2'), 'resolved_server', '... but it can be closed with "server"');
+
+-- =============================================================================
+-- 11. Donors have no country or branch: everybody who sees a donor through a
+--     project may edit it, but a conflict on a donor is decided by a global
+--     reviewer only
+-- =============================================================================
+insert into res
+select 'dn0', pg_temp.push(tests.id('u_col_pemba'), 'dev-a', jsonb_build_array(
+  pg_temp.op(200, 'donors', pg_temp.nid(200), 0, jsonb_build_object('name_latin', 'Donor zero')),
+  pg_temp.op(201, 'project_donors', pg_temp.nid(201), 0, jsonb_build_object(
+    'project_id', pg_temp.nid(1), 'donor_id', pg_temp.nid(200), 'year', 2020))));
+-- the supervisor (who sees the donor through the project) and a second device
+-- of the collector rename it from the same base
+insert into res
+select 'dn1', pg_temp.push(tests.id('u_sup_pemba'), 'dev-s', jsonb_build_array(
+  pg_temp.op(202, 'donors', pg_temp.nid(200), 1, jsonb_build_object('name_latin', 'Donor S'))));
+insert into res
+select 'dn2', pg_temp.push(tests.id('u_col_pemba'), 'dev-a2', jsonb_build_array(
+  pg_temp.op(203, 'donors', pg_temp.nid(200), 1, jsonb_build_object('name_latin', 'Donor A'))));
+
+select is(pg_temp.st('dn0') || pg_temp.st('dn1') || pg_temp.st('dn2'),
+  array['applied', 'applied', 'applied', 'conflict'],
+  'a donor renamed on two devices from the same base: conflict');
+select is(
+  (select row(c.table_name, c.row_id, c.project_id, c.field, c.server_value, c.client_value)::text
+   from public.sync_conflicts c where c.id = pg_temp.cid('dn2')),
+  row('donors'::text, pg_temp.nid(200), null::uuid, 'name_latin'::text, '"Donor S"'::jsonb, '"Donor A"'::jsonb)::text,
+  'the donor conflict carries no project (a donor belongs to no country or branch)');
+
+select ok(
+  not (pg_temp.cid('dn2') = any (pg_temp.pulled(tests.id('u_sup_pemba'), 'sync_conflicts')))
+  and not (pg_temp.cid('dn2') = any (pg_temp.pulled(tests.id('u_mgr_tz'), 'sync_conflicts', 'aal2')))
+  and pg_temp.cid('dn2') = any (pg_temp.pulled(tests.id('u_hq'), 'sync_conflicts', 'aal2')),
+  'a donor conflict is sent to global reviewers only');
+select throws_ok(
+  format($q$select pg_temp.resolve(%L::uuid, %L::uuid, 'client')$q$, tests.id('u_sup_pemba'), pg_temp.cid('dn2')),
+  'PT403', 'out_of_scope', 'a branch supervisor cannot resolve a donor conflict');
+select throws_ok(
+  format($q$select pg_temp.resolve(%L::uuid, %L::uuid, 'client', 'aal2')$q$, tests.id('u_mgr_tz'), pg_temp.cid('dn2')),
+  'PT403', 'out_of_scope', 'a country manager cannot resolve a donor conflict');
+
+insert into res
+select 'dn3', pg_temp.resolve(tests.id('u_hq'), pg_temp.cid('dn2'), 'client', 'aal2');
+select is(
+  (select row(d.name_latin, c.state)::text
+   from public.donors d, public.sync_conflicts c
+   where d.id = pg_temp.nid(200) and c.id = pg_temp.cid('dn2')),
+  row('Donor A'::text, 'resolved_client'::text)::text,
+  'hq_admin (global reviewer) resolves the donor conflict');
 
 select * from finish();
 rollback;

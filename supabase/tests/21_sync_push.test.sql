@@ -5,7 +5,7 @@
 begin;
 set local search_path = public, extensions, tests;
 
-select plan(95);
+select plan(109);
 
 do $$ begin perform tests.fixture(); end $$;
 
@@ -293,6 +293,28 @@ select is(
    where r.user_id = tests.id('u_col_pemba') and r.device_id = 'dev-a'),
   array['check_violation', 'invalid_coordinates', 'invalid_op', 'invalid_value', 'row_deleted', 'unknown_table'],
   'rejected operations are logged for the sync-status board (private.sync_rejections)');
+
+-- ... and the board (sync_status(), migration 0045) reports them per user and device
+create function pg_temp.status_of(p_user uuid) returns jsonb language plpgsql as
+$fn$
+declare
+  r jsonb;
+begin
+  perform tests.login_as(tests.id('u_hq'), 'aal2', 'dev-hq');
+  r := public.sync_status();
+  perform tests.logout();
+  return (select u from jsonb_array_elements(r -> 'users') u where (u ->> 'user_id')::uuid = p_user);
+end;
+$fn$;
+
+select is(
+  (select jsonb_build_object(
+            'user', s -> 'rejected_7d',
+            'device', (select d -> 'rejected_7d' from jsonb_array_elements(s -> 'devices') d
+                       where d ->> 'device_id' = 'dev-a'))
+   from pg_temp.status_of(tests.id('u_col_pemba')) s),
+  '{"user": 6, "device": 6}'::jsonb,
+  'sync_status(): the six operations rejected by sync_push are counted as rejected_7d of the user and of the device');
 
 insert into res
 select 'c2', pg_temp.push(tests.id('u_col_pemba'), 'dev-a', jsonb_build_array(
@@ -709,6 +731,119 @@ select is(
 select ok(
   (select pe.deleted_at is null and pe.merged_into_id is null from public.persons pe where pe.id = pg_temp.nid(120)),
   'filing or rejecting a merge request never changes the persons');
+
+-- =============================================================================
+-- L. created_at: the offline entry time is kept on insert, immutable afterwards
+-- =============================================================================
+insert into res
+select 'l1', pg_temp.push(tests.id('u_col_pemba'), 'dev-a', jsonb_build_array(
+  pg_temp.op(160, 'projects', pg_temp.nid(160), 0, jsonb_build_object(
+    'name_ar', 'أدخل دون اتصال', 'type', 'school', 'country_id', tests.id('tz'),
+    'created_at', now() - interval '3 days')),
+  pg_temp.op(161, 'project_maintenance', pg_temp.nid(161), 0, jsonb_build_object(
+    'project_id', pg_temp.nid(160), 'description', 'Entered offline', 'created_at', now() - interval '2 days')),
+  pg_temp.op(162, 'donors', pg_temp.nid(162), 0, jsonb_build_object(
+    'name_latin', 'Clock slightly ahead', 'created_at', now() + interval '2 minutes')),
+  pg_temp.op(163, 'donors', pg_temp.nid(163), 0, jsonb_build_object(
+    'name_latin', 'Clock far ahead', 'created_at', now() + interval '2 days')),
+  pg_temp.op(164, 'donors', pg_temp.nid(164), 0, jsonb_build_object('name_latin', 'No entry time', 'created_at', null)),
+  pg_temp.op(165, 'donors', pg_temp.nid(165), 0, jsonb_build_object('name_latin', 'Blank entry time', 'created_at', ' ')),
+  pg_temp.op(166, 'donors', pg_temp.nid(166), 0, jsonb_build_object('name_latin', 'Infinite', 'created_at', '-infinity')),
+  pg_temp.op(167, 'donors', pg_temp.nid(167), 0, jsonb_build_object('name_latin', 'Not a time', 'created_at', 'not-a-timestamp'))));
+
+select is(pg_temp.st('l1'), array_fill('applied'::text, array[7]) || array['rejected'],
+  'insert with created_at: accepted, only a value that is not a timestamp rejects the operation');
+select is(
+  array[(select p.created_at from public.projects p where p.id = pg_temp.nid(160)),
+        (select m.created_at from public.project_maintenance m where m.id = pg_temp.nid(161))],
+  array[now() - interval '3 days', now() - interval '2 days'],
+  'insert: the client-supplied created_at (offline entry time) is stored, on a project and on a child');
+select is(
+  array[(select d.created_at from public.donors d where d.id = pg_temp.nid(162)),
+        (select d.created_at from public.donors d where d.id = pg_temp.nid(163))],
+  array[now() + interval '2 minutes', now()],
+  'insert: a small clock skew is tolerated, a created_at further in the future is replaced by the server time');
+select is(
+  (select array_agg(d.created_at order by d.id) from public.donors d
+   where d.id in (pg_temp.nid(164), pg_temp.nid(165), pg_temp.nid(166))),
+  array[now(), now(), now()],
+  'insert: a null, blank or infinite created_at falls back to the server time');
+select ok(
+  pg_temp.err('l1', 7) = 'invalid_value'
+  and not exists (select 1 from public.donors d where d.id = pg_temp.nid(167)),
+  'insert: a created_at that is not a timestamp is rejected as invalid_value');
+
+insert into res
+select 'l2', pg_temp.push(tests.id('u_col_pemba'), 'dev-a', jsonb_build_array(
+  pg_temp.op(168, 'projects', pg_temp.nid(160), 1, jsonb_build_object(
+    'builder', 'Later edit', 'created_at', now() - interval '30 days'))));
+select ok(
+  pg_temp.st('l2') = array['applied'] and not (pg_temp.r('l2', 0) ? 'ignored_fields')
+  and (select p.builder = 'Later edit' and p.created_at = now() - interval '3 days'
+       from public.projects p where p.id = pg_temp.nid(160)),
+  'update: created_at stays immutable (dropped silently like the other server-managed columns)');
+
+-- =============================================================================
+-- M. Donors: only a donor the caller can see may be changed, deleted or linked
+--    (same visibility rule as RLS and sync_pull)
+-- =============================================================================
+-- a colleague of the branch sees the donor through the project link and may
+-- correct it; deleting needs the creator or a reviewer; an unlinked donor of
+-- somebody else is invisible to him
+insert into res
+select 'm1', pg_temp.push(tests.id('u_col_pemba2'), 'dev-b', jsonb_build_array(
+  pg_temp.op(170, 'donors', pg_temp.nid(11), 1, jsonb_build_object('name_latin', 'Generous donor')),
+  pg_temp.op(171, 'donors', pg_temp.nid(11), 2, null, 'delete'),
+  pg_temp.op(172, 'donors', pg_temp.nid(1001), 1, jsonb_build_object('name_latin', 'x'))));
+
+select is(pg_temp.st('m1'), array['applied', 'rejected', 'rejected'],
+  'a donor linked to a project in scope may be corrected by any writer of that scope');
+select is(array[pg_temp.err('m1', 1), pg_temp.err('m1', 2)], array['not_owner', 'out_of_scope'],
+  'deleting it needs the creator or a reviewer; an unlinked donor of a colleague is out of scope');
+
+-- a collector of another country who knows the id: the stale base would be a
+-- conflict (which echoes the stored value) if the donor were visible to him
+insert into res
+select 'm2', pg_temp.push(tests.id('u_col_ke'), 'dev-k', jsonb_build_array(
+  pg_temp.op(173, 'donors', pg_temp.nid(11), 1, jsonb_build_object('name_latin', 'Hacked')),
+  pg_temp.op(174, 'donors', pg_temp.nid(11), 2, null, 'delete'),
+  pg_temp.op(175, 'project_donors', pg_temp.nid(175), 0, jsonb_build_object(
+    'project_id', tests.id('p_ke_1'), 'donor_id', pg_temp.nid(11), 'year', 2020)),
+  pg_temp.op(176, 'project_donors', pg_temp.nid(176), 0, jsonb_build_object(
+    'project_id', tests.id('p_ke_1'), 'donor_id', pg_temp.nid(7676), 'year', 2020)),
+  -- his own donor, created and linked in the same batch
+  pg_temp.op(177, 'donors', pg_temp.nid(177), 0, jsonb_build_object('name_latin', 'Kenyan donor')),
+  pg_temp.op(178, 'project_donors', pg_temp.nid(178), 0, jsonb_build_object(
+    'project_id', tests.id('p_ke_1'), 'donor_id', pg_temp.nid(177), 'year', 2021))));
+
+select is(pg_temp.st('m2'), array['rejected', 'rejected', 'rejected', 'rejected', 'applied', 'applied'],
+  'a donor of another country cannot be changed, deleted or linked by id; an own donor is linked in the same batch');
+select is(
+  array[pg_temp.err('m2', 0), pg_temp.err('m2', 1), pg_temp.err('m2', 2), pg_temp.err('m2', 3)],
+  array['out_of_scope', 'out_of_scope', 'donor_not_available', 'parent_missing'],
+  'foreign donor: out_of_scope / donor_not_available; a donor that does not exist: parent_missing');
+select ok(
+  not (pg_temp.r('m2', 0) ? 'server_values') and not (pg_temp.r('m2', 0) ? 'conflict_ids')
+  and (select d.name_latin = 'Generous donor' and d.deleted_at is null from public.donors d where d.id = pg_temp.nid(11))
+  and not exists (select 1 from public.project_donors pd where pd.id in (pg_temp.nid(175), pg_temp.nid(176)))
+  and not exists (select 1 from public.sync_conflicts sc where sc.table_name = 'donors' and sc.row_id = pg_temp.nid(11)),
+  'nothing about the foreign donor is disclosed (no conflict, no server value) and nothing is written');
+
+insert into res
+select 'm3', pg_temp.push(tests.id('u_hq'), 'dev-h', jsonb_build_array(
+  pg_temp.op(179, 'donors', pg_temp.nid(1001), 1, jsonb_build_object('notes', 'checked by HQ'))), 'aal2');
+select is(pg_temp.st('m3'), array['applied'], 'a global reader (hq_admin) may correct any donor');
+
+-- re-pointing an existing link follows the same rule
+insert into res
+select 'm4', pg_temp.push(tests.id('u_col_pemba'), 'dev-a', jsonb_build_array(
+  pg_temp.op(180, 'project_donors', pg_temp.nid(12), pg_temp.ver('project_donors', pg_temp.nid(12)),
+             jsonb_build_object('donor_id', pg_temp.nid(177))),
+  pg_temp.op(181, 'project_donors', pg_temp.nid(12), pg_temp.ver('project_donors', pg_temp.nid(12)),
+             jsonb_build_object('donor_id', pg_temp.nid(1002), 'amount', 6000))));
+select is(
+  array[pg_temp.err('m4', 0), pg_temp.r('m4', 1) ->> 'status'], array['donor_not_available', 'applied'],
+  'a link can be re-pointed only to a donor the caller can see');
 
 -- =============================================================================
 -- K. Ledger ownership and revoked sessions

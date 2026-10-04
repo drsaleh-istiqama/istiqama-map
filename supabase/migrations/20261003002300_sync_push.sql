@@ -21,6 +21,13 @@
 --       - disjoint from the client's fields   -> apply                    (merged)
 --       - same field, different value         -> one sync_conflicts row per
 --         field; the other fields are still applied                       (conflict)
+--
+-- created_at: accepted from the client on INSERT only (the offline entry time;
+-- private.tg_std clamps the future) and immutable afterwards.
+--
+-- Donors (registry scope kind "donor") have no country or branch: any writer
+-- may add one, but changing, deleting or linking an existing donor requires
+-- that the caller can see it (private.sync_donor_visible = the RLS rule).
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
@@ -62,7 +69,7 @@ begin
     return s;
   end if;
 
-  if p_reg.scope_kind in ('global', 'conflict') then
+  if p_reg.scope_kind in ('global', 'conflict', 'donor') then
     return s;
   end if;
 
@@ -105,6 +112,38 @@ begin
   end if;
 
   return s;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Is an existing donor visible to the caller? Same rule as the RLS policy
+-- donors_select (migration 0013) and as sync_pull: global readers see every
+-- donor, everybody else the donors he created and the donors linked through
+-- project_donors to a project in his read scope.
+--
+-- sync_push uses it so that nobody can change, delete or link a donor he could
+-- not have received: a conflict result would otherwise echo the stored name of
+-- a foreign donor, and linking a foreign donor to an own project would make it
+-- visible.
+-- -----------------------------------------------------------------------------
+create or replace function private.sync_donor_visible(
+  p_ctx private.sync_ctx, p_donor_id uuid, p_created_by uuid)
+returns boolean
+language plpgsql
+stable
+security definer
+set search_path = public, extensions, private, pg_temp
+as $$
+begin
+  if coalesce(p_ctx.read_all, false) or coalesce(p_created_by = p_ctx.uid, false) then
+    return true;
+  end if;
+  return exists (
+    select 1
+    from public.project_donors pd
+    join public.projects p on p.id = pd.project_id
+    where pd.donor_id = p_donor_id
+      and (p.country_id = any (p_ctx.read_c) or p.branch_id = any (p_ctx.read_b)));
 end;
 $$;
 
@@ -324,6 +363,42 @@ begin
 end;
 $$;
 
+-- project_donors: the linked donor must exist, be live and be visible to the
+-- caller (a link to a project in scope is what makes a donor visible, so a
+-- donor the caller cannot see must not be linkable by id).
+create or replace function private.sync_guard_project_donors(
+  p_ctx private.sync_ctx, p_op text, p_old jsonb, p_fields jsonb, p_reviewer boolean)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, extensions, private, pg_temp
+as $$
+declare
+  v_donor   uuid;
+  v_creator uuid;
+  v_deleted boolean;
+begin
+  if (p_fields ->> 'donor_id') is not null
+     and (p_op = 'insert' or lower(p_fields ->> 'donor_id') is distinct from (p_old ->> 'donor_id')) then
+    v_donor := (p_fields ->> 'donor_id')::uuid;
+    select d.created_by, d.deleted_at is not null
+      into v_creator, v_deleted
+    from public.donors d
+    where d.id = v_donor;
+    if not found then
+      raise exception 'parent_missing' using errcode = 'PT422',
+        detail = 'project_donors.donor_id points to a donor that does not exist on the server';
+    end if;
+    if v_deleted or not private.sync_donor_visible(p_ctx, v_donor, v_creator) then
+      raise exception 'donor_not_available' using errcode = 'PT403',
+        detail = 'The donor is deleted or not visible to you.';
+    end if;
+  end if;
+  return jsonb_build_object('fields', p_fields, 'force', '{}'::jsonb, 'on_change', '{}'::jsonb);
+end;
+$$;
+
 -- person_merge_requests: a reviewer may file a pending request and reject it.
 -- Merging / reverting happens only through merge_persons / revert_person_merge.
 create or replace function private.sync_guard_person_merge_requests(
@@ -440,6 +515,7 @@ declare
   v_has_geom    boolean := false;
   v_lon         double precision;
   v_lat         double precision;
+  v_created     timestamptz;
   v_new         jsonb;
   v_delta       jsonb   := '{}'::jsonb;
   v_apply       jsonb   := '{}'::jsonb;
@@ -518,6 +594,10 @@ begin
     v_scope    := private.sync_row_scope(reg, v_cur, v_id);
     v_writer   := private.sync_can(p_ctx, 'write',  reg.scope_kind, v_scope.country_id, v_scope.branch_id);
     v_reviewer := private.sync_can(p_ctx, 'review', reg.scope_kind, v_scope.country_id, v_scope.branch_id);
+    if reg.scope_kind = 'donor'
+       and not private.sync_donor_visible(p_ctx, v_id, (v_cur ->> 'created_by')::uuid) then
+      v_writer := false; v_reviewer := false;   -- out_of_scope
+    end if;
     perform private.sync_authorise(
       reg.push_delete, v_writer, v_reviewer,
       (v_cur ->> 'created_by')::uuid = p_ctx.uid,
@@ -548,7 +628,8 @@ begin
   -- ---------------------------------------------------------------------------
   -- 4. UPSERT: sanitise the payload
   --    Only writable columns survive; server-managed columns are dropped
-  --    silently, names that are not columns at all are reported back.
+  --    silently (created_at is taken from v_fields on INSERT only, see 5.),
+  --    names that are not columns at all are reported back.
   -- ---------------------------------------------------------------------------
   v_writable := private.sync_writable_columns(v_table);
 
@@ -652,6 +733,19 @@ begin
         case when v_lon is null then null else format('SRID=4326;POINT(%s %s)', v_lon, v_lat) end);
     end if;
 
+    -- Offline entry time. created_at is server-managed and never writable on
+    -- update (private.tg_std keeps the old value), but an INSERT keeps the time
+    -- at which the row was created on the device. private.tg_std replaces a
+    -- value more than 5 minutes in the future by now(); a missing, blank or
+    -- infinite value falls back to now() as well; a value that is not a
+    -- timestamp rejects the operation (invalid_value), like any other field.
+    if nullif(btrim(v_fields ->> 'created_at'), '') is not null then
+      v_created := (v_fields ->> 'created_at')::timestamptz;
+      if isfinite(v_created) then
+        v_apply := v_apply || jsonb_build_object('created_at', v_created);
+      end if;
+    end if;
+
     if v_apply = '{}'::jsonb then
       execute format('insert into public.%I (id) values ($1) returning version', v_table)
         into v_version using v_id;
@@ -683,6 +777,11 @@ begin
     v_scope    := private.sync_row_scope(reg, v_cur, v_id);
     v_writer   := private.sync_can(p_ctx, 'write',  reg.scope_kind, v_scope.country_id, v_scope.branch_id);
     v_reviewer := private.sync_can(p_ctx, 'review', reg.scope_kind, v_scope.country_id, v_scope.branch_id);
+    if reg.scope_kind = 'donor'
+       and not private.sync_donor_visible(p_ctx, v_id, (v_cur ->> 'created_by')::uuid) then
+      -- a donor the caller could not have received (see sync_donor_visible)
+      v_writer := false; v_reviewer := false;   -- out_of_scope
+    end if;
     perform private.sync_authorise(
       reg.push_update, v_writer, v_reviewer,
       (v_cur ->> 'created_by')::uuid = p_ctx.uid,
@@ -1019,10 +1118,12 @@ comment on function public.sync_push(jsonb, text) is
 -- -----------------------------------------------------------------------------
 revoke execute on function
   private.sync_row_scope(private.sync_tables, jsonb, uuid),
+  private.sync_donor_visible(private.sync_ctx, uuid, uuid),
   private.sync_authorise(text, boolean, boolean, boolean, boolean, boolean),
   private.sync_guard_projects(private.sync_ctx, text, jsonb, jsonb, boolean),
   private.sync_guard_localities(private.sync_ctx, text, jsonb, jsonb, boolean),
   private.sync_guard_project_staff(private.sync_ctx, text, jsonb, jsonb, boolean),
+  private.sync_guard_project_donors(private.sync_ctx, text, jsonb, jsonb, boolean),
   private.sync_guard_person_merge_requests(private.sync_ctx, text, jsonb, jsonb, boolean),
   private.sync_error(text, text, text, text, text),
   private.sync_apply_op(private.sync_ctx, jsonb)
