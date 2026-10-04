@@ -4,11 +4,15 @@ import { parseCsv } from '../_shared/csv.ts';
 import type { ExportColumns } from '../_shared/labels.ts';
 import { readZipDirectory, readZipEntry } from '../_shared/zip.ts';
 import {
+  asStaffColumns,
   buildXlsxExport,
   cellPages,
   csvChunks,
   csvStream,
+  datasetOf,
   exportFileName,
+  staffColumnsOf,
+  type ExportColumnsWithStaff,
   type ExportPage,
   type PageFetcher,
   type Progress,
@@ -279,5 +283,174 @@ describe('exportFileName', () => {
     );
     expect(name).toBe('istiqama-projects-20261003-8ffed1be.csv');
     expect(name).toMatch(/^[\x20-\x7e]+$/);
+  });
+
+  it('names a staff export after its dataset', () => {
+    expect(
+      exportFileName(
+        '01a1027f-fc21-7a83-8e7f-64628ffed1be',
+        'xlsx',
+        new Date('2026-10-03T16:01:44Z'),
+        'staff',
+      ),
+    ).toBe('istiqama-staff-20261003-8ffed1be.xlsx');
+  });
+});
+
+// ------------------------------------------------------------------------------------------
+// Staff sheet
+// ------------------------------------------------------------------------------------------
+
+const STAFF_AR: ExportColumnsWithStaff = {
+  ...COLUMNS_AR,
+  staff_columns: [
+    { key: 'person_name_ar', header: 'الاسم (عربي)', kind: 'text' },
+    { key: 'role', header: 'الدور', kind: 'enum', enum: 'staff_role' },
+    { key: 'gender', header: 'الجنس', kind: 'enum', enum: 'gender' },
+    { key: 'salary_amount', header: 'الراتب الشهري', kind: 'number' },
+  ],
+  enums: {
+    ...COLUMNS_AR.enums,
+    staff_role: { imam: 'إمام', teacher: 'معلم' },
+    gender: { male: 'ذكر', female: 'أنثى' },
+  },
+};
+
+/** A fake `export_staff_rows`: `total` rows in pages of `size`, with an empty page after each. */
+function fakeStaffPages(total: number, size: number): { fetch: PageFetcher; calls: number } {
+  const state = { calls: 0 };
+  const fetch: PageFetcher = async (after) => {
+    state.calls++;
+    const cur = (after as { n: number; gap: boolean } | null) ?? { n: 0, gap: false };
+    if (cur.gap) return { rows: [], done: false, next: { n: cur.n, gap: false } };
+    const rows = Array.from({ length: Math.min(size, total - cur.n) }, (_v, k) => ({
+      person_name_ar: `شخص ${cur.n + k + 1}`,
+      role: (cur.n + k) % 2 ? 'teacher' : 'imam',
+      gender: (cur.n + k) % 2 ? 'female' : 'male',
+      salary_amount: 1000 + cur.n + k,
+    }));
+    const end = cur.n + rows.length;
+    return { rows, done: end >= total, next: end >= total ? null : { n: end, gap: true } };
+  };
+  return {
+    fetch,
+    get calls() {
+      return state.calls;
+    },
+  };
+}
+
+describe('dataset helpers', () => {
+  it('datasetOf: only filters.dataset = "staff" selects the staff table', () => {
+    expect(datasetOf({ dataset: 'staff' })).toBe('staff');
+    expect(datasetOf({ dataset: 'projects' })).toBe('projects');
+    expect(datasetOf({})).toBe('projects');
+    expect(datasetOf(null)).toBe('projects');
+    expect(datasetOf({ dataset: 'STAFF' })).toBe('projects');
+  });
+
+  it('staffColumnsOf / asStaffColumns', () => {
+    expect(staffColumnsOf(COLUMNS_AR)).toEqual([]);
+    expect(asStaffColumns(STAFF_AR).columns.map((c) => c.key)).toEqual([
+      'person_name_ar',
+      'role',
+      'gender',
+      'salary_amount',
+    ]);
+    expect(asStaffColumns(STAFF_AR).enums.gender).toEqual({ male: 'ذكر', female: 'أنثى' });
+  });
+
+  it('cellPages with an explicit column list skips empty pages and follows the cursor', async () => {
+    const src = fakeStaffPages(5, 2);
+    const pages: unknown[][][] = [];
+    for await (const p of cellPages(STAFF_AR, src.fetch, STAFF_AR.staff_columns)) pages.push(p);
+    expect(pages.map((p) => p.length)).toEqual([2, 2, 1]);
+    expect(pages[0]).toEqual([
+      ['شخص 1', 'إمام', 'ذكر', 1000],
+      ['شخص 2', 'معلم', 'أنثى', 1001],
+    ]);
+    expect(src.calls).toBe(5); // 3 data pages + 2 empty ones
+  });
+});
+
+describe('XLSX export with a staff sheet', () => {
+  it('adds «الكادر» after the projects sheet and counts its rows apart', async () => {
+    const progress = fresh();
+    const outcome = await buildXlsxExport(
+      STAFF_AR,
+      cellPages(STAFF_AR, fakePages(3, 2).fetch),
+      progress,
+      1000,
+      { staff: cellPages(STAFF_AR, fakeStaffPages(4, 3).fetch, STAFF_AR.staff_columns) },
+    );
+    if (outcome.overflow) throw new Error('unexpected overflow');
+    expect(progress).toMatchObject({ rows: 3, staffRows: 4 });
+    const wb = XLSX.read(
+      new Uint8Array(await new Blob(outcome.chunks as BlobPart[]).arrayBuffer()),
+      {
+        type: 'array',
+      },
+    );
+    expect(wb.SheetNames).toEqual(['المشاريع', 'الكادر']);
+    const staff = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets['الكادر']!, { header: 1 });
+    expect(staff[0]).toEqual(['الاسم (عربي)', 'الدور', 'الجنس', 'الراتب الشهري']);
+    expect(staff).toHaveLength(5);
+    expect(staff[4]).toEqual(['شخص 4', 'معلم', 'أنثى', 1003]);
+  });
+
+  it('English job: sheet «Staff»; a staff export alone can name its single sheet', async () => {
+    const en: ExportColumnsWithStaff = { ...STAFF_AR, lang: 'en', dir: 'ltr' };
+    const both = await buildXlsxExport(en, cellPages(en, fakePages(1, 5).fetch), fresh(), 100, {
+      staff: cellPages(en, fakeStaffPages(1, 5).fetch, en.staff_columns),
+    });
+    if (both.overflow) throw new Error('unexpected overflow');
+    expect(
+      XLSX.read(new Uint8Array(await new Blob(both.chunks as BlobPart[]).arrayBuffer()), {
+        type: 'array',
+      }).SheetNames,
+    ).toEqual(['Projects', 'Staff']);
+
+    const staffOnly = asStaffColumns(en);
+    const alone = await buildXlsxExport(
+      { ...staffOnly, staff_columns: [] },
+      cellPages(staffOnly, fakeStaffPages(2, 5).fetch),
+      fresh(),
+      100,
+      { sheetName: 'Staff' },
+    );
+    if (alone.overflow) throw new Error('unexpected overflow');
+    expect(
+      XLSX.read(new Uint8Array(await new Blob(alone.chunks as BlobPart[]).arrayBuffer()), {
+        type: 'array',
+      }).SheetNames,
+    ).toEqual(['Staff']);
+  });
+
+  it('no staff columns: the staff pages are never read', async () => {
+    const src = fakeStaffPages(4, 3);
+    const outcome = await buildXlsxExport(
+      COLUMNS_AR,
+      cellPages(COLUMNS_AR, fakePages(2, 5).fetch),
+      fresh(),
+      100,
+      {
+        staff: cellPages(COLUMNS_AR, src.fetch, []),
+      },
+    );
+    expect(outcome.overflow).toBe(false);
+    expect(src.calls).toBe(0);
+  });
+
+  it('a staff sheet beyond the row limit is an overflow of the workbook', async () => {
+    const outcome = await buildXlsxExport(
+      STAFF_AR,
+      cellPages(STAFF_AR, fakePages(2, 5).fetch),
+      fresh(),
+      3,
+      {
+        staff: cellPages(STAFF_AR, fakeStaffPages(10, 2).fetch, STAFF_AR.staff_columns),
+      },
+    );
+    expect(outcome).toEqual({ overflow: true, sheet: 'staff' });
   });
 });

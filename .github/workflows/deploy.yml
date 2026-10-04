@@ -1,0 +1,224 @@
+# Deployment (docs/BRIEF.md §1 "CI/CD": environments staging and production; docs/CI.md §5).
+#
+#   staging     every green CI run on main (workflow_run), or manually
+#   production  tags v*  or manually — the "production" environment must have required
+#               reviewers (GitHub → Settings → Environments), which is the manual approval
+#
+# Per environment: supabase db push (versioned migrations; the staging seed ONLY on staging),
+# Edge Functions deploy + their secrets, web build with that environment's public values,
+# optional Sentry release, web upload to the static host.
+#
+# OPEN OWNER DECISIONS (docs/OWNER_DECISIONS.md #1 hosting/region, #2 domain): nothing here
+# assumes them. Every project ref, password, URL and hosting token comes from the environment's
+# secrets/variables; while WEB_HOSTING is unset the web build is only kept as an artifact.
+#
+# Secrets (per environment):  SUPABASE_ACCESS_TOKEN, SUPABASE_PROJECT_REF, SUPABASE_DB_PASSWORD,
+#                             VITE_SUPABASE_ANON_KEY,
+#                             CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID  (WEB_HOSTING=cloudflare-pages)
+#                             NETLIFY_AUTH_TOKEN + NETLIFY_SITE_ID          (WEB_HOSTING=netlify)
+#                             SENTRY_AUTH_TOKEN (optional)
+# Variables (per environment): VITE_SUPABASE_URL, VITE_TILES_URL, VITE_SENTRY_DSN (optional),
+#                             APP_ORIGINS (CORS of the functions, e.g. https://staging.example.org),
+#                             WEB_HOSTING (cloudflare-pages | netlify | unset), WEB_PROJECT_NAME,
+#                             SENTRY_ORG, SENTRY_PROJECT (optional)
+# Repository-level secrets named SUPABASE_PROJECT_REF_STAGING / _PRODUCTION and
+# SUPABASE_DB_PASSWORD_STAGING / _PRODUCTION are accepted as a fallback.
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [staging, production]
+        default: staging
+
+permissions:
+  contents: read
+
+concurrency:
+  # One deployment per environment at a time; never cancel one that is running.
+  group: deploy-${{ github.event_name == 'push' && 'production' || inputs.environment || 'staging' }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '24'
+  SUPABASE_CLI_VERSION: latest
+
+jobs:
+  # Tags and manual runs re-run the full CI on the exact commit; workflow_run already has it.
+  ci:
+    if: github.event_name != 'workflow_run'
+    uses: ./.github/workflows/ci.yml
+
+  plan:
+    name: Decide the target
+    runs-on: ubuntu-24.04
+    needs: ci
+    if: >-
+      always() &&
+      (needs.ci.result == 'success' ||
+       (needs.ci.result == 'skipped' && github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push'))
+    outputs:
+      environment: ${{ steps.pick.outputs.environment }}
+      sha: ${{ steps.pick.outputs.sha }}
+    steps:
+      - id: pick
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_ENV: ${{ inputs.environment }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          case "$EVENT" in
+            workflow_run)      env=staging;     sha="$RUN_SHA" ;;
+            push)              env=production;  sha="$GITHUB_SHA" ;;
+            workflow_dispatch) env="$INPUT_ENV"; sha="$GITHUB_SHA" ;;
+          esac
+          echo "environment=$env" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "### Deploy $sha → **$env**" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Deploy to ${{ needs.plan.outputs.environment }}
+    runs-on: ubuntu-24.04
+    needs: plan
+    timeout-minutes: 40
+    environment:
+      name: ${{ needs.plan.outputs.environment }}
+    env:
+      TARGET: ${{ needs.plan.outputs.environment }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF || (needs.plan.outputs.environment == 'production' && secrets.SUPABASE_PROJECT_REF_PRODUCTION || secrets.SUPABASE_PROJECT_REF_STAGING) }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD || (needs.plan.outputs.environment == 'production' && secrets.SUPABASE_DB_PASSWORD_PRODUCTION || secrets.SUPABASE_DB_PASSWORD_STAGING) }}
+      VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+      VITE_TILES_URL: ${{ vars.VITE_TILES_URL }}
+      VITE_SENTRY_DSN: ${{ vars.VITE_SENTRY_DSN }}
+      VITE_APP_ENV: ${{ needs.plan.outputs.environment }}
+      WEB_HOSTING: ${{ vars.WEB_HOSTING }}
+      WEB_PROJECT_NAME: ${{ vars.WEB_PROJECT_NAME }}
+      HAS_SENTRY: ${{ secrets.SENTRY_AUTH_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - uses: supabase/setup-cli@v1
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+
+      - name: Required configuration is present
+        run: |
+          missing=""
+          for v in SUPABASE_ACCESS_TOKEN SUPABASE_PROJECT_REF SUPABASE_DB_PASSWORD \
+                   VITE_SUPABASE_URL VITE_SUPABASE_ANON_KEY; do
+            [ -n "${!v}" ] || missing="$missing $v"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Environment '$TARGET' is not configured:$missing (docs/CI.md §5)"
+            exit 1
+          fi
+
+      - name: Link the Supabase project
+        run: supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+
+      - name: Pending migrations (dry run)
+        run: supabase db push --dry-run --password "$SUPABASE_DB_PASSWORD"
+
+      - name: supabase db push — staging (migrations + seed.staging.sql)
+        if: env.TARGET == 'staging'
+        run: supabase db push --include-seed --password "$SUPABASE_DB_PASSWORD"
+
+      - name: supabase db push — production (migrations only, never a seed)
+        if: env.TARGET == 'production'
+        run: supabase db push --password "$SUPABASE_DB_PASSWORD"
+
+      - name: Edge Functions secrets
+        env:
+          APP_ORIGINS: ${{ vars.APP_ORIGINS }}
+          # Owner decision #4: no SMS provider yet. "fake" never sends anything.
+          OTP_PROVIDER: ${{ vars.OTP_PROVIDER || 'fake' }}
+        run: |
+          supabase secrets set --project-ref "$SUPABASE_PROJECT_REF" \
+            APP_ENV="$TARGET" OTP_PROVIDER="$OTP_PROVIDER" \
+            ${APP_ORIGINS:+APP_ORIGINS="$APP_ORIGINS"}
+
+      - name: Edge Functions deploy
+        run: |
+          for dir in supabase/functions/*/; do
+            fn="$(basename "$dir")"
+            case "$fn" in _*) continue ;; esac
+            [ -f "$dir/index.ts" ] || continue
+            flags=""
+            # Supabase Auth calls the SMS hook without a user JWT (supabase/functions/README.md §2).
+            [ "$fn" = "otp-hook" ] && flags="--no-verify-jwt"
+            echo "::group::$fn"
+            supabase functions deploy "$fn" --project-ref "$SUPABASE_PROJECT_REF" $flags
+            echo "::endgroup::"
+          done
+
+      - name: Build the web app (public values of this environment)
+        run: |
+          npm run build
+          npm run size -w apps/web
+
+      - name: Sentry release + source maps (optional)
+        if: env.HAS_SENTRY == 'true'
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          release="istiqama-map@$version+${GITHUB_SHA::7}"
+          npx --yes @sentry/cli@2 releases new "$release"
+          npx --yes @sentry/cli@2 sourcemaps upload --release "$release" apps/web/dist
+          npx --yes @sentry/cli@2 releases set-commits "$release" --auto --ignore-missing || true
+          npx --yes @sentry/cli@2 releases finalize "$release"
+
+      - name: Strip source maps from the public build
+        # Maps are built for Sentry; they must not be served from the public site.
+        run: find apps/web/dist -name '*.map' -delete
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist-${{ env.TARGET }}
+          path: apps/web/dist
+          retention-days: 30
+
+      - name: Web deploy — Cloudflare Pages (placeholder until owner decision #1/#2)
+        if: env.WEB_HOSTING == 'cloudflare-pages'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          branch=$([ "$TARGET" = production ] && echo main || echo staging)
+          npx --yes wrangler@4 pages deploy apps/web/dist \
+            --project-name "${WEB_PROJECT_NAME:?set the WEB_PROJECT_NAME variable}" --branch "$branch"
+
+      - name: Web deploy — Netlify (placeholder until owner decision #1/#2)
+        if: env.WEB_HOSTING == 'netlify'
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        run: npx --yes netlify-cli@17 deploy --dir apps/web/dist --prod --no-build
+
+      - name: Web deploy — no host chosen yet
+        if: env.WEB_HOSTING != 'cloudflare-pages' && env.WEB_HOSTING != 'netlify'
+        run: |
+          msg="WEB_HOSTING is not set for '$TARGET' (owner decisions #1/#2 open): the build is kept as the artifact web-dist-$TARGET; database and functions were deployed."
+          echo "::warning::$msg"
+          echo "$msg" >> "$GITHUB_STEP_SUMMARY"

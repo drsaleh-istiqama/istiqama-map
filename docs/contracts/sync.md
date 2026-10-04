@@ -210,7 +210,10 @@ Whole-call errors (HTTP error, nothing applied — retry the same batch later, i
    `reviewed_at`; localities `name_norm`, `approved_by`, `approved_at`; donors `name_norm`;
    persons `name_normalized`, `merged_into_id`; photos `purged_at`; merge requests
    `decided_by`, `decided_at`, `undo`. `review_note` is ignored unless the caller is a
-   reviewer. Unknown names are ignored and reported in `ignored_fields`.
+   reviewer — except on the INSERT of a project by a non-reviewer, where a non-empty
+   `review_note` is stored as `migration_note` when `migration_note` itself is not sent (the v2
+   migration flag, OWNER_DECISIONS item أ; migration 0073). `migration_note` is an ordinary
+   client-writable column. Unknown names are ignored and reported in `ignored_fields`.
 3. **Location.** `lon` and `lat` must be sent together (both `null` clears the point);
    range −180..180 / −90..90, else `rejected/invalid_coordinates`. Stored as
    `Point, SRID 4326`. Pull returns `lon`/`lat`, never `geom`.
@@ -477,11 +480,11 @@ Errors: `PT401`, `PT403 session_revoked`, `PT422 invalid_cursor`, `PT429` (600 c
 Donors have no country or branch. `sync_pull` sends **exactly the donors the RLS policy
 `donors_select` shows** (pgTAP compares the two sets for every role):
 
-| Caller                                            | Donors received                                                                            |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| global reader (`hq_admin` at aal2, global viewer) | all                                                                                        |
+| Caller                                            | Donors received                                                                                                                                   |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| global reader (`hq_admin` at aal2, global viewer) | all                                                                                                                                               |
 | everybody else                                    | donors he created + donors linked by a `project_donors` row to a project in his read scope (where he reads as a viewer only: an approved project) |
-| no effective role                                 | donors he created                                                                          |
+| no effective role                                 | donors he created                                                                                                                                 |
 
 "Linked" means any `project_donors` row, live or soft-deleted, to any project in scope, live
 or soft-deleted — the policy does not look at `deleted_at`, and neither does sync. A Kenyan

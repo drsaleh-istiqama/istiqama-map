@@ -15,19 +15,19 @@
 
 ## Binding technical decisions (brief §1)
 
-| Area | Decision |
-|---|---|
-| Frontend | PWA, TypeScript, Vite, Preact + signals. Initial JS < 200 kB gzip. |
-| Map | MapLibre GL JS + PMTiles (Protomaps) on our own storage. Never `tile.openstreetmap.org`. |
-| Backend | Supabase: Postgres 15+ with PostGIS, `pg_trgm`, `unaccent`; Auth; Storage; RLS on every table. Must run unchanged on self-hosted Supabase. |
-| Local storage | IndexedDB via Dexie. `localStorage` only for UI preferences. |
-| Offline | Workbox: hashed precache + per-request-type runtime rules. |
-| IDs | UUIDv7 generated on the device. |
-| Fonts | Tajawal self-hosted. No Google Fonts. |
-| Tests | Vitest (units), pgTAP (RLS + functions), Playwright (e2e incl. offline), k6 (load). |
-| CI/CD | GitHub Actions; `staging` and `production`; versioned migrations in `supabase/migrations`. |
-| Monitoring | Sentry (web + functions), sync-status dashboard. |
-| Version | Single source: root `package.json` → injected at build time (`__APP_VERSION__`). |
+| Area          | Decision                                                                                                                                   |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Frontend      | PWA, TypeScript, Vite, Preact + signals. Initial JS < 200 kB gzip.                                                                         |
+| Map           | MapLibre GL JS + PMTiles (Protomaps) on our own storage. Never `tile.openstreetmap.org`.                                                   |
+| Backend       | Supabase: Postgres 15+ with PostGIS, `pg_trgm`, `unaccent`; Auth; Storage; RLS on every table. Must run unchanged on self-hosted Supabase. |
+| Local storage | IndexedDB via Dexie. `localStorage` only for UI preferences.                                                                               |
+| Offline       | Workbox: hashed precache + per-request-type runtime rules.                                                                                 |
+| IDs           | UUIDv7 generated on the device.                                                                                                            |
+| Fonts         | Tajawal self-hosted. No Google Fonts.                                                                                                      |
+| Tests         | Vitest (units), pgTAP (RLS + functions), Playwright (e2e incl. offline), k6 (load).                                                        |
+| CI/CD         | GitHub Actions; `staging` and `production`; versioned migrations in `supabase/migrations`.                                                 |
+| Monitoring    | Sentry (web + functions), sync-status dashboard.                                                                                           |
+| Version       | Single source: root `package.json` → injected at build time (`__APP_VERSION__`).                                                           |
 
 ## Local environment (no Docker on the dev machine)
 

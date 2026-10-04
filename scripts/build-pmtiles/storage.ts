@@ -19,7 +19,9 @@ export function storageConfig(bucket = 'tiles'): StorageConfig {
   const url = (process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL ?? '').replace(/\/+$/, '');
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
   if (!url || !serviceKey)
-    throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required (environment or .env.local)');
+    throw new Error(
+      'SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required (environment or .env.local)',
+    );
   return { url, serviceKey, bucket };
 }
 
@@ -94,7 +96,8 @@ export async function verifyPublic(
   const head = new Uint8Array(await res.arrayBuffer());
   const range = res.headers.get('content-range');
   const size = range ? Number(range.split('/')[1]) : Number(res.headers.get('content-length'));
-  if (res.status !== 206) throw new UploadError(`range request answered ${res.status}, expected 206`, res.status);
+  if (res.status !== 206)
+    throw new UploadError(`range request answered ${res.status}, expected 206`, res.status);
   if (size !== expectedBytes)
     throw new UploadError(`object has ${size} bytes, expected ${expectedBytes}`, res.status);
   return { status: res.status, size, head };

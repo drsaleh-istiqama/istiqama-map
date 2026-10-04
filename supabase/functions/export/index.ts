@@ -43,15 +43,19 @@ import {
   toHttpError,
   unwrap,
 } from '../_shared/http.ts';
-import type { ExportColumns } from '../_shared/labels.ts';
 import { enforceRateLimit } from '../_shared/ratelimit.ts';
 import { XLSX_MIME } from '../_shared/xlsx.ts';
 import {
+  STAFF_SHEET_NAMES,
+  asStaffColumns,
   buildXlsxExport,
   cellPages,
   csvChunks,
   csvStream,
+  datasetOf,
   exportFileName,
+  staffColumnsOf,
+  type ExportColumnsWithStaff,
   type ExportFormat,
   type ExportPage,
   type Progress,
@@ -205,34 +209,60 @@ async function processExport(job: Job, creds: CallerHeaders): Promise<void> {
         details: `The export was abandoned after ${MAX_ATTEMPTS} attempts.`,
       });
 
-    const columns = unwrap(
-      await withRetry<ExportColumns>(() => user.rpc('export_columns', { p_lang: job.lang })),
+    const dictionary = unwrap(
+      await withRetry<ExportColumnsWithStaff>(() =>
+        user.rpc('export_columns', { p_lang: job.lang }),
+      ),
     );
-    if (!Array.isArray(columns.columns) || columns.columns.length === 0)
+    if (!Array.isArray(dictionary.columns) || dictionary.columns.length === 0)
       throw new HttpError(500, 'PT500', 'no_columns', {
         details: 'export_columns returned no columns.',
       });
 
-    const fetchPage = async (after: unknown): Promise<ExportPage> =>
-      unwrap(
-        await withRetry<ExportPage>(() =>
-          user.rpc('export_rows', { p_job_id: job.id, p_after: after, p_limit: PAGE_SIZE }),
-        ),
-      );
+    const rpcPages =
+      (fn: 'export_rows' | 'export_staff_rows') =>
+      async (after: unknown): Promise<ExportPage> =>
+        unwrap(
+          await withRetry<ExportPage>(() =>
+            user.rpc(fn, { p_job_id: job.id, p_after: after, p_limit: PAGE_SIZE }),
+          ),
+        );
+
+    // dataset "staff": the staff table is the (only) table of the file
+    const dataset = datasetOf(job.filters);
+    const staffColumns = staffColumnsOf(dictionary);
+    if (dataset === 'staff' && staffColumns.length === 0)
+      throw new HttpError(403, 'PT403', 'no_staff_access', {
+        details: 'The staff table is not available to this account.',
+      });
+    const columns = dataset === 'staff' ? asStaffColumns(dictionary) : dictionary;
+    const fetchPage = rpcPages(dataset === 'staff' ? 'export_staff_rows' : 'export_rows');
 
     let format: ExportFormat = job.format;
     let fallback: Record<string, unknown> | null = null;
     let truncatedCells = 0;
 
     if (format === 'xlsx') {
+      // projects: second sheet with the staff when the caller may see staff
+      const withStaff = dataset === 'projects' && staffColumns.length > 0;
       const outcome = await buildXlsxExport(
-        columns,
+        dataset === 'staff' ? { ...columns, staff_columns: [] } : dictionary,
         cellPages(columns, fetchPage),
         progress,
         XLSX_MAX_ROWS,
+        {
+          sheetName:
+            dataset === 'staff' ? (STAFF_SHEET_NAMES[job.lang] ?? STAFF_SHEET_NAMES.en) : undefined,
+          staff: withStaff
+            ? cellPages(dictionary, rpcPages('export_staff_rows'), staffColumns)
+            : undefined,
+        },
       );
       if (outcome.overflow) {
+        // The CSV fallback holds one table: the job's main table (a staff sheet is dropped;
+        // the user can request the staff as their own export, filters.dataset = "staff").
         fallback = { from: 'xlsx', to: 'csv', reason: 'row_limit', limit: XLSX_MAX_ROWS };
+        if (withStaff) fallback.staff_omitted = true;
         format = 'csv';
         progress = { rows: 0, bytes: 0, pages: 0 };
       } else {
@@ -278,6 +308,8 @@ async function processExport(job: Job, creds: CallerHeaders): Promise<void> {
     };
     if (fallback) stats.fallback = fallback;
     if (truncatedCells > 0) stats.truncated_cells = truncatedCells;
+    if (dataset !== 'projects') stats.dataset = dataset;
+    if (progress.staffRows !== undefined) stats.staff_rows = progress.staffRows;
     // Bookkeeping only; a failure here must not fail the export.
     await svc
       .from('export_jobs')
@@ -296,7 +328,7 @@ async function processExport(job: Job, creds: CallerHeaders): Promise<void> {
           p_storage_path: uploaded,
           p_row_count: progress.rows,
           p_error: null,
-          p_file_name: exportFileName(job.id, extension),
+          p_file_name: exportFileName(job.id, extension, new Date(), dataset),
           p_bytes: progress.bytes,
         }),
       ),

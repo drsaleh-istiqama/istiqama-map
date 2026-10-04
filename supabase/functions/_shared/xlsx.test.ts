@@ -220,3 +220,131 @@ describe('XlsxWriter', () => {
     expect(back.truncated).toBe(false);
   });
 });
+
+function joined(chunks: Uint8Array[], size: number): Uint8Array {
+  const bytes = new Uint8Array(size);
+  let o = 0;
+  for (const c of chunks) {
+    bytes.set(c, o);
+    o += c.byteLength;
+  }
+  return bytes;
+}
+
+async function entryText(bytes: Uint8Array, name: string): Promise<string> {
+  const entry = readZipDirectory(bytes).find((e) => e.name === name);
+  if (!entry) throw new Error(`no entry ${name}`);
+  return new TextDecoder().decode(await readZipEntry(bytes, entry, 50_000_000));
+}
+
+describe('XlsxWriter — several sheets', () => {
+  it('writes sheets in order, each with its own header, frozen row and direction', async () => {
+    const writer = new XlsxWriter({ sheetName: 'المشاريع', rtl: true, columns: COLUMNS });
+    await writer.addRows([['TZ-1', 'مسجد', 120, 'x']]);
+    const staff = writer.addSheet({
+      sheetName: 'الكادر',
+      rtl: true,
+      columns: [{ header: 'الاسم' }, { header: 'الدور' }, { header: 'الراتب' }],
+    });
+    await staff.addRows([
+      ['سالم', 'إمام', 250000],
+      ['خديجة', 'معلم', null],
+    ]);
+    const third = writer.addSheet({ sheetName: 'Notes', rtl: false, columns: [{ header: 'n' }] });
+    await third.addRows([['=1+1']]);
+    const result = await writer.finish();
+    expect(result.rows).toBe(1);
+    expect(result.sheets).toEqual([
+      { name: 'المشاريع', rows: 1 },
+      { name: 'الكادر', rows: 2 },
+      { name: 'Notes', rows: 1 },
+    ]);
+    const bytes = joined(result.chunks, result.size);
+
+    // SheetJS reads all three
+    const wb = XLSX.read(bytes, { type: 'array' });
+    expect(wb.SheetNames).toEqual(['المشاريع', 'الكادر', 'Notes']);
+    expect(XLSX.utils.sheet_to_json(wb.Sheets['الكادر']!, { header: 1, defval: null })).toEqual([
+      ['الاسم', 'الدور', 'الراتب'],
+      ['سالم', 'إمام', 250000],
+      ['خديجة', 'معلم', null],
+    ]);
+    // our own reader still sees the first sheet only
+    expect((await readXlsx(bytes, { maxRows: 10 })).rows).toEqual([
+      ['رمز المشروع', 'النوع', 'السعة', 'ملاحظة'],
+      ['TZ-1', 'مسجد', 120, 'x'],
+    ]);
+
+    // parts, relationships and content types for every sheet; styles keep their own id
+    const types = await entryText(bytes, '[Content_Types].xml');
+    for (const n of [1, 2, 3]) expect(types).toContain(`/xl/worksheets/sheet${n}.xml`);
+    const rels = await entryText(bytes, 'xl/_rels/workbook.xml.rels');
+    expect(rels).toContain(
+      'Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet3.xml"',
+    );
+    expect(rels).toContain(
+      'Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles"',
+    );
+    const s2 = await entryText(bytes, 'xl/worksheets/sheet2.xml');
+    expect(s2).toMatch(/<sheetView[^>]*rightToLeft="1"/);
+    expect(s2).toContain('state="frozen"');
+    const s3 = await entryText(bytes, 'xl/worksheets/sheet3.xml');
+    expect(s3).not.toContain('rightToLeft');
+    expect(s3).not.toContain('<f>'); // formula-looking text is never a formula
+    expect(s3).toContain(' s="2" t="inlineStr"');
+  });
+
+  it('makes sheet names unique (case-insensitive) and Excel-safe', async () => {
+    const writer = new XlsxWriter({ sheetName: 'Staff', rtl: false, columns: [{ header: 'a' }] });
+    const b = writer.addSheet({ sheetName: 'staff', rtl: false, columns: [{ header: 'a' }] });
+    const c = writer.addSheet({
+      sheetName: 'x'.repeat(40),
+      rtl: false,
+      columns: [{ header: 'a' }],
+    });
+    const d = writer.addSheet({
+      sheetName: 'x'.repeat(40),
+      rtl: false,
+      columns: [{ header: 'a' }],
+    });
+    const e = writer.addSheet({ sheetName: 'a/b:c', rtl: false, columns: [{ header: 'a' }] });
+    expect([b.name, c.name, d.name, e.name]).toEqual([
+      'staff (2)',
+      'x'.repeat(31),
+      'x'.repeat(27) + ' (2)',
+      'a b c',
+    ]);
+    const { chunks, size, sheets } = await writer.finish();
+    expect(sheets.map((s) => s.name)).toEqual([
+      'Staff',
+      'staff (2)',
+      'x'.repeat(31),
+      'x'.repeat(27) + ' (2)',
+      'a b c',
+    ]);
+    expect(XLSX.read(joined(chunks, size), { type: 'array' }).SheetNames).toHaveLength(5);
+  });
+
+  it('counts truncated cells over all sheets; no sheet can be added after finish', async () => {
+    const writer = new XlsxWriter({ sheetName: 'a', rtl: false, columns: [{ header: 'h' }] });
+    await writer.addRows([['x'.repeat(XLSX_MAX_CELL_CHARS + 1)]]);
+    const second = writer.addSheet({ sheetName: 'b', rtl: false, columns: [{ header: 'h' }] });
+    await second.addRows([['y'.repeat(XLSX_MAX_CELL_CHARS + 1)], ['z']]);
+    expect(() => writer.addSheet({ sheetName: 'c', rtl: false, columns: [] })).toThrow(RangeError);
+    const result = await writer.finish();
+    expect(result.truncatedCells).toBe(2);
+    expect(result.sheets.map((s) => s.rows)).toEqual([1, 2]);
+    expect(() =>
+      writer.addSheet({ sheetName: 'd', rtl: false, columns: [{ header: 'h' }] }),
+    ).toThrow(/finished/);
+    await expect(second.addRows([['late']])).rejects.toThrow(/finished/);
+  });
+
+  it('an empty extra sheet still has its header row', async () => {
+    const writer = new XlsxWriter({ sheetName: 'a', rtl: false, columns: [{ header: 'h' }] });
+    writer.addSheet({ sheetName: 'b', rtl: true, columns: [{ header: 'الاسم' }] });
+    const { chunks, size } = await writer.finish();
+    const wb = XLSX.read(joined(chunks, size), { type: 'array' });
+    expect(XLSX.utils.sheet_to_json(wb.Sheets.b!, { header: 1 })).toEqual([['الاسم']]);
+  });
+});

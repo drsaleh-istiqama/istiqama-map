@@ -3,17 +3,17 @@
 Contract for brief §2.4 (persons), §3 (roles, session/device revocation), §11 (rate limiting,
 access log) and the sync-status board of §1. Read this instead of the SQL.
 
-| File | Content |
-|---|---|
-| `20261003004000_rate_limit_restricted_log.sql` | `private.rate_limit`, `private.rate_limit_cleanup`, `private.log_restricted` |
-| `20261003004100_person_candidates.sql` | lookup table `private.person_names` + triggers, `person_candidates` |
-| `20261003004200_person_merge.sql` | `merge_persons`, `revert_person_merge`, `request_person_merge`, `resolve_person_merge_request` |
-| `20261003004300_restricted_read.sql` | `restricted_read` |
-| `20261003004400_admin_rpcs.sql` | `admin_users`, `admin_set_role`, `admin_remove_role`, `admin_set_user_active`, `admin_revoke_sessions`, `admin_restore_device` |
-| `20261003004500_sync_status.sql` | `private.sync_rejections` + `private.log_sync_rejection`, `report_device_status`, `sync_status` |
-| `20261003007100_followups.sql` | `user_display_names` (§10), `merge_localities`, `revert_locality_merge` + `private.locality_merges`, `private.locality_merged_into`, `private.locality_merge_allowed` (§11) |
-| `20261003007200_review_fixes_server.sql` | managed currencies for `staff_compensation` (schema.md), `private.end_auth_sessions` + trigger `profiles_end_auth_sessions`, `admin_end_auth_sessions` (§6) |
-| `supabase/tests/40…46_*.test.sql` | 317 pgTAP assertions |
+| File                                           | Content                                                                                                                                                                     |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `20261003004000_rate_limit_restricted_log.sql` | `private.rate_limit`, `private.rate_limit_cleanup`, `private.log_restricted`                                                                                                |
+| `20261003004100_person_candidates.sql`         | lookup table `private.person_names` + triggers, `person_candidates`                                                                                                         |
+| `20261003004200_person_merge.sql`              | `merge_persons`, `revert_person_merge`, `request_person_merge`, `resolve_person_merge_request`                                                                              |
+| `20261003004300_restricted_read.sql`           | `restricted_read`                                                                                                                                                           |
+| `20261003004400_admin_rpcs.sql`                | `admin_users`, `admin_set_role`, `admin_remove_role`, `admin_set_user_active`, `admin_revoke_sessions`, `admin_restore_device`                                              |
+| `20261003004500_sync_status.sql`               | `private.sync_rejections` + `private.log_sync_rejection`, `report_device_status`, `sync_status`                                                                             |
+| `20261003007100_followups.sql`                 | `user_display_names` (§10), `merge_localities`, `revert_locality_merge` + `private.locality_merges`, `private.locality_merged_into`, `private.locality_merge_allowed` (§11) |
+| `20261003007200_review_fixes_server.sql`       | managed currencies for `staff_compensation` (schema.md), `private.end_auth_sessions` + trigger `profiles_end_auth_sessions`, `admin_end_auth_sessions` (§6)                 |
+| `supabase/tests/40…46_*.test.sql`              | 317 pgTAP assertions                                                                                                                                                        |
 
 ## 0. Conventions
 
@@ -25,15 +25,15 @@ access log) and the sync-status board of §1. Read this instead of the SQL.
   PostgREST returns `{ code: "PTxxx", message: "<code>", details: "<sentence>", hint }` with
   HTTP status `xxx`. Switch on `message`, show a translated text.
 
-| HTTP / SQLSTATE | `message` | When |
-|---|---|---|
-| 401 `PT401` | `not_authenticated` | no JWT user |
-| 403 `PT403` | `forbidden` | role/scope does not allow the call |
-| 403 `PT403` | `mfa_required` | admin RPC called by an `hq_admin`/`country_manager` whose token is not `aal2` |
-| 404 `PT404` | `person_not_found`, `merge_request_not_found`, `user_not_found`, `role_not_found`, `device_not_found` | also returned for rows outside the caller's scope (no existence oracle) |
-| 409 `PT409` | `person_already_merged`, `merge_not_revertible`, `request_not_pending`, `last_hq_admin`, `cannot_deactivate_self` | state conflicts |
-| 422 `PT422` | `invalid_argument`, `invalid_table`, `too_many_projects`, `invalid_role_scope`, `invalid_device_id`, `device_mismatch` | validation |
-| 429 `PT429` | `rate_limited` | see §1 (`hint`: "Retry in N seconds.") |
+| HTTP / SQLSTATE | `message`                                                                                                              | When                                                                          |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| 401 `PT401`     | `not_authenticated`                                                                                                    | no JWT user                                                                   |
+| 403 `PT403`     | `forbidden`                                                                                                            | role/scope does not allow the call                                            |
+| 403 `PT403`     | `mfa_required`                                                                                                         | admin RPC called by an `hq_admin`/`country_manager` whose token is not `aal2` |
+| 404 `PT404`     | `person_not_found`, `merge_request_not_found`, `user_not_found`, `role_not_found`, `device_not_found`                  | also returned for rows outside the caller's scope (no existence oracle)       |
+| 409 `PT409`     | `person_already_merged`, `merge_not_revertible`, `request_not_pending`, `last_hq_admin`, `cannot_deactivate_self`      | state conflicts                                                               |
+| 422 `PT422`     | `invalid_argument`, `invalid_table`, `too_many_projects`, `invalid_role_scope`, `invalid_device_id`, `device_mismatch` | validation                                                                    |
+| 429 `PT429`     | `rate_limited`                                                                                                         | see §1 (`hint`: "Retry in N seconds.")                                        |
 
 Remember (authz contract): `country_manager` and `hq_admin` are effective **only at `aal2`**;
 a revoked session/device or an inactive profile has no roles at all, so every function below
@@ -46,8 +46,8 @@ Fixed-window counter in the unlogged table `private.rate_limit_buckets`
 
 - Bucket = `auth.uid()` (nil UUID when there is no user) + `p_key` + window start
   (`floor(epoch / window) * window`, wall clock). One atomic upsert; the caller locks only its
-  own row, so users never block each other. Two concurrent calls of the *same* user on the
-  *same* key serialise until the first transaction ends — keep keys per function.
+  own row, so users never block each other. Two concurrent calls of the _same_ user on the
+  _same_ key serialise until the first transaction ends — keep keys per function.
 - More than `p_max` calls in the window → `PT429 rate_limited`. The refused call's increment is
   rolled back with its transaction, so the bucket stays at `p_max` and the next window starts
   from zero. The first hit of a new window deletes the caller's finished windows for that key;
@@ -87,7 +87,7 @@ Matching (inside the caller's people scope, live and unmerged persons only):
    **separately** (the stored `name_normalized` holds both scripts, which would halve the score
    of a person who has both). Trigram similarity ≥ **0.6**, GIN index, `%` operator with
    `pg_trgm.similarity_threshold` set locally. The best of the two is reported.
-   A single word (no space after normalisation) can only reach 0.6 against a name that *is*
+   A single word (no space after normalisation) can only reach 0.6 against a name that _is_
    that word, so it is looked up by equality. Fewer than 2 characters: no name search.
    The threshold is read from `app_settings` key `persons.name_similarity` (default 0.6,
    clamped to 0.4..1), so the server follows the same setting the client reads.
@@ -103,22 +103,31 @@ candidates (taken from the 40 best name matches, same-area first, plus all phone
     "id": "…",
     "name_ar": "محمد بن سالم الحارثي",
     "name_latin": null,
-    "phone": "+255711111111",          // private.mask_phone() form when phone_masked
-    "phone_masked": false,             // true only when the caller may not see this person's phone
+    "phone": "+255711111111", // private.mask_phone() form when phone_masked
+    "phone_masked": false, // true only when the caller may not see this person's phone
     "gender": "male",
     "birth_year": 1980,
-    "home_area": { "id": "…", "name_ar": "…", "name_en": "…", "name_sw": "…", "text": null } , // or null
-    "roles": ["imam", "teacher"],      // distinct roles in projects the caller can read
-    "staff": [                         // live assignments in projects the caller can read
-      { "project_staff_id": "…", "project_id": "…", "project_code": "TZ-PN-000123",
-        "project_name_ar": "…", "project_name_latin": "…", "project_type": "mosque",
-        "role": "teacher", "start_date": "2021-03-01", "end_date": null }
+    "home_area": { "id": "…", "name_ar": "…", "name_en": "…", "name_sw": "…", "text": null }, // or null
+    "roles": ["imam", "teacher"], // distinct roles in projects the caller can read
+    "staff": [
+      // live assignments in projects the caller can read
+      {
+        "project_staff_id": "…",
+        "project_id": "…",
+        "project_code": "TZ-PN-000123",
+        "project_name_ar": "…",
+        "project_name_latin": "…",
+        "project_type": "mosque",
+        "role": "teacher",
+        "start_date": "2021-03-01",
+        "end_date": null,
+      },
     ],
-    "hidden_projects": 0,              // assignments in projects outside the caller's read scope
-    "similarity": 1.000,               // null when no name was given
+    "hidden_projects": 0, // assignments in projects outside the caller's read scope
+    "similarity": 1.0, // null when no name was given
     "same_area": true,
-    "reasons": ["phone", "name", "area"]   // any non-empty subset, in this order
-  }
+    "reasons": ["phone", "name", "area"], // any non-empty subset, in this order
+  },
 ]
 ```
 
@@ -129,9 +138,9 @@ for single words.
 Implementation notes for other teams:
 
 - `private.person_names (person_id, script 'ar'|'latin', name_norm, n_trgm, country_id,
-  branch_id)` is maintained by the triggers `t85_person_names_ins` / `t85_person_names_upd` on
+branch_id)` is maintained by the triggers `t85_person_names_ins` / `t85_person_names_upd` on
   `persons`. **Bulk loaders that disable triggers must call `select
-  private.person_names_rebuild();` afterwards.**
+private.person_names_rebuild();` afterwards.**
 - pg_trgm needs a database whose `LC_CTYPE` is not `C` (see §9).
 
 ## 4. Merging persons
@@ -154,8 +163,15 @@ Merging/reverting/deciding requires review rights over **both** persons.
    `undo` document is written.
 
 ```jsonc
-{ "request_id": "…", "state": "merged", "source_id": "…", "target_id": "…",
-  "moved_staff": 1, "collapsed_staff": 1, "filled_fields": ["birth_year", "gender", "phone_e164"] }
+{
+  "request_id": "…",
+  "state": "merged",
+  "source_id": "…",
+  "target_id": "…",
+  "moved_staff": 1,
+  "collapsed_staff": 1,
+  "filled_fields": ["birth_year", "gender", "phone_e164"],
+}
 ```
 
 `undo` (owned by these functions, do not edit):
@@ -183,9 +199,16 @@ are un-deleted and get their salary rows back, the source is live again
 cleared **unless somebody changed them since**. Request state → `reverted`.
 
 ```jsonc
-{ "request_id": "…", "state": "reverted", "source_id": "…", "target_id": "…",
-  "restored_staff": 1, "skipped_staff": 0, "restored_collapsed": 1,
-  "reset_fields": ["phone_e164", "gender", "birth_year"] }
+{
+  "request_id": "…",
+  "state": "reverted",
+  "source_id": "…",
+  "target_id": "…",
+  "restored_staff": 1,
+  "skipped_staff": 0,
+  "restored_collapsed": 1,
+  "reset_fields": ["phone_e164", "gender", "birth_year"],
+}
 ```
 
 `merge_not_revertible` when the request is not `merged`, has no undo data, the source is no
@@ -266,14 +289,47 @@ one of the manager's countries or to a branch of it, **and not** an `hq_admin`.
 (normalised, substring); `p_limit` 1..5000. Sorted by name.
 
 ```jsonc
-[ { "id": "…", "full_name": "…", "email": "…", "phone": "…", "preferred_language": "ar",
-    "active": true, "sessions_revoked_at": null, "created_at": "…", "last_sign_in_at": null,
-    "roles": [ { "id": "<user_roles.id>", "role": "field_collector", "scope_type": "branch",
-                 "scope_id": "…", "scope_name_ar": "…", "scope_name_en": "…", "scope_name_sw": "…",
-                 "country_id": "…", "created_at": "…" } ],
-    "devices": [ { "id": "…", "device_id": "…", "label": "…", "user_agent": "…", "app_version": "3.0.0",
-                   "last_seen_at": "…", "last_push_at": "…", "last_pull_at": "…",
-                   "pending_ops": 0, "pending_photos": 0, "revoked_at": null } ] } ]
+[
+  {
+    "id": "…",
+    "full_name": "…",
+    "email": "…",
+    "phone": "…",
+    "preferred_language": "ar",
+    "active": true,
+    "sessions_revoked_at": null,
+    "created_at": "…",
+    "last_sign_in_at": null,
+    "roles": [
+      {
+        "id": "<user_roles.id>",
+        "role": "field_collector",
+        "scope_type": "branch",
+        "scope_id": "…",
+        "scope_name_ar": "…",
+        "scope_name_en": "…",
+        "scope_name_sw": "…",
+        "country_id": "…",
+        "created_at": "…",
+      },
+    ],
+    "devices": [
+      {
+        "id": "…",
+        "device_id": "…",
+        "label": "…",
+        "user_agent": "…",
+        "app_version": "3.0.0",
+        "last_seen_at": "…",
+        "last_push_at": "…",
+        "last_pull_at": "…",
+        "pending_ops": 0,
+        "pending_photos": 0,
+        "revoked_at": null,
+      },
+    ],
+  },
+]
 ```
 
 `email` and `last_sign_in_at` come from `auth.users` (phones are returned unmasked: only
@@ -281,13 +337,13 @@ administrators can call this).
 
 ### `admin_set_role(p_user_id uuid, p_role text, p_scope_type text, p_scope_id uuid) returns jsonb`
 
-| role | allowed scope |
-|---|---|
-| `hq_admin` | `global` |
-| `country_manager` | `country` |
-| `branch_supervisor` | `branch` |
-| `field_collector` | `branch` or `country` |
-| `viewer` | `global`, `country` or `branch` |
+| role                | allowed scope                   |
+| ------------------- | ------------------------------- |
+| `hq_admin`          | `global`                        |
+| `country_manager`   | `country`                       |
+| `branch_supervisor` | `branch`                        |
+| `field_collector`   | `branch` or `country`           |
+| `viewer`            | `global`, `country` or `branch` |
 
 `global` ⇒ `p_scope_id` null; otherwise the country/branch must exist (`invalid_role_scope`).
 Unknown user (no profile) ⇒ `user_not_found`. Idempotent; a previously removed identical grant
@@ -435,19 +491,19 @@ resolvers (`resolved_by`) on the device, which only holds user ids. Any signed-i
 session gate (`PT401` / `PT403 session_revoked`), `PT429` (120 / minute).
 
 ```jsonc
-[ { "id": "…", "full_name": "…" } ]      // sorted by full_name; unknown or invisible ids are left out
+[{ "id": "…", "full_name": "…" }] // sorted by full_name; unknown or invisible ids are left out
 ```
 
 At most **200 ids** per call (`PT422 too_many_ids`); `null` / empty → `[]`. A user U is named
 when the caller
 
-| | Rule | Same rule as |
-|---|---|---|
-| a | is U | `profiles_select_own` |
-| b | is `hq_admin` (aal2) | `profiles_select_hq` |
-| c | can see restricted data of a country in which U holds a live role (country scope, or a branch of that country) | `profiles_select_manager` |
-| d | has **people** scope on a project U created ("entered by") | `report_project.entered_by`, export `entered_by` |
-| e | may see a sync conflict U raised or resolved: project conflicts in his review scope (restricted tables only with restricted access to the project's country), person conflicts in his review scope, locality conflicts in the countries of his review scope, other rows for global reviewers | policy `sync_conflicts_select`, `sync_pull` |
+|     | Rule                                                                                                                                                                                                                                                                                         | Same rule as                                     |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| a   | is U                                                                                                                                                                                                                                                                                         | `profiles_select_own`                            |
+| b   | is `hq_admin` (aal2)                                                                                                                                                                                                                                                                         | `profiles_select_hq`                             |
+| c   | can see restricted data of a country in which U holds a live role (country scope, or a branch of that country)                                                                                                                                                                               | `profiles_select_manager`                        |
+| d   | has **people** scope on a project U created ("entered by")                                                                                                                                                                                                                                   | `report_project.entered_by`, export `entered_by` |
+| e   | may see a sync conflict U raised or resolved: project conflicts in his review scope (restricted tables only with restricted access to the project's country), person conflicts in his review scope, locality conflicts in the countries of his review scope, other rows for global reviewers | policy `sync_conflicts_select`, `sync_pull`      |
 
 A `viewer` (and a caller without effective roles) gets **only his own name** — names are
 people data (brief §3). Deactivated users keep their name (attribution of what they entered).

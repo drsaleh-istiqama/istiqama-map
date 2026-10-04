@@ -169,7 +169,8 @@ describe('enumerations = CHECK constraints', () => {
     ['project_photos', 'category', PHOTO_CATEGORIES],
     ['project_photos', 'upload_state', PHOTO_UPLOAD_STATES],
     ['project_staff', 'role', STAFF_ROLES],
-    ['staff_compensation', 'currency', CURRENCIES],
+    // staff_compensation.currency is no longer an enumerated CHECK (migration 0072): a format
+    // CHECK plus a managed-list trigger; asserted separately below.
     ['persons', 'gender', GENDERS],
     ['localities', 'status', LOCALITY_STATUSES],
     ['option_values', 'list_key', OPTION_LIST_KEYS],
@@ -193,6 +194,20 @@ describe('enumerations = CHECK constraints', () => {
       const list = [...re.exec(hit!.def)![1]!.matchAll(/'([^']*)'::/g)].map((m) => m[1]);
       expect([`${table}.${column}`, [...values]]).toEqual([`${table}.${column}`, list]);
     }
+  });
+
+  it('staff_compensation.currency: format CHECK + every client currency is managed (0072)', async () => {
+    const [fmt] = await rows<{ def: string }>(
+      `select pg_get_constraintdef(oid) as def from pg_constraint
+        where conrelid = 'public.staff_compensation'::regclass
+          and conname = 'staff_compensation_currency_format_ck'`,
+    );
+    expect(fmt?.def).toContain('[A-Z]{3}');
+    const managed = await rows<{ code: string; ok: boolean }>(
+      'select c as code, private.currency_is_managed(c) as ok from unnest($1::text[]) c',
+      [[...CURRENCIES]],
+    );
+    expect(managed.filter((m) => !m.ok).map((m) => m.code)).toEqual([]);
   });
 });
 

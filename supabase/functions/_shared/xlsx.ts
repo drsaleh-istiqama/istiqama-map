@@ -9,8 +9,10 @@
  * on the fly (`_shared/zip.ts`), memory use is the size of the COMPRESSED file.
  * The unit tests read the result back with SheetJS and with `_shared/xlsx-read.ts`.
  *
- * Layout: one sheet; row 1 = bold header, frozen; right-to-left sheet view for Arabic;
- * text as inline strings (never formulas), numbers as numbers.
+ * Layout: one or more sheets (the first one is `xl/worksheets/sheet1.xml`; further sheets come
+ * from `addSheet`); in each, row 1 = bold header, frozen; right-to-left sheet view for Arabic;
+ * text as inline strings (never formulas), numbers as numbers. Each sheet is deflated in its
+ * own stream, so sheets can be filled one after the other without holding XML in memory.
  *
  * Formula injection: an inline string (`t="inlineStr"`) is never evaluated by a spreadsheet,
  * so the text is written AS IS — prefixing an apostrophe (the CSV guard) would corrupt values
@@ -107,33 +109,77 @@ export interface XlsxOptions {
   columns: XlsxColumn[];
 }
 
+/** Options of one sheet (the same shape as the workbook options of the first sheet). */
+export type XlsxSheetOptions = XlsxOptions;
+
+export interface XlsxSheetSummary {
+  /** Name as written into the workbook (cleaned, unique). */
+  name: string;
+  /** Data rows (the header is not counted). */
+  rows: number;
+}
+
 export interface XlsxResult {
   chunks: Uint8Array[];
   size: number;
-  /** Data rows written (the header is not counted). */
+  /** Data rows written to the FIRST sheet (the header is not counted). */
   rows: number;
-  /** Cells whose text was cut at Excel's 32,767 character limit. */
+  /** Cells whose text was cut at Excel's 32,767 character limit (all sheets). */
   truncatedCells: number;
+  /** Every sheet in workbook order. */
+  sheets: XlsxSheetSummary[];
 }
 
-export class XlsxWriter {
+/** Excel refuses two sheets whose names differ only in case: make each name unique. */
+function uniqueSheetName(name: string, taken: Set<string>): string {
+  const base = safeSheetName(name);
+  let candidate = base;
+  for (let n = 2; taken.has(candidate.toLowerCase()); n++) {
+    const suffix = ` (${n})`;
+    candidate = base.slice(0, 31 - suffix.length) + suffix;
+  }
+  taken.add(candidate.toLowerCase());
+  return candidate;
+}
+
+/**
+ * One worksheet of an `XlsxWriter`. Obtained from `XlsxWriter.addSheet` (the first sheet is
+ * the writer itself: `XlsxWriter.addRows`). Rows are deflated as they are added.
+ */
+export class XlsxSheet {
   private readonly encoder = new TextEncoder();
-  private readonly sheet = new ZipEntryStream('xl/worksheets/sheet1.xml');
+  /** @internal */
+  readonly stream: ZipEntryStream;
   private readonly columnNames: string[];
   private rowNumber = 0;
   private truncated = 0;
   private started = false;
   private closed = false;
 
-  constructor(private readonly opts: XlsxOptions) {
+  /** @internal use `XlsxWriter.addSheet` */
+  constructor(
+    readonly index: number,
+    readonly name: string,
+    private readonly opts: XlsxSheetOptions,
+  ) {
     if (opts.columns.length === 0 || opts.columns.length > XLSX_MAX_COLUMNS)
       throw new RangeError('an XLSX sheet needs 1…16384 columns');
     this.columnNames = opts.columns.map((_c, i) => columnName(i));
+    this.stream = new ZipEntryStream(`xl/worksheets/sheet${index}.xml`);
   }
 
   /** Data rows written so far. */
   get rows(): number {
     return Math.max(0, this.rowNumber - 1);
+  }
+
+  /** Cells cut at the Excel limit so far. */
+  get truncatedCells(): number {
+    return this.truncated;
+  }
+
+  get isClosed(): boolean {
+    return this.closed;
   }
 
   private cellXml(ref: string, value: Cell | boolean | undefined, style: number): string {
@@ -185,7 +231,7 @@ export class XlsxWriter {
         this.opts.columns.map((c) => c.header),
         1,
       );
-    await this.sheet.write(this.encoder.encode(head));
+    await this.stream.write(this.encoder.encode(head));
   }
 
   /** Append data rows (one array of cells per row, in column order). */
@@ -197,21 +243,97 @@ export class XlsxWriter {
     for (const row of rows) {
       xml += this.rowXml(row, 0);
       if (xml.length > 262_144) {
-        await this.sheet.write(this.encoder.encode(xml));
+        await this.stream.write(this.encoder.encode(xml));
         xml = '';
       }
     }
-    if (xml !== '') await this.sheet.write(this.encoder.encode(xml));
+    if (xml !== '') await this.stream.write(this.encoder.encode(xml));
   }
 
-  /** Close the sheet and assemble the archive. */
-  async finish(): Promise<XlsxResult> {
-    if (this.closed) throw new Error('workbook already finished');
+  /** @internal Write the end of the sheet XML (the writer adds the stream to the archive). */
+  async close(): Promise<void> {
+    if (this.closed) return;
     await this.start();
     this.closed = true;
-    await this.sheet.write(this.encoder.encode('</sheetData></worksheet>'));
+    await this.stream.write(this.encoder.encode('</sheetData></worksheet>'));
+  }
+}
 
-    const sheetName = xmlEscape(safeSheetName(this.opts.sheetName));
+/** Upper bound of sheets per workbook (Excel has no fixed limit; this guards against loops). */
+export const XLSX_MAX_SHEETS = 255;
+
+export class XlsxWriter {
+  private readonly sheets: XlsxSheet[] = [];
+  private readonly names = new Set<string>();
+  private closed = false;
+
+  constructor(opts: XlsxOptions) {
+    this.addSheetInternal(opts);
+  }
+
+  private addSheetInternal(opts: XlsxSheetOptions): XlsxSheet {
+    // validate before taking the name
+    if (opts.columns.length === 0 || opts.columns.length > XLSX_MAX_COLUMNS)
+      throw new RangeError('an XLSX sheet needs 1…16384 columns');
+    const sheet = new XlsxSheet(
+      this.sheets.length + 1,
+      uniqueSheetName(opts.sheetName, this.names),
+      opts,
+    );
+    this.sheets.push(sheet);
+    return sheet;
+  }
+
+  /** The first sheet. */
+  get first(): XlsxSheet {
+    return this.sheets[0]!;
+  }
+
+  /** Data rows written to the first sheet so far. */
+  get rows(): number {
+    return this.first.rows;
+  }
+
+  /** Append data rows to the FIRST sheet. */
+  async addRows(rows: ReadonlyArray<ReadonlyArray<Cell | boolean | undefined>>): Promise<void> {
+    if (this.closed) throw new Error('workbook already finished');
+    await this.first.addRows(rows);
+  }
+
+  /**
+   * Add another sheet after the existing ones and return it; fill it with `sheet.addRows`.
+   * The name is cleaned (`safeSheetName`) and made unique within the workbook.
+   */
+  addSheet(opts: XlsxSheetOptions): XlsxSheet {
+    if (this.closed) throw new Error('workbook already finished');
+    if (this.sheets.length >= XLSX_MAX_SHEETS) throw new RangeError('too many sheets');
+    return this.addSheetInternal(opts);
+  }
+
+  /** Close every sheet and assemble the archive. */
+  async finish(): Promise<XlsxResult> {
+    if (this.closed) throw new Error('workbook already finished');
+    this.closed = true;
+    for (const sheet of this.sheets) await sheet.close();
+
+    const sheetOverrides = this.sheets
+      .map(
+        (s) =>
+          `<Override PartName="/xl/worksheets/sheet${s.index}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`,
+      )
+      .join('');
+    // rId1…rIdN: sheets; rId(N+1): styles
+    const sheetEntries = this.sheets
+      .map((s) => `<sheet name="${xmlEscape(s.name)}" sheetId="${s.index}" r:id="rId${s.index}"/>`)
+      .join('');
+    const sheetRels = this.sheets
+      .map(
+        (s) =>
+          `<Relationship Id="rId${s.index}" Type="${NS_REL}/worksheet" Target="worksheets/sheet${s.index}.xml"/>`,
+      )
+      .join('');
+    const stylesRel = `rId${this.sheets.length + 1}`;
+
     const zip = new ZipWriter();
     await zip.add(
       '[Content_Types].xml',
@@ -220,7 +342,7 @@ export class XlsxWriter {
         '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
         '<Default Extension="xml" ContentType="application/xml"/>' +
         '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
-        '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
+        sheetOverrides +
         '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
         '</Types>',
     );
@@ -236,15 +358,15 @@ export class XlsxWriter {
       XML_HEADER +
         `<workbook xmlns="${NS_MAIN}" xmlns:r="${NS_REL}">` +
         '<bookViews><workbookView/></bookViews>' +
-        `<sheets><sheet name="${sheetName}" sheetId="1" r:id="rId1"/></sheets>` +
+        `<sheets>${sheetEntries}</sheets>` +
         '</workbook>',
     );
     await zip.add(
       'xl/_rels/workbook.xml.rels',
       XML_HEADER +
         `<Relationships xmlns="${NS_PKG_REL}">` +
-        `<Relationship Id="rId1" Type="${NS_REL}/worksheet" Target="worksheets/sheet1.xml"/>` +
-        `<Relationship Id="rId2" Type="${NS_REL}/styles" Target="styles.xml"/>` +
+        sheetRels +
+        `<Relationship Id="${stylesRel}" Type="${NS_REL}/styles" Target="styles.xml"/>` +
         '</Relationships>',
     );
     await zip.add(
@@ -270,9 +392,15 @@ export class XlsxWriter {
         '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
         '</styleSheet>',
     );
-    await zip.addStream(this.sheet);
+    for (const sheet of this.sheets) await zip.addStream(sheet.stream);
     const { chunks, size } = zip.finish();
-    return { chunks, size, rows: this.rows, truncatedCells: this.truncated };
+    return {
+      chunks,
+      size,
+      rows: this.first.rows,
+      truncatedCells: this.sheets.reduce((n, s) => n + s.truncatedCells, 0),
+      sheets: this.sheets.map((s) => ({ name: s.name, rows: s.rows })),
+    };
   }
 }
 

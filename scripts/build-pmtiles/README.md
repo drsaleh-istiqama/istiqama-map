@@ -4,12 +4,12 @@ Brief §1 (PMTiles on our own storage, never `tile.openstreetmap.org`) and §4.7
 packs per region). Everything here reads **local files** by default: nothing is downloaded
 unless you pass a remote source together with `--allow-remote`.
 
-| File | Purpose |
-|---|---|
-| `index.ts` | `npm run pmtiles:build` — one pack per administrative area: extract → upload → `map_packs` row |
-| `upload-dev.ts` | publishes the development basemap to `tiles/basemap/east-africa.pmtiles` |
-| `dev-basemap.ts` | builds a stand-in basemap from `admin_areas` when no Protomaps extract is available |
-| `cli.ts`, `region.ts`, `pmtiles.ts`, `storage.ts`, `header.ts`, `writer.ts` | parts (unit-tested in `build-pmtiles.test.ts`) |
+| File                                                                        | Purpose                                                                                        |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `index.ts`                                                                  | `npm run pmtiles:build` — one pack per administrative area: extract → upload → `map_packs` row |
+| `upload-dev.ts`                                                             | publishes the development basemap to `tiles/basemap/east-africa.pmtiles`                       |
+| `dev-basemap.ts`                                                            | builds a stand-in basemap from `admin_areas` when no Protomaps extract is available            |
+| `cli.ts`, `region.ts`, `pmtiles.ts`, `storage.ts`, `header.ts`, `writer.ts` | parts (unit-tested in `build-pmtiles.test.ts`)                                                 |
 
 Requirements: the go-pmtiles CLI at `.local/pmtiles/pmtiles.exe` (or `--tool`), `DATABASE_URL`,
 `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in the environment or `.env.local` (the service

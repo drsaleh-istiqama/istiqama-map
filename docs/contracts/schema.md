@@ -17,15 +17,15 @@ jobs, `server_info()`).
 
 ## 1. Standard columns
 
-| Column | Type | Notes |
-|---|---|---|
-| `id` | `uuid` PK, default `private.uuid_v7()` | a client-supplied id is kept |
-| `created_at` | `timestamptz not null default now()` | a supplied value is kept (offline entry time) unless it is more than 5 min in the future |
-| `updated_at` | `timestamptz not null default now()` | always `now()` |
-| `created_by`, `updated_by` | `uuid` → `auth.users(id)` (no cascade) | `auth.uid()` when there is a JWT user; explicit values are kept only when `auth.uid()` is null. `created_by` is immutable for JWT users |
-| `version` | `integer not null default 1` | 1 on insert, `old.version + 1` on **every** update |
-| `deleted_at` | `timestamptz` | soft delete; hard `DELETE` is blocked (§6) |
-| `sync_xid` | `bigint not null default private.current_xid()` | syncable tables only; set on every insert/update |
+| Column                     | Type                                            | Notes                                                                                                                                   |
+| -------------------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                       | `uuid` PK, default `private.uuid_v7()`          | a client-supplied id is kept                                                                                                            |
+| `created_at`               | `timestamptz not null default now()`            | a supplied value is kept (offline entry time) unless it is more than 5 min in the future                                                |
+| `updated_at`               | `timestamptz not null default now()`            | always `now()`                                                                                                                          |
+| `created_by`, `updated_by` | `uuid` → `auth.users(id)` (no cascade)          | `auth.uid()` when there is a JWT user; explicit values are kept only when `auth.uid()` is null. `created_by` is immutable for JWT users |
+| `version`                  | `integer not null default 1`                    | 1 on insert, `old.version + 1` on **every** update                                                                                      |
+| `deleted_at`               | `timestamptz`                                   | soft delete; hard `DELETE` is blocked (§6)                                                                                              |
+| `sync_xid`                 | `bigint not null default private.current_xid()` | syncable tables only; set on every insert/update                                                                                        |
 
 **Syncable tables (have `sync_xid` and index `(sync_xid, id)`)**, in pull order:
 `countries, admin_areas, branches, option_values, fx_rates, localities, donors, projects,
@@ -39,21 +39,21 @@ No standard columns: `audit_log, sync_applied_ops, restricted_access_log`, `priv
 
 ## 2. Helper functions (schema `private`, all with pinned `search_path`)
 
-| Function | Returns | Notes |
-|---|---|---|
-| `private.current_xid()` | `bigint` | `pg_current_xact_id()`; top-level xid even inside sub-transactions. STABLE |
-| `private.safe_xid()` | `bigint` | `pg_snapshot_xmin(pg_current_snapshot())`. STABLE |
-| `private.device_id()` | `text` | header `x-device-id` (from `request.headers`), else setting `app.device_id`, else NULL; max 128 chars |
-| `private.f_unaccent(text)` | `text` | IMMUTABLE wrapper of `extensions.unaccent('extensions.unaccent', $1)` |
-| `private.norm(text)` | `text` | IMMUTABLE STRICT, see §2.1 |
-| `private.uuid_v7()` | `uuid` | VOLATILE |
-| `private.mask_phone(text)` | `text` | first 4 chars + `•` × (len−7) + last 3; shorter than 8 chars → all `•`. `+255712345678` → `+255••••••678` |
-| `private.geom_audit(geometry)` | `text` | point → EWKT; other → `SRID=4326;MULTIPOLYGON npoints=N md5=…` |
-| `private.deepest_admin_area(geometry)` | `table(id uuid, country_id uuid, level smallint)` | deepest live `admin_areas` row whose `geom` contains the point (`ST_Contains`); 0 rows when none |
-| `private.next_project_code(country_id uuid, admin_area_id uuid)` | `text` | consumes the per-country counter; owner only |
-| `private.project_completeness(p public.projects, p_skip_children boolean default false)` | `smallint` | §5; STABLE |
-| `private.harden_private_schema()` | `integer` | §9.1; owner only |
-| `private.schema_version()` | `text` | §9.3; 14-digit prefix of the newest migration, **bump it in every later migration** |
+| Function                                                                                 | Returns                                           | Notes                                                                                                     |
+| ---------------------------------------------------------------------------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `private.current_xid()`                                                                  | `bigint`                                          | `pg_current_xact_id()`; top-level xid even inside sub-transactions. STABLE                                |
+| `private.safe_xid()`                                                                     | `bigint`                                          | `pg_snapshot_xmin(pg_current_snapshot())`. STABLE                                                         |
+| `private.device_id()`                                                                    | `text`                                            | header `x-device-id` (from `request.headers`), else setting `app.device_id`, else NULL; max 128 chars     |
+| `private.f_unaccent(text)`                                                               | `text`                                            | IMMUTABLE wrapper of `extensions.unaccent('extensions.unaccent', $1)`                                     |
+| `private.norm(text)`                                                                     | `text`                                            | IMMUTABLE STRICT, see §2.1                                                                                |
+| `private.uuid_v7()`                                                                      | `uuid`                                            | VOLATILE                                                                                                  |
+| `private.mask_phone(text)`                                                               | `text`                                            | first 4 chars + `•` × (len−7) + last 3; shorter than 8 chars → all `•`. `+255712345678` → `+255••••••678` |
+| `private.geom_audit(geometry)`                                                           | `text`                                            | point → EWKT; other → `SRID=4326;MULTIPOLYGON npoints=N md5=…`                                            |
+| `private.deepest_admin_area(geometry)`                                                   | `table(id uuid, country_id uuid, level smallint)` | deepest live `admin_areas` row whose `geom` contains the point (`ST_Contains`); 0 rows when none          |
+| `private.next_project_code(country_id uuid, admin_area_id uuid)`                         | `text`                                            | consumes the per-country counter; owner only                                                              |
+| `private.project_completeness(p public.projects, p_skip_children boolean default false)` | `smallint`                                        | §5; STABLE                                                                                                |
+| `private.harden_private_schema()`                                                        | `integer`                                         | §9.1; owner only                                                                                          |
+| `private.schema_version()`                                                               | `text`                                            | §9.3; 14-digit prefix of the newest migration, **bump it in every later migration**                       |
 
 ### 2.1 `private.norm` — canonical algorithm (mirror it exactly in `normalize.ts`)
 
@@ -119,7 +119,7 @@ and Arabic punctuation are untouched, `U+200B` is removed rather than turned int
 characters outside the BMP survive.
 
 Normalised columns hold **both scripts in one string** (`name_ar name_latin …`). Match a query
-with *word* similarity (`norm(q) <% col`, `word_similarity`, `strict_word_similarity`) or `LIKE`,
+with _word_ similarity (`norm(q) <% col`, `word_similarity`, `strict_word_similarity`) or `LIKE`,
 not with whole-string `similarity()`, otherwise the other script dilutes the score.
 
 > **Database locale.** pg_trgm only extracts trigrams from Arabic text when the database
@@ -167,31 +167,32 @@ becomes `approved`. Renaming a locality refreshes `projects.search_norm` of its 
 
 **`projects`** (S)
 
-| Column | Type | Notes |
-|---|---|---|
-| `code` | `text` | server-generated, unique when not null, immutable (§4.2) |
-| `external_id` | `text` | import key, unique when not null |
-| `name_ar` | `text not null` | non-blank |
-| `name_latin` | `text` | |
-| `type` | `text not null` | `mosque|school|combined` |
-| `status` | `text not null default 'active'` | `active|maintenance|building|inactive` |
-| `capacity` | `integer` | ≥ 0 |
-| `geom` | `geometry(Point,4326)` | valid lon/lat; **required unless `record_state = 'draft'`** (`projects_geom_required_ck`) |
-| `gps_accuracy_m` | `real` | ≥ 0 |
-| `location_source` | `text` | `gps|map|import` |
-| `country_id` | `uuid not null` → countries | from `geom` (§4.1) |
-| `admin_area_id` | `uuid` → admin_areas | from `geom` (§4.1) |
-| `locality_id` | `uuid` → localities | |
-| `branch_id` | `uuid` → branches | not derived; set by the writer |
-| `builder` | `text` | |
-| `build_year` | `smallint` | 1800..2200; filled from `build_date` when missing |
-| `build_date` | `date` | optional |
-| `record_state` | `text not null default 'draft'` | `draft|submitted|approved|returned` |
-| `review_note` | `text` | |
-| `reviewed_by`, `reviewed_at` | `uuid` → auth.users, `timestamptz` | stamped by trigger when `record_state` changes to `approved`/`returned` |
-| `completeness` | `smallint not null default 0` | 0..100, always overwritten by trigger (§5) |
-| `search_norm` | `text not null default ''` | always overwritten by trigger (§4.3) |
-| `import_batch_id` | `uuid` → import_batches | |
+| Column                       | Type                               | Notes                                                                                                                                |
+| ---------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `code`                       | `text`                             | server-generated, unique when not null, immutable (§4.2)                                                                             |
+| `external_id`                | `text`                             | import key, unique when not null                                                                                                     |
+| `name_ar`                    | `text not null`                    | non-blank                                                                                                                            |
+| `name_latin`                 | `text`                             |                                                                                                                                      |
+| `type`                       | `text not null`                    | `mosque                                                                                                                              | school      | combined` |
+| `status`                     | `text not null default 'active'`   | `active                                                                                                                              | maintenance | building  | inactive` |
+| `capacity`                   | `integer`                          | ≥ 0                                                                                                                                  |
+| `geom`                       | `geometry(Point,4326)`             | valid lon/lat; **required unless `record_state = 'draft'`** (`projects_geom_required_ck`)                                            |
+| `gps_accuracy_m`             | `real`                             | ≥ 0                                                                                                                                  |
+| `location_source`            | `text`                             | `gps                                                                                                                                 | map         | import`   |
+| `country_id`                 | `uuid not null` → countries        | from `geom` (§4.1)                                                                                                                   |
+| `admin_area_id`              | `uuid` → admin_areas               | from `geom` (§4.1)                                                                                                                   |
+| `locality_id`                | `uuid` → localities                |                                                                                                                                      |
+| `branch_id`                  | `uuid` → branches                  | not derived; set by the writer                                                                                                       |
+| `builder`                    | `text`                             |                                                                                                                                      |
+| `build_year`                 | `smallint`                         | 1800..2200; filled from `build_date` when missing                                                                                    |
+| `build_date`                 | `date`                             | optional                                                                                                                             |
+| `record_state`               | `text not null default 'draft'`    | `draft                                                                                                                               | submitted   | approved  | returned` |
+| `review_note`                | `text`                             | reviewer field (sync_push ignores it from non-reviewers)                                                                             |
+| `migration_note`             | `text`                             | ≤ 2000 chars; client-writable flag of the v2 migration (OWNER_DECISIONS item أ), cleared by a reviewer once checked (migration 0073) |
+| `reviewed_by`, `reviewed_at` | `uuid` → auth.users, `timestamptz` | stamped by trigger when `record_state` changes to `approved`/`returned`                                                              |
+| `completeness`               | `smallint not null default 0`      | 0..100, always overwritten by trigger (§5)                                                                                           |
+| `search_norm`                | `text not null default ''`         | always overwritten by trigger (§4.3)                                                                                                 |
+| `import_batch_id`            | `uuid` → import_batches            |                                                                                                                                      |
 
 Indexes: GiST `geom`; GIN trgm on `name_ar`, `name_latin`, `search_norm`;
 `(country_id, status, type)`; `(branch_id)`; `(admin_area_id)`; `(locality_id)`; `(created_by)`;
@@ -380,10 +381,11 @@ All derived columns are (re)computed by BEFORE triggers; values sent by a client
 
 On insert, and on update when `geom`, `admin_area_id` or `country_id` changed (and `geom` is not
 null): the deepest live `admin_areas` polygon containing the point (`ST_Contains`, level 3 > 2 >
-1) sets **both** `admin_area_id` and `country_id`. When no polygon contains the point the
-writer's values are kept, and a non-null `admin_area_id` then decides `country_id`.
-`country_id` is `NOT NULL`: a row whose country can be neither derived nor supplied fails (23502).
-`localities` follow the same rule.
+
+1. sets **both** `admin_area_id` and `country_id`. When no polygon contains the point the
+   writer's values are kept, and a non-null `admin_area_id` then decides `country_id`.
+   `country_id` is `NOT NULL`: a row whose country can be neither derived nor supplied fails (23502).
+   `localities` follow the same rule.
 
 ### 4.2 `code`
 
@@ -418,19 +420,19 @@ JWT user may supply one on insert.
 
 Sum of the weights whose condition holds. "live" = `deleted_at is null`.
 
-| Key | Weight | Condition |
-|---|---:|---|
-| `name_ar` | 10 | `name_ar` not blank after trim |
-| `name_latin` | 5 | `name_latin` not blank after trim |
-| `location` | 15 | `geom` (lon/lat) present |
-| `admin_area` | 5 | `admin_area_id` not null |
-| `capacity` | 5 | `capacity > 0` |
-| `build_year` | 5 | `build_year` not null |
-| `photos` | 15 | at least one live `project_photos` row (any `upload_state`) |
-| `land` | 10 | a live `project_land` row exists |
-| `facilities` | 10 | a live `project_facilities` row exists |
-| `staff` | 10 | at least one live `project_staff` row |
-| `community` | 10 | a live `community_profiles` row exists |
+| Key          | Weight | Condition                                                   |
+| ------------ | -----: | ----------------------------------------------------------- |
+| `name_ar`    |     10 | `name_ar` not blank after trim                              |
+| `name_latin` |      5 | `name_latin` not blank after trim                           |
+| `location`   |     15 | `geom` (lon/lat) present                                    |
+| `admin_area` |      5 | `admin_area_id` not null                                    |
+| `capacity`   |      5 | `capacity > 0`                                              |
+| `build_year` |      5 | `build_year` not null                                       |
+| `photos`     |     15 | at least one live `project_photos` row (any `upload_state`) |
+| `land`       |     10 | a live `project_land` row exists                            |
+| `facilities` |     10 | a live `project_facilities` row exists                      |
+| `staff`      |     10 | at least one live `project_staff` row                       |
+| `community`  |     10 | a live `community_profiles` row exists                      |
 
 Restricted tables are not part of the score. It is recomputed on every insert/update of the
 project and, through statement-level triggers on the five child tables, whenever a child row is
@@ -448,20 +450,20 @@ inserted, soft-deleted, restored or hard-deleted. The project row is only writte
   DEFINER maintenance functions called with the service-role key, pgTAP before `tests.login_as`).
 - `audit_log` and `restricted_access_log` additionally reject every `UPDATE`, `DELETE`, `TRUNCATE`
   from anyone (`PT403 append_only_table`); retention needs `alter table … disable trigger
-  t01_append_only` by the owner.
+t01_append_only` by the owner.
 - Tables in `private` carry no such triggers.
 
 ## 7. Triggers and the audit log
 
-| Trigger | Timing | Tables |
-|---|---|---|
-| `t00_no_hard_delete`, `t00_no_truncate` | BEFORE statement | all public tables |
-| `t01_append_only`, `t01_append_only_truncate` | BEFORE statement | `audit_log`, `restricted_access_log` |
-| `t10_std` | BEFORE INSERT/UPDATE row | all tables with standard columns |
-| `t20_derive` / `t20_validate` / `t20_rules` | BEFORE INSERT/UPDATE row | `admin_areas`, `localities`, `persons`, `donors`, `projects` / `user_roles`, `community_profiles` / `project_photos` |
-| `t80_projects_search` | AFTER UPDATE row (names changed) | `localities` |
-| `t80_completeness_ins/_upd/_del` | AFTER statement (transition tables) | `project_photos`, `project_land`, `project_facilities`, `project_staff`, `community_profiles` |
-| `t90_audit` | AFTER INSERT/UPDATE/DELETE row | all tables with standard columns except `import_rows` |
+| Trigger                                       | Timing                              | Tables                                                                                                               |
+| --------------------------------------------- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `t00_no_hard_delete`, `t00_no_truncate`       | BEFORE statement                    | all public tables                                                                                                    |
+| `t01_append_only`, `t01_append_only_truncate` | BEFORE statement                    | `audit_log`, `restricted_access_log`                                                                                 |
+| `t10_std`                                     | BEFORE INSERT/UPDATE row            | all tables with standard columns                                                                                     |
+| `t20_derive` / `t20_validate` / `t20_rules`   | BEFORE INSERT/UPDATE row            | `admin_areas`, `localities`, `persons`, `donors`, `projects` / `user_roles`, `community_profiles` / `project_photos` |
+| `t80_projects_search`                         | AFTER UPDATE row (names changed)    | `localities`                                                                                                         |
+| `t80_completeness_ins/_upd/_del`              | AFTER statement (transition tables) | `project_photos`, `project_land`, `project_facilities`, `project_staff`, `community_profiles`                        |
+| `t90_audit`                                   | AFTER INSERT/UPDATE/DELETE row      | all tables with standard columns except `import_rows`                                                                |
 
 `audit_log` rows:
 
@@ -495,18 +497,18 @@ PL/pgSQL caches while a table is still empty (first rows of a bulk load) stay in
 
 ## 8. Error codes raised by this layer
 
-| SQLSTATE | MESSAGE | When |
-|---|---|---|
-| `PT403` | `hard_delete_forbidden` | DELETE/TRUNCATE by or for an API user |
-| `PT403` | `append_only_table` | UPDATE/DELETE/TRUNCATE on a log table |
-| `PT422` | `photo_limit_exceeded` | 11th live photo |
-| `PT422` | `photo_project_immutable` | `project_photos.project_id` changed |
-| `PT422` | `invalid_option_value` | community option id not in the right list |
-| `PT422` | `invalid_scope` | `user_roles.scope_id` is not a country/branch |
-| `PT422` | `admin_area_parent_mismatch` | wrong parent level/country |
-| `23514` | constraint `<table>_<column>_ck` | enumerations, ranges, paths, `projects_geom_required_ck` |
-| `23505` | index/constraint name | `projects_code_key`, `projects_external_id_key`, `<table>_project_live_key`, `project_photos_cover_key`, `project_donors_live_key`, `staff_compensation_live_key`, `user_roles_live_key`, … |
-| `23502` / `23503` | — | missing required value / unknown reference |
+| SQLSTATE          | MESSAGE                          | When                                                                                                                                                                                        |
+| ----------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PT403`           | `hard_delete_forbidden`          | DELETE/TRUNCATE by or for an API user                                                                                                                                                       |
+| `PT403`           | `append_only_table`              | UPDATE/DELETE/TRUNCATE on a log table                                                                                                                                                       |
+| `PT422`           | `photo_limit_exceeded`           | 11th live photo                                                                                                                                                                             |
+| `PT422`           | `photo_project_immutable`        | `project_photos.project_id` changed                                                                                                                                                         |
+| `PT422`           | `invalid_option_value`           | community option id not in the right list                                                                                                                                                   |
+| `PT422`           | `invalid_scope`                  | `user_roles.scope_id` is not a country/branch                                                                                                                                               |
+| `PT422`           | `admin_area_parent_mismatch`     | wrong parent level/country                                                                                                                                                                  |
+| `23514`           | constraint `<table>_<column>_ck` | enumerations, ranges, paths, `projects_geom_required_ck`                                                                                                                                    |
+| `23505`           | index/constraint name            | `projects_code_key`, `projects_external_id_key`, `<table>_project_live_key`, `project_photos_cover_key`, `project_donors_live_key`, `staff_compensation_live_key`, `user_roles_live_key`, … |
+| `23502` / `23503` | —                                | missing required value / unknown reference                                                                                                                                                  |
 
 BEFORE triggers run before the CHECK constraints: a level-1 `admin_areas` row with a parent fails
 with `PT422 admin_area_parent_mismatch` (not with `admin_areas_parent_ck`). When several CHECKs
@@ -538,13 +540,13 @@ Materialized views cannot have RLS; they rely on the missing privileges.
 
 ### 9.2 Scheduled jobs (pg_cron)
 
-| Job | Schedule (UTC) | Command | Migration |
-|---|---|---|---|
-| `istiqama-refresh-reports` | every 15 min | `select public.refresh_reports()` | 0058 |
-| `istiqama-rate-limit-cleanup` | hourly, minute 7 | `select private.rate_limit_cleanup()` | 0058 |
-| `istiqama-expire-exports` | daily 02:23 | `select private.expire_export_jobs()` | 0058 |
-| `istiqama-sync-prune` | daily 02:41 | `select private.sync_prune()` — ledger `sync_applied_ops` and scope-move log, 180 days | 0070 |
-| `istiqama-sync-rejections-cleanup` | daily 02:53 | `select private.sync_rejections_cleanup()` — rejected-operation log, 30 days | 0070 |
+| Job                                | Schedule (UTC)   | Command                                                                                | Migration |
+| ---------------------------------- | ---------------- | -------------------------------------------------------------------------------------- | --------- |
+| `istiqama-refresh-reports`         | every 15 min     | `select public.refresh_reports()`                                                      | 0058      |
+| `istiqama-rate-limit-cleanup`      | hourly, minute 7 | `select private.rate_limit_cleanup()`                                                  | 0058      |
+| `istiqama-expire-exports`          | daily 02:23      | `select private.expire_export_jobs()`                                                  | 0058      |
+| `istiqama-sync-prune`              | daily 02:41      | `select private.sync_prune()` — ledger `sync_applied_ops` and scope-move log, 180 days | 0070      |
+| `istiqama-sync-rejections-cleanup` | daily 02:53      | `select private.sync_rejections_cleanup()` — rejected-operation log, 30 days           | 0070      |
 
 All are scheduled only when `pg_cron` can be enabled; otherwise the migrations print a notice
 and do nothing. The jobs run as the role that applied the migration, without an end-user JWT
@@ -560,11 +562,13 @@ For the diagnostics / "about" screen. `STABLE`, `SECURITY DEFINER`, EXECUTE for 
 and `service_role` (not `anon`); no further authorisation, no rate limit, never raises.
 
 ```jsonc
-{ "app_environment": "staging",          // app_settings 'app.environment' when it is a non-empty JSON
-                                         // string, else "production" (reference-data.md §5)
-  "schema_version": "20261003007000",    // 14-digit prefix of the newest migration, as text
-  "server_time": "2026-10-03T15:43:38.093651+00:00",   // clock_timestamp()
-  "postgis_version": "3.6.2" }           // postgis_lib_version()
+{
+  "app_environment": "staging", // app_settings 'app.environment' when it is a non-empty JSON
+  // string, else "production" (reference-data.md §5)
+  "schema_version": "20261003007000", // 14-digit prefix of the newest migration, as text
+  "server_time": "2026-10-03T15:43:38.093651+00:00", // clock_timestamp()
+  "postgis_version": "3.6.2",
+} // postgis_lib_version()
 ```
 
 `schema_version` is the greater of `private.schema_version()` (a constant, **to be bumped by

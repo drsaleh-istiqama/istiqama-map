@@ -28,7 +28,10 @@ export function loadEnvFile(file: string): void {
     if (!m || line.trim().startsWith('#')) continue;
     const key = m[1]!;
     let value = m[2]!;
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
       value = value.slice(1, -1);
     }
     if (process.env[key] === undefined) process.env[key] = value;
@@ -49,7 +52,8 @@ export function config(): StackConfig {
   loadEnvFile(path.join(ROOT, '.env.local'));
   loadEnvFile(path.join(ROOT, '.env'));
   const dbUrl = process.env.DATABASE_URL ?? '';
-  const dbName = /\/([^/?]+)(\?|$)/.exec(dbUrl.replace(/^postgres(ql)?:\/\/[^/]+/, ''))?.[1] ?? 'istiqama';
+  const dbName =
+    /\/([^/?]+)(\?|$)/.exec(dbUrl.replace(/^postgres(ql)?:\/\/[^/]+/, ''))?.[1] ?? 'istiqama';
   return {
     pgPort: Number(process.env.PG_PORT ?? 54322),
     postgrestPort: Number(process.env.POSTGREST_PORT ?? 54323),
@@ -64,7 +68,8 @@ export function config(): StackConfig {
 export function run(cmd: string, args: string[], opts: SpawnSyncOptions = {}): void {
   const res = spawnSync(cmd, args, { stdio: 'inherit', ...opts });
   if (res.error) throw res.error;
-  if (res.status !== 0) throw new Error(`${path.basename(cmd)} ${args.join(' ')} exited with ${res.status}`);
+  if (res.status !== 0)
+    throw new Error(`${path.basename(cmd)} ${args.join(' ')} exited with ${res.status}`);
 }
 
 export function capture(
@@ -74,7 +79,11 @@ export function capture(
 ): { status: number; stdout: string; stderr: string } {
   const res = spawnSync(cmd, args, { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, ...opts });
   if (res.error) throw res.error;
-  return { status: res.status ?? 1, stdout: String(res.stdout ?? ''), stderr: String(res.stderr ?? '') };
+  return {
+    status: res.status ?? 1,
+    stdout: String(res.stdout ?? ''),
+    stderr: String(res.stderr ?? ''),
+  };
 }
 
 export function isPortOpen(port: number, host = '127.0.0.1'): Promise<boolean> {
@@ -104,7 +113,12 @@ export async function waitForPort(port: number, timeoutMs = 30_000): Promise<boo
 }
 
 /** Start a long-running child that survives this script; stdout/stderr go to .local/logs. */
-export function startDetached(name: string, cmd: string, args: string[], env: NodeJS.ProcessEnv = {}): number {
+export function startDetached(
+  name: string,
+  cmd: string,
+  args: string[],
+  env: NodeJS.ProcessEnv = {},
+): number {
   fs.mkdirSync(LOG_DIR, { recursive: true });
   fs.mkdirSync(RUN_DIR, { recursive: true });
   const out = fs.openSync(path.join(LOG_DIR, `${name}.log`), 'a');
@@ -144,16 +158,24 @@ export function psqlArgs(db: string): string[] {
   return ['-h', '127.0.0.1', '-p', String(pgPort), '-U', 'postgres', '-d', db, '-X'];
 }
 
-export const PG_ENV: NodeJS.ProcessEnv = { ...process.env, PGCLIENTENCODING: 'UTF8', PGOPTIONS: '--client-min-messages=warning' };
+export const PG_ENV: NodeJS.ProcessEnv = {
+  ...process.env,
+  PGCLIENTENCODING: 'UTF8',
+  PGOPTIONS: '--client-min-messages=warning',
+};
 
 /** Parse `--flag value` / `--flag` style arguments; positional arguments are returned in `_`. */
-export function parseArgs(argv: string[], booleans: string[] = []): Record<string, string | boolean | string[]> & { _: string[] } {
+export function parseArgs(
+  argv: string[],
+  booleans: string[] = [],
+): Record<string, string | boolean | string[]> & { _: string[] } {
   const out: Record<string, string | boolean | string[]> & { _: string[] } = { _: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     if (a.startsWith('--')) {
       const key = a.slice(2);
-      if (booleans.includes(key) || i + 1 >= argv.length || argv[i + 1]!.startsWith('--')) out[key] = true;
+      if (booleans.includes(key) || i + 1 >= argv.length || argv[i + 1]!.startsWith('--'))
+        out[key] = true;
       else out[key] = argv[++i]!;
     } else out._.push(a);
   }

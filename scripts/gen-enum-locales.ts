@@ -33,10 +33,18 @@ const EXTRA: Record<string, Record<string, Labels>> = {
     mosque_front: { ar: 'واجهة المسجد', sw: 'Mbele ya msikiti', en: 'Mosque front' },
     mosque_inside: { ar: 'داخل المسجد', sw: 'Ndani ya msikiti', en: 'Inside the mosque' },
     school_front: { ar: 'واجهة المدرسة', sw: 'Mbele ya madrasa', en: 'School front' },
-    school_inside: { ar: 'داخل المدرسة / الفصول', sw: 'Ndani ya madrasa / madarasa', en: 'Inside the school / classrooms' },
+    school_inside: {
+      ar: 'داخل المدرسة / الفصول',
+      sw: 'Ndani ya madrasa / madarasa',
+      en: 'Inside the school / classrooms',
+    },
     land: { ar: 'الأرض والساحات', sw: 'Ardhi na viwanja', en: 'Land and grounds' },
     facilities: { ar: 'المرافق والخدمات', sw: 'Huduma na vifaa', en: 'Facilities and services' },
-    maintenance: { ar: 'موضع يحتاج صيانة', sw: 'Sehemu inayohitaji matengenezo', en: 'Spot needing maintenance' },
+    maintenance: {
+      ar: 'موضع يحتاج صيانة',
+      sw: 'Sehemu inayohitaji matengenezo',
+      en: 'Spot needing maintenance',
+    },
     other: { ar: 'أخرى', sw: 'Nyingine', en: 'Other' },
   },
   gender: {
@@ -57,7 +65,13 @@ const EXTRA: Record<string, Record<string, Labels>> = {
 
 const client = new pg.Client({ connectionString: url });
 await client.connect();
-const { rows } = await client.query<{ enum_key: string; code: string; ar: string; sw: string; en: string }>(
+const { rows } = await client.query<{
+  enum_key: string;
+  code: string;
+  ar: string;
+  sw: string;
+  en: string;
+}>(
   'select enum_key, code, ar, sw, en from private.enum_labels order by enum_key, sort_order, code',
 );
 await client.end();
@@ -79,4 +93,6 @@ const dir = path.join(ROOT, 'apps', 'web', 'locales', '_parts');
 for (const lang of ['ar', 'sw', 'en'] as const) {
   fs.writeFileSync(path.join(dir, `enum.${lang}.json`), JSON.stringify(out[lang], null, 2) + '\n');
 }
-console.log(`enum locales: ${Object.keys(out.ar).length} keys (${rows.length} from private.enum_labels)`);
+console.log(
+  `enum locales: ${Object.keys(out.ar).length} keys (${rows.length} from private.enum_labels)`,
+);

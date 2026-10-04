@@ -4,16 +4,16 @@ What is implemented for brief §3 / ARCHITECTURE §2.3 + Appendix A: the helper 
 table privileges, every RLS policy, the storage policies and the pgTAP harness.
 Read this instead of the SQL. Source files:
 
-| File | Content |
-|---|---|
-| `20261003001000_authz_helpers.sql` | `private.*` helpers (Appendix A.3) |
-| `20261003001100_rls_baseline_grants.sql` | RLS on + forced everywhere, all grants/revokes |
-| `20261003001200_rls_reference_admin.sql` | policies: reference tables, `profiles`, `user_roles`, `devices`; profile column guard; last-hq_admin guard |
-| `20261003001300_rls_field_data.sql` | policies: projects, children, people, localities, donors, conflicts, notifications |
-| `20261003001400_rls_logs_jobs_restricted.sql` | policies: logs, job tables; restricted tables (none) |
-| `20261003001500_storage_buckets_policies.sql` | buckets + `storage.objects` policies |
-| `supabase/tests/00_helpers.test.sql` | `tests.*` harness and fixtures (Appendix A.4) |
-| `supabase/tests/10…16_*.test.sql` | 886 assertions proving the matrix below (isolation, roles, restricted + logs, admin tables, session/MFA, storage, catalog) |
+| File                                          | Content                                                                                                                    |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `20261003001000_authz_helpers.sql`            | `private.*` helpers (Appendix A.3)                                                                                         |
+| `20261003001100_rls_baseline_grants.sql`      | RLS on + forced everywhere, all grants/revokes                                                                             |
+| `20261003001200_rls_reference_admin.sql`      | policies: reference tables, `profiles`, `user_roles`, `devices`; profile column guard; last-hq_admin guard                 |
+| `20261003001300_rls_field_data.sql`           | policies: projects, children, people, localities, donors, conflicts, notifications                                         |
+| `20261003001400_rls_logs_jobs_restricted.sql` | policies: logs, job tables; restricted tables (none)                                                                       |
+| `20261003001500_storage_buckets_policies.sql` | buckets + `storage.objects` policies                                                                                       |
+| `supabase/tests/00_helpers.test.sql`          | `tests.*` harness and fixtures (Appendix A.4)                                                                              |
+| `supabase/tests/10…16_*.test.sql`             | 886 assertions proving the matrix below (isolation, roles, restricted + logs, admin tables, session/MFA, storage, catalog) |
 
 ## 1. Model in one page
 
@@ -34,7 +34,7 @@ Read this instead of the SQL. Source files:
 - **Scope rule (Appendix A.3).** A role grant is `(role, scope_type, scope_id)`:
   `global` matches every row, `country` matches rows whose `country_id = scope_id`, `branch`
   matches rows whose `branch_id = scope_id`. Nothing else is inferred (a country scope does
-  *not* match a row with a NULL `country_id` through its branch).
+  _not_ match a row with a NULL `country_id` through its branch).
 - **Session gate.** Every helper returns "nothing" unless `private.session_ok()`:
   profile exists, `active`, not soft-deleted; JWT `iat` ≥ `profiles.sessions_revoked_at` (when
   set; a token without `iat` fails); the device in the `x-device-id` header is not revoked for
@@ -74,21 +74,22 @@ private.photo_object_project(p_name text) returns uuid   -- project id of a phot
 private.photo_object_writable(p_name text) returns boolean -- may the caller create/replace this photos object (§4.4)
 private.tg_profiles_guard()                              -- trigger t05_guard on profiles
 private.tg_keep_hq_admin()                               -- triggers t85_keep_hq_admin on user_roles, profiles (§4.1)
+private.tg_lock_hq_admins_stmt()                         -- statement triggers t84_lock_hq_admins (§4.1, migration 0073)
 private.authz_scope_all(text[]) / authz_scope_ids(text[], text) / authz_can(text[], uuid, uuid)  -- internal
 ```
 
-| Role | read | people | write | review | restricted |
-|---|:-:|:-:|:-:|:-:|:-:|
-| `field_collector` | ✓ | ✓ | ✓ | – | – |
-| `branch_supervisor` | ✓ | ✓ | ✓ | ✓ | – |
-| `country_manager` (AAL2) | ✓ | ✓ | ✓ | ✓ | ✓ (country/global scope) |
-| `hq_admin` (AAL2, always global) | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `viewer` | ✓ | – | – | – | – |
+| Role                             | read | people | write | review |        restricted        |
+| -------------------------------- | :--: | :----: | :---: | :----: | :----------------------: |
+| `field_collector`                |  ✓   |   ✓    |   ✓   |   –    |            –             |
+| `branch_supervisor`              |  ✓   |   ✓    |   ✓   |   ✓    |            –             |
+| `country_manager` (AAL2)         |  ✓   |   ✓    |   ✓   |   ✓    | ✓ (country/global scope) |
+| `hq_admin` (AAL2, always global) |  ✓   |   ✓    |   ✓   |   ✓    |            ✓             |
+| `viewer`                         |  ✓   |   –    |   –   |   –    |            –             |
 
 Execute privileges: `authenticated` and `service_role` may execute every helper **except**
 `private.project_scope()`, which returns raw facts without any check and is therefore executable
 only by the migration role / `service_role` (i.e. from SECURITY DEFINER code). `anon` cannot
-execute anything (no USAGE on `private`). The helpers only describe the *caller*, so exposing
+execute anything (no USAGE on `private`). The helpers only describe the _caller_, so exposing
 them to `authenticated` leaks nothing; schema `private` is not exposed through PostgREST.
 
 Cost: one helper call ≈ 0.03–0.1 ms (PL/pgSQL, plans cached per connection). They are `STABLE`;
@@ -98,8 +99,8 @@ PostgreSQL does not cache results across calls, so:
 - in a **function** call a helper once and keep the value in a variable; never call a `can_*`
   wrapper per row of a large set — filter with the triple instead.
 
-"Write" and "review" are capabilities, not the whole business rule. The helpers answer *"may
-this caller write/review inside this scope at all"*. Rules such as "a collector edits only
+"Write" and "review" are capabilities, not the whole business rule. The helpers answer _"may
+this caller write/review inside this scope at all"_. Rules such as "a collector edits only
 records it created", "an edit of an approved record goes back to `submitted`" or "only
 `record_state` transitions listed in the workflow" belong to the RPC that performs the write
 (use `project_scope().created_by` / `.record_state`).
@@ -165,17 +166,17 @@ Rules:
 `S` = SELECT, `I` = INSERT, `U` = UPDATE. Nobody has DELETE/TRUNCATE. "scope" = rows matching
 the role's scope (§1). Columns: field collector, branch supervisor, country manager (AAL2),
 hq_admin (AAL2), viewer. Manager/HQ at AAL1 and users without a role behave like the last column
-of the *reference* rows only (valid session) and see nothing else.
+of the _reference_ rows only (valid session) and see nothing else.
 
 ### 4.1 Reference and admin tables
 
-| Table | collector | supervisor | manager | hq_admin | viewer | Policies |
-|---|---|---|---|---|---|---|
-| `countries`, `admin_areas`, `branches`, `option_values`, `fx_rates`, `map_packs` | S all | S all | S all | S I U all | S all | `<t>_select` (`session_ok`), `<t>_insert_hq`, `<t>_update_hq` |
-| `app_settings` | S `is_public` | S `is_public` | S `is_public` | S I U all | S `is_public` | `app_settings_select`, `_insert_hq`, `_update_hq` |
-| `profiles` | S own; U own¹ | S own; U own¹ | S own + users of own country²; U own¹ | S I U all | S own; U own¹ | `profiles_select_own/_hq/_manager`, `profiles_insert_hq`, `profiles_update_hq/_own` + triggers `t05_guard`, `t85_keep_hq_admin` |
-| `user_roles` | S own | S own | S own + grants scoped to own country² | S I U all | S own | `user_roles_select_own/_hq/_manager`, `_insert_hq`, `_update_hq` + trigger `t85_keep_hq_admin` |
-| `devices` | S own | S own | S own + devices of users of own country² | S I U all | S own | `devices_select_own/_hq/_manager`, `_insert_hq`, `_update_hq` |
+| Table                                                                            | collector     | supervisor    | manager                                  | hq_admin  | viewer        | Policies                                                                                                                        |
+| -------------------------------------------------------------------------------- | ------------- | ------------- | ---------------------------------------- | --------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `countries`, `admin_areas`, `branches`, `option_values`, `fx_rates`, `map_packs` | S all         | S all         | S all                                    | S I U all | S all         | `<t>_select` (`session_ok`), `<t>_insert_hq`, `<t>_update_hq`                                                                   |
+| `app_settings`                                                                   | S `is_public` | S `is_public` | S `is_public`                            | S I U all | S `is_public` | `app_settings_select`, `_insert_hq`, `_update_hq`                                                                               |
+| `profiles`                                                                       | S own; U own¹ | S own; U own¹ | S own + users of own country²; U own¹    | S I U all | S own; U own¹ | `profiles_select_own/_hq/_manager`, `profiles_insert_hq`, `profiles_update_hq/_own` + triggers `t05_guard`, `t85_keep_hq_admin` |
+| `user_roles`                                                                     | S own         | S own         | S own + grants scoped to own country²    | S I U all | S own         | `user_roles_select_own/_hq/_manager`, `_insert_hq`, `_update_hq` + trigger `t85_keep_hq_admin`                                  |
+| `devices`                                                                        | S own         | S own         | S own + devices of users of own country² | S I U all | S own         | `devices_select_own/_hq/_manager`, `_insert_hq`, `_update_hq`                                                                   |
 
 ¹ Only `full_name`, `phone`, `preferred_language` (trigger `t05_guard`, SQLSTATE `PT403`
 otherwise). `active`, `sessions_revoked_at`, `deleted_at`, `id`, creation metadata are for
@@ -195,22 +196,30 @@ re-scope, change of `role` or `user_id`) and on `profiles` (old row active and l
 soft delete, change of `id`) raise `PT409 last_hq_admin` when, after the whole statement, no
 effective `hq_admin` is left. They fire only for statements run by `authenticated`/`anon`
 (the trigger's `WHEN` sees the role of the statement): SECURITY DEFINER code checks for itself,
-and `service_role` / the migration role remain the break-glass path. Two administrators
-removing each other in concurrent transactions can still both succeed (same as the RPCs).
+and `service_role` / the migration role remain the break-glass path. Concurrent removals are
+serialised (migration 0073): a BEFORE UPDATE **statement** trigger `t84_lock_hq_admins` (API
+roles; on `profiles` only for statements that set `active`, `deleted_at` or `id`) takes the
+advisory lock of `private.lock_hq_admins()` before the statement locks any row, and
+`t85_keep_hq_admin` calls `private.lock_hq_admins()` before its check — the same lock order as
+`admin_remove_role` / `admin_set_user_active` (advisory lock, then rows). Two administrators
+removing each other at the same moment: the second waits and then fails (`PT409 last_hq_admin`,
+or the column guard once its own right is gone; `40001` under REPEATABLE READ). Proof with two
+sessions: `supabase/tests/concurrency/hq_admin_race.sh <private db>` (fails on the pre-0073
+trigger with zero administrators left, passes with it).
 
 ### 4.2 Field data (SELECT only; writes through RPC)
 
-| Table | collector | supervisor | manager | hq_admin | viewer | Predicate |
-|---|---|---|---|---|---|---|
-| `projects` | scope | scope | scope | all | scope, **approved only**⁶ | read triple on `country_id`/`branch_id`; not approved → people triple too⁶ |
-| `project_land`, `project_facilities`, `project_maintenance`, `project_photos`, `project_donors`, `community_profiles` | scope | scope | scope | all | scope, **approved parent only**⁶ | parent project in read scope (and visible by ⁶) |
-| `persons` | scope | scope | scope | all | **–** | people triple on `persons.country_id`/`branch_id` |
-| `project_staff` | scope | scope | scope | all | **–** | parent project in people scope |
-| `localities` | country³ | country³ | country | all | country³ / all | `country_id` in read countries or in the country of a read branch |
-| `donors` | linked⁴ + own | linked⁴ + own | linked⁴ + own | all | linked⁴ (global viewer: all) | see ⁴ |
-| `person_merge_requests` | – | scope | scope | all | – | source or target person in review scope |
-| `sync_conflicts`⁵ | – | scope | scope | all | – | project / person / locality of the conflict in review scope |
-| `notifications` | own | own | own | own | own | `user_id = auth.uid()` |
+| Table                                                                                                                 | collector     | supervisor    | manager       | hq_admin | viewer                           | Predicate                                                                  |
+| --------------------------------------------------------------------------------------------------------------------- | ------------- | ------------- | ------------- | -------- | -------------------------------- | -------------------------------------------------------------------------- |
+| `projects`                                                                                                            | scope         | scope         | scope         | all      | scope, **approved only**⁶        | read triple on `country_id`/`branch_id`; not approved → people triple too⁶ |
+| `project_land`, `project_facilities`, `project_maintenance`, `project_photos`, `project_donors`, `community_profiles` | scope         | scope         | scope         | all      | scope, **approved parent only**⁶ | parent project in read scope (and visible by ⁶)                            |
+| `persons`                                                                                                             | scope         | scope         | scope         | all      | **–**                            | people triple on `persons.country_id`/`branch_id`                          |
+| `project_staff`                                                                                                       | scope         | scope         | scope         | all      | **–**                            | parent project in people scope                                             |
+| `localities`                                                                                                          | country³      | country³      | country       | all      | country³ / all                   | `country_id` in read countries or in the country of a read branch          |
+| `donors`                                                                                                              | linked⁴ + own | linked⁴ + own | linked⁴ + own | all      | linked⁴ (global viewer: all)     | see ⁴                                                                      |
+| `person_merge_requests`                                                                                               | –             | scope         | scope         | all      | –                                | source or target person in review scope                                    |
+| `sync_conflicts`⁵                                                                                                     | –             | scope         | scope         | all      | –                                | project / person / locality of the conflict in review scope                |
+| `notifications`                                                                                                       | own           | own           | own           | own      | own                              | `user_id = auth.uid()`                                                     |
 
 ³ A locality has a country but no branch: branch-scoped roles see the localities of the country
 their branch belongs to (it is geographic reference data, like `admin_areas`).
@@ -237,24 +246,24 @@ the client query.
 
 ### 4.3 Jobs, logs, restricted
 
-| Table | collector | supervisor | manager | hq_admin | viewer | Notes |
-|---|---|---|---|---|---|---|
-| `export_jobs`, `import_batches` | S own | S own | S own | S own | S own | `user_id = auth.uid()`; written by RPC |
-| `import_rows` | S own | S own | S own | S own | S own | rows of own batches |
-| `audit_log` | – | – | – | S (not the rows of restricted tables) | – | append-only for every role |
-| `restricted_access_log` | – | – | – | S | – | append-only; `service_role` has no U/D either |
-| `staff_compensation`, `community_sensitive` | ✗ | ✗ | ✗ | ✗ | ✗ | no privilege, no policy: `42501` |
-| `sync_applied_ops` | ✗ | ✗ | ✗ | ✗ | ✗ | no privilege, no policy |
+| Table                                       | collector | supervisor | manager | hq_admin                              | viewer | Notes                                         |
+| ------------------------------------------- | --------- | ---------- | ------- | ------------------------------------- | ------ | --------------------------------------------- |
+| `export_jobs`, `import_batches`             | S own     | S own      | S own   | S own                                 | S own  | `user_id = auth.uid()`; written by RPC        |
+| `import_rows`                               | S own     | S own      | S own   | S own                                 | S own  | rows of own batches                           |
+| `audit_log`                                 | –         | –          | –       | S (not the rows of restricted tables) | –      | append-only for every role                    |
+| `restricted_access_log`                     | –         | –          | –       | S                                     | –      | append-only; `service_role` has no U/D either |
+| `staff_compensation`, `community_sensitive` | ✗         | ✗          | ✗       | ✗                                     | ✗      | no privilege, no policy: `42501`              |
+| `sync_applied_ops`                          | ✗         | ✗          | ✗       | ✗                                     | ✗      | no privilege, no policy                       |
 
 `–` = privilege exists but no row is visible; `✗` = `permission denied` (SQLSTATE `42501`).
 
 ### 4.4 Storage (`storage.objects`)
 
-| Bucket | Read (select / signed URL) | Write (insert / update) | Delete |
-|---|---|---|---|
-| `photos` (private) `projects/{ISO2}/{project_id}/{photo_id}_{full\|thumb}.{webp\|jpg\|jpeg}` | caller can read the project (viewer included — approved projects only, §4.2 ⁶) | caller may edit the photo **row**: `{project_id}/{photo_id}` is a live `project_photos` row of a live project, and the caller is its creator with write scope on the project or a reviewer of the project (`private.photo_object_writable`; applies to insert, upsert/TUS overwrite and move — old and new name) | nobody (service role: `purge-photos`) |
-| `exports`, `imports` (private) `{auth.uid()}/…` | own folder | own folder | nobody |
-| `tiles` (public) | every signed-in user with a valid session; anonymous HTTP through the public endpoint | `hq_admin` | `hq_admin` |
+| Bucket                                                                                       | Read (select / signed URL)                                                            | Write (insert / update)                                                                                                                                                                                                                                                                                          | Delete                                |
+| -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| `photos` (private) `projects/{ISO2}/{project_id}/{photo_id}_{full\|thumb}.{webp\|jpg\|jpeg}` | caller can read the project (viewer included — approved projects only, §4.2 ⁶)        | caller may edit the photo **row**: `{project_id}/{photo_id}` is a live `project_photos` row of a live project, and the caller is its creator with write scope on the project or a reviewer of the project (`private.photo_object_writable`; applies to insert, upsert/TUS overwrite and move — old and new name) | nobody (service role: `purge-photos`) |
+| `exports`, `imports` (private) `{auth.uid()}/…`                                              | own folder                                                                            | own folder                                                                                                                                                                                                                                                                                                       | nobody                                |
+| `tiles` (public)                                                                             | every signed-in user with a valid session; anonymous HTTP through the public endpoint | `hq_admin`                                                                                                                                                                                                                                                                                                       | `hq_admin`                            |
 
 Notes: the project row **and the `project_photos` row** must exist on the server before the
 photo's objects are uploaded (push the outbox first; the photo queue already waits for both
@@ -268,10 +277,10 @@ server); the extension may be any of the three. The `photos` bucket is limited t
 `image/webp`, `image/jpeg`; `imports` to 25 MB. `exports` objects may be written by the owner's
 JWT or by the service role.
 
-**Upload rate limiting (brief §11) — which layer.** The database bounds the *number* of photo
+**Upload rate limiting (brief §11) — which layer.** The database bounds the _number_ of photo
 objects: no object without a live photo row, at most 3 × 3 × 2 names per row, at most 10 live
 rows per project, and rows are written only through `sync_push` (rate limited, 120 calls/min).
-The *request rate* of uploads is not limited in the database: Storage evaluates these policies
+The _request rate_ of uploads is not limited in the database: Storage evaluates these policies
 in a permission test that it rolls back (the local gateway does the same dry run), so a
 `private.rate_limit` counter inside a policy would not persist. It is limited in front of
 Storage — the local gateway (600 object uploads per user per minute, `local-gateway.md` §3.3)
@@ -327,10 +336,10 @@ tests._uuid(p_seed text) returns uuid                         -- deterministic i
 ```
 
 - Every test file: `begin; set local search_path = public, extensions, tests; select plan(n);
-  select tests.fixture(); … select * from finish(); rollback;`. Run `00_helpers` first on a
+select tests.fixture(); … select * from finish(); rollback;`. Run `00_helpers` first on a
   fresh database (it drops and recreates schema `tests`).
 - `login_as` sets `role authenticated`, `request.jwt.claims` = `{sub, role, aud, aal, iat, exp,
-  session_id}` (`iat` = now, whole seconds) and `request.headers` = `{"x-device-id": …}`
+session_id}` (`iat` = now, whole seconds) and `request.headers` = `{"x-device-id": …}`
   (`p_device => null`: no header), all transaction-local. `create_user(email, null, null, null)`
   creates a user without a role; user ids are derived from the e-mail
   (`tests._uuid('user:' || email)`).
@@ -341,21 +350,21 @@ tests._uuid(p_seed text) returns uuid                         -- deterministic i
 
 Fixture (`tests.fixture()`), ids through `tests.id('<key>')`:
 
-| Keys | Rows |
-|---|---|
-| `tz`, `ke` | countries with iso2 `TZ`, `KE` (existing rows are reused) |
-| `tz_pemba_north`, `tz_tanga`, `ke_mombasa` | level-1 `admin_areas`, short codes `PN`, `TG`, `MB`, squares lon/lat `39.60..39.90 / -5.20..-4.80`, `38.80..39.30 / -5.40..-4.80`, `39.50..39.80 / -4.20..-3.90` |
-| `br_pemba`, `br_tanga`, `br_mombasa` | branches (TZ, TZ, KE) |
-| `u_hq` | `hq_admin`, global |
-| `u_mgr_tz`, `u_mgr_ke` | `country_manager`, country |
-| `u_sup_pemba` | `branch_supervisor`, `br_pemba` |
-| `u_col_pemba`, `u_col_pemba2` | `field_collector`, `br_pemba` |
-| `u_col_tanga` | `field_collector`, `br_tanga` |
-| `u_col_ke` | `field_collector`, `br_mombasa` |
-| `u_viewer_tz`, `u_viewer_global` | `viewer`, country `tz` / global |
-| `p_pemba_1` (approved), `p_pemba_2` (draft) | projects by `u_col_pemba` in `br_pemba`, points `(39.75,-5.05)`, `(39.70,-4.95)` |
-| `p_tanga_1` (approved) | by `u_col_tanga` in `br_tanga`, `(39.10,-5.07)` |
-| `p_ke_1` (approved) | by `u_col_ke` in `br_mombasa`, `(39.66,-4.05)` |
+| Keys                                                                        | Rows                                                                                                                                                                                                                                        |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tz`, `ke`                                                                  | countries with iso2 `TZ`, `KE` (existing rows are reused)                                                                                                                                                                                   |
+| `tz_pemba_north`, `tz_tanga`, `ke_mombasa`                                  | level-1 `admin_areas`, short codes `PN`, `TG`, `MB`, squares lon/lat `39.60..39.90 / -5.20..-4.80`, `38.80..39.30 / -5.40..-4.80`, `39.50..39.80 / -4.20..-3.90`                                                                            |
+| `br_pemba`, `br_tanga`, `br_mombasa`                                        | branches (TZ, TZ, KE)                                                                                                                                                                                                                       |
+| `u_hq`                                                                      | `hq_admin`, global                                                                                                                                                                                                                          |
+| `u_mgr_tz`, `u_mgr_ke`                                                      | `country_manager`, country                                                                                                                                                                                                                  |
+| `u_sup_pemba`                                                               | `branch_supervisor`, `br_pemba`                                                                                                                                                                                                             |
+| `u_col_pemba`, `u_col_pemba2`                                               | `field_collector`, `br_pemba`                                                                                                                                                                                                               |
+| `u_col_tanga`                                                               | `field_collector`, `br_tanga`                                                                                                                                                                                                               |
+| `u_col_ke`                                                                  | `field_collector`, `br_mombasa`                                                                                                                                                                                                             |
+| `u_viewer_tz`, `u_viewer_global`                                            | `viewer`, country `tz` / global                                                                                                                                                                                                             |
+| `p_pemba_1` (approved), `p_pemba_2` (draft)                                 | projects by `u_col_pemba` in `br_pemba`, points `(39.75,-5.05)`, `(39.70,-4.95)`                                                                                                                                                            |
+| `p_tanga_1` (approved)                                                      | by `u_col_tanga` in `br_tanga`, `(39.10,-5.07)`                                                                                                                                                                                             |
+| `p_ke_1` (approved)                                                         | by `u_col_ke` in `br_mombasa`, `(39.66,-4.05)`                                                                                                                                                                                              |
 | `person:<p>`, `staff:<p>`, `comp:<p>`, `sens:<p>`, `photo:<p>`, `maint:<p>` | per project: one person (imam, phone `+2557000000N` / `+254700000004`), its `project_staff` row, one `staff_compensation` (250000 TZS/KES from 2024-01-01), one `community_sensitive`, one uploaded cover photo, one open maintenance entry |
 
 `tests.fixture_extra()` adds: `land:<p>`, `fac:<p>`, `community:<p>`, `donor:<p>` +

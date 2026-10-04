@@ -34,10 +34,14 @@ if (!fs.existsSync(path.join(PG_DATA, 'PG_VERSION'))) {
 //    caller never sees EOF.
 if (await isPortOpen(cfg.pgPort)) console.log(`PostgreSQL already running on :${cfg.pgPort}`);
 else {
-  const res = spawnSync(pgBin('pg_ctl'), ['-D', PG_DATA, '-l', path.join(LOG_DIR, 'postgres.log'), '-w', '-t', '60', 'start'], {
-    stdio: 'ignore',
-    windowsHide: true,
-  });
+  const res = spawnSync(
+    pgBin('pg_ctl'),
+    ['-D', PG_DATA, '-l', path.join(LOG_DIR, 'postgres.log'), '-w', '-t', '60', 'start'],
+    {
+      stdio: 'ignore',
+      windowsHide: true,
+    },
+  );
   if (res.status !== 0 || !(await waitForPort(cfg.pgPort, 60_000))) {
     console.error(`PostgreSQL failed to start — see ${path.join(LOG_DIR, 'postgres.log')}`);
     process.exit(1);
@@ -46,15 +50,30 @@ else {
 }
 
 const dbExists =
-  capture(pgBin('psql'), [...psqlArgs('postgres'), '-A', '-t', '-c', `select 1 from pg_database where datname = '${cfg.dbName}'`], {
-    env: PG_ENV,
-  }).stdout.trim() === '1';
+  capture(
+    pgBin('psql'),
+    [
+      ...psqlArgs('postgres'),
+      '-A',
+      '-t',
+      '-c',
+      `select 1 from pg_database where datname = '${cfg.dbName}'`,
+    ],
+    {
+      env: PG_ENV,
+    },
+  ).stdout.trim() === '1';
 
 // 2. PostgREST (needs libpq from the PostgreSQL bin directory on PATH)
 if (!args['no-postgrest']) {
-  if (await isPortOpen(cfg.postgrestPort)) console.log(`PostgREST already running on :${cfg.postgrestPort}`);
-  else if (!dbExists) console.log(`database "${cfg.dbName}" does not exist yet — run "npm run db:reset", then "npm run stack:start" again`);
-  else if (!cfg.jwtSecret) console.log('SUPABASE_JWT_SECRET missing (.env.local) — PostgREST not started');
+  if (await isPortOpen(cfg.postgrestPort))
+    console.log(`PostgREST already running on :${cfg.postgrestPort}`);
+  else if (!dbExists)
+    console.log(
+      `database "${cfg.dbName}" does not exist yet — run "npm run db:reset", then "npm run stack:start" again`,
+    );
+  else if (!cfg.jwtSecret)
+    console.log('SUPABASE_JWT_SECRET missing (.env.local) — PostgREST not started');
   else {
     startDetached('postgrest', path.join(LOCAL, 'postgrest', 'postgrest.exe'), [], {
       PATH: `${path.join(PG_HOME, 'bin')}${path.delimiter}${process.env.PATH}`,
@@ -69,17 +88,26 @@ if (!args['no-postgrest']) {
       PGRST_SERVER_PORT: String(cfg.postgrestPort),
       PGRST_DB_CHANNEL_ENABLED: 'true',
     });
-    console.log((await waitForPort(cfg.postgrestPort, 30_000)) ? `PostgREST started on :${cfg.postgrestPort}` : 'PostgREST did not open its port — see .local/logs/postgrest.log');
+    console.log(
+      (await waitForPort(cfg.postgrestPort, 30_000))
+        ? `PostgREST started on :${cfg.postgrestPort}`
+        : 'PostgREST did not open its port — see .local/logs/postgrest.log',
+    );
   }
 }
 
 // 3. Gateway (Auth / Storage / Functions emulation in front of PostgREST)
 const gateway = path.join(ROOT, 'scripts', 'local-stack', 'gateway', 'server.ts');
 if (!args['no-gateway'] && fs.existsSync(gateway)) {
-  if (await isPortOpen(cfg.gatewayPort)) console.log(`gateway already running on :${cfg.gatewayPort}`);
+  if (await isPortOpen(cfg.gatewayPort))
+    console.log(`gateway already running on :${cfg.gatewayPort}`);
   else if (!dbExists) console.log('gateway not started (database missing)');
   else {
     startDetached('gateway', process.execPath, ['--import', 'tsx', gateway]);
-    console.log((await waitForPort(cfg.gatewayPort, 30_000)) ? `gateway started on :${cfg.gatewayPort}  (API URL http://127.0.0.1:${cfg.gatewayPort})` : 'gateway did not open its port — see .local/logs/gateway.log');
+    console.log(
+      (await waitForPort(cfg.gatewayPort, 30_000))
+        ? `gateway started on :${cfg.gatewayPort}  (API URL http://127.0.0.1:${cfg.gatewayPort})`
+        : 'gateway did not open its port — see .local/logs/gateway.log',
+    );
   }
 }

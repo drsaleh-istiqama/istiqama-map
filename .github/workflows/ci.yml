@@ -1,0 +1,228 @@
+# Continuous integration (docs/BRIEF.md §1 "CI/CD", §5 budget, §14 acceptance criteria 1 and 7).
+# Documentation: docs/CI.md.
+#
+#   quality     ESLint, Prettier, tsc (scripts, web, Edge Functions), Vitest
+#   build       production build + initial-JS budget (200 kB gzip) → artifact "web-dist"
+#   db          real Supabase CLI stack → supabase db reset → pgTAP (supabase test db)
+#   e2e         real Supabase CLI stack → Playwright (Chrome) against the preview build
+#   lighthouse  Lighthouse CI on the preview build (mobile) + installability checks
+#
+# Also callable from deploy.yml (`workflow_call`), so a production deployment always runs the
+# full suite on the exact commit it deploys.
+name: CI
+
+on:
+  # Branches only: tag pushes are tested by deploy.yml, which calls this workflow.
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  NODE_VERSION: '24'
+  # Pin to a tested release once the first green run exists (docs/CI.md §3).
+  SUPABASE_CLI_VERSION: latest
+  # Services the tests never use; skipping them saves ~1 minute and memory on the runner.
+  SUPABASE_EXCLUDE: vector,logflare,studio
+  FORCE_COLOR: '1'
+
+jobs:
+  quality:
+    name: Lint · format · typecheck · Vitest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: ESLint
+        run: npm run lint
+      - name: Prettier
+        run: npm run format:check
+      - name: Typecheck — scripts + web
+        run: npm run typecheck
+      - name: Typecheck — Edge Functions (Node view)
+        run: npx tsc -p supabase/functions/tsconfig.json --noEmit
+      - name: Vitest
+        run: npm test
+      - name: Workflow files are valid YAML
+        run: node .github/scripts/validate-workflows.mjs
+
+  build:
+    name: Build + size budget
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      # Public build-time values only. The CI stack runs on the loopback; the anon key of the
+      # Lighthouse build is a dummy (the login page makes no API call before "send code").
+      VITE_SUPABASE_URL: http://127.0.0.1:54321
+      VITE_SUPABASE_ANON_KEY: ci-build-anon-key-not-a-secret
+      VITE_TILES_URL: http://127.0.0.1:54321/storage/v1/object/public/tiles
+      VITE_APP_ENV: ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Build (locales + tsc + vite build)
+        run: npm run build
+      - name: Initial JS ≤ 200 kB gzip (brief §1)
+        run: npm run size -w apps/web
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: apps/web/dist
+          retention-days: 7
+          if-no-files-found: error
+
+  db:
+    name: Supabase stack + pgTAP
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: supabase/setup-cli@v1
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+      - name: CI-only Supabase tuning (rate limits for automated sign-ins)
+        run: node .github/scripts/ci-supabase-config.mjs
+      - name: supabase start
+        run: supabase start -x "$SUPABASE_EXCLUDE"
+      - name: supabase db reset (migrations + staging seed)
+        run: supabase db reset
+      - name: pgTAP harness first (00_helpers is not wrapped in a transaction)
+        # `supabase test db` hands the directory to pg_prove, which runs files in sorted order,
+        # so 00_helpers.test.sql runs first anyway. Installing the harness explicitly makes the
+        # suite independent of that ordering; the file is idempotent (drops + recreates `tests`).
+        run: |
+          container="$(docker ps --format '{{.Names}}' | grep -E '^supabase_db_' | head -n1)"
+          docker exec -i "$container" psql -v ON_ERROR_STOP=1 -U postgres -d postgres -q \
+            < supabase/tests/00_helpers.test.sql
+      - name: supabase test db (pgTAP)
+        run: supabase test db
+      - name: Stack logs on failure
+        if: failure()
+        run: |
+          for c in $(docker ps -a --format '{{.Names}}' | grep -E '^supabase_'); do
+            echo "::group::$c"; docker logs --tail 200 "$c" 2>&1 || true; echo "::endgroup::"
+          done
+
+  e2e:
+    name: Playwright on the Supabase stack
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CI: 'true'
+      # The test runner reads OTP codes from /dev/otp (the local gateway's fake provider). On
+      # the real stack a small proxy answers /dev/* from the Mailpit/Inbucket mail catcher and
+      # forwards everything else to the API (docs/CI.md §2.4). The app itself talks to :54321.
+      E2E_SUPABASE_URL: http://127.0.0.1:54329
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - uses: supabase/setup-cli@v1
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+      - name: CI-only Supabase tuning (rate limits for automated sign-ins)
+        run: node .github/scripts/ci-supabase-config.mjs
+      - name: supabase start
+        run: supabase start -x "$SUPABASE_EXCLUDE"
+      - name: supabase db reset (migrations + staging seed)
+        run: supabase db reset
+      - name: Export stack URLs and keys to the job environment
+        run: node .github/scripts/supabase-ci-env.mjs >> "$GITHUB_ENV"
+      - name: Start the /dev/otp proxy
+        run: |
+          nohup node .github/scripts/dev-otp-proxy.mjs > dev-otp-proxy.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:54329/dev/health && exit 0; sleep 1
+          done
+          cat dev-otp-proxy.log; exit 1
+      - name: Browsers (Chromium + the Chrome channel the config uses)
+        run: |
+          npx playwright install --with-deps chromium
+          command -v google-chrome || npx playwright install --with-deps chrome
+      - name: Playwright (builds and previews the app itself)
+        run: npm run e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            apps/web/playwright-report
+            apps/web/test-results
+            dev-otp-proxy.log
+          retention-days: 7
+      - name: Stack logs on failure
+        if: failure()
+        run: |
+          for c in $(docker ps -a --format '{{.Names}}' | grep -E '^supabase_(auth|rest|edge|storage|kong)'); do
+            echo "::group::$c"; docker logs --tail 300 "$c" 2>&1 || true; echo "::endgroup::"
+          done
+
+  lighthouse:
+    name: Lighthouse CI (mobile) + installability
+    runs-on: ubuntu-24.04
+    needs: build
+    timeout-minutes: 25
+    env:
+      # Lighthouse CI is pinned; it bundles its own Lighthouse (12.x: no PWA category any more,
+      # see docs/CI.md §4 — installability is asserted by scripts/lighthouse/audit.ts instead).
+      LHCI_VERSION: 0.15.1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: apps/web/dist
+      - name: Chrome
+        run: command -v google-chrome || npx playwright install --with-deps chrome
+      - name: Lighthouse — mobile preset (Performance ≥ 85, Accessibility ≥ 95)
+        working-directory: apps/web
+        run: npx --yes @lhci/cli@"$LHCI_VERSION" autorun --config=./lighthouserc.json
+      - name: Lighthouse — simulated 3G (FCP < 2.5 s, brief §5)
+        if: success() || failure()
+        working-directory: apps/web
+        run: npx --yes @lhci/cli@"$LHCI_VERSION" autorun --config=./lighthouserc.3g.json
+      - name: Installability + accessibility probes (Playwright + CDP)
+        if: success() || failure()
+        run: |
+          (cd apps/web && nohup npx vite preview --port 4173 --strictPort > ../../preview.log 2>&1 &)
+          for i in $(seq 1 30); do curl -fsS -o /dev/null http://127.0.0.1:4173/ && break; sleep 1; done
+          npx tsx scripts/lighthouse/audit.ts --url http://127.0.0.1:4173 --pages login \
+            --browser chrome --no-metrics --enforce --out lighthouse-audit.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lighthouse-reports
+          path: |
+            apps/web/lighthouse-reports
+            lighthouse-audit.json
+            preview.log
+          retention-days: 14
+          if-no-files-found: ignore

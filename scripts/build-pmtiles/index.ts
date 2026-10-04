@@ -36,7 +36,8 @@ function mb(bytes: number): string {
 async function connect(opts: BuildOptions): Promise<pg.Client> {
   dotenv.config({ path: [path.join(ROOT, '.env.local'), path.join(ROOT, '.env')], quiet: true });
   const url = opts.databaseUrl ?? process.env.DATABASE_URL;
-  if (!url) throw new UsageError('DATABASE_URL is not set (environment, .env.local or --database-url)');
+  if (!url)
+    throw new UsageError('DATABASE_URL is not set (environment, .env.local or --database-url)');
   const client = new pg.Client({ connectionString: url });
   await client.connect();
   return client;
@@ -75,7 +76,9 @@ async function build(client: pg.Client, opts: BuildOptions): Promise<void> {
     if (!existsSync(opts.source)) throw new UsageError(`source archive not found: ${opts.source}`);
     // A broken source fails here, not after minutes of extracting.
     const { header } = await readArchiveHeader(opts.source);
-    log(`source    z${header.minZoom}–${header.maxZoom}, bounds ${header.minLon},${header.minLat},${header.maxLon},${header.maxLat}`);
+    log(
+      `source    z${header.minZoom}–${header.maxZoom}, bounds ${header.minLon},${header.minLat},${header.maxLon},${header.maxLat}`,
+    );
   }
   if (!existsSync(opts.tool)) throw new UsageError(`pmtiles CLI not found: ${opts.tool} (--tool)`);
 
@@ -101,9 +104,10 @@ async function build(client: pg.Client, opts: BuildOptions): Promise<void> {
 
   const { header, bytes } = await readArchiveHeader(out);
   const sha256 = await sha256File(out);
-  log(`built     ${out} — ${mb(bytes)}, z${header.minZoom}–${header.maxZoom}, sha256 ${sha256.slice(0, 16)}…`);
-  const tilesVersion =
-    opts.tilesVersion ?? (/(\d{8})/.exec(path.basename(opts.source))?.[1] ?? null);
+  log(
+    `built     ${out} — ${mb(bytes)}, z${header.minZoom}–${header.maxZoom}, sha256 ${sha256.slice(0, 16)}…`,
+  );
+  const tilesVersion = opts.tilesVersion ?? /(\d{8})/.exec(path.basename(opts.source))?.[1] ?? null;
 
   if (!opts.upload) return;
   const cfg = storageConfig();

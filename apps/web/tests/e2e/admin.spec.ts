@@ -310,16 +310,25 @@ test.describe('administration console', () => {
       created.roleIds.push(grants[0]!.id);
 
       // -- 4. revoke every session of the collector -------------------------------------------
+      // The "revoked at" line is already visible when an earlier run revoked this account, so
+      // wait for the stored timestamp to MOVE before probing the old token (race seen in the
+      // acceptance run of 2026-10-04).
+      const revokedAt = async () =>
+        (
+          await serviceSelect<{ sessions_revoked_at: string | null }>(
+            request,
+            `profiles?select=sessions_revoked_at&id=eq.${targetId}`,
+          )
+        )[0]?.sessions_revoked_at ?? null;
+      const revokedBefore = await revokedAt();
       await page.getByTestId('admin-user-revoke').click();
       await expect(page.getByTestId('confirm-dialog')).toBeVisible();
       await page.getByTestId('confirm-ok').click();
       await expect(page.getByTestId('admin-user-revoked-at')).toBeVisible({ timeout: 20_000 });
-
-      const profile = await serviceSelect<{ sessions_revoked_at: string | null }>(
-        request,
-        `profiles?select=sessions_revoked_at&id=eq.${targetId}`,
-      );
-      expect(profile[0]?.sessions_revoked_at).toBeTruthy();
+      await expect
+        .poll(revokedAt, { timeout: 20_000, message: 'sessions_revoked_at moved forward' })
+        .not.toBe(revokedBefore);
+      expect(await revokedAt()).toBeTruthy();
 
       // The old access token no longer passes (its next statement sees a dead session).
       const after = await request.post(`${SUPABASE_URL}/rest/v1/rpc/my_context`, {

@@ -9,7 +9,9 @@ import { open, stat } from 'node:fs/promises';
 import { checkLayout, HEADER_BYTES, parseHeader, type PmtilesHeader } from './header.ts';
 
 /** Reads and validates the header of a local archive (throws InvalidArchiveError). */
-export async function readArchiveHeader(file: string): Promise<{ header: PmtilesHeader; bytes: number }> {
+export async function readArchiveHeader(
+  file: string,
+): Promise<{ header: PmtilesHeader; bytes: number }> {
   const handle = await open(file, 'r');
   try {
     const { size } = await handle.stat();

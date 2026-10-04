@@ -528,10 +528,7 @@ const hasRetries = (state: RunState): boolean =>
  */
 export async function finalizeMigration(
   state: RunState,
-  deps: Pick<
-    RunnerDeps,
-    'online' | 'syncNow' | 'readLegacy' | 'removeLegacy' | 'requestMerge'
-  >,
+  deps: Pick<RunnerDeps, 'online' | 'syncNow' | 'readLegacy' | 'removeLegacy' | 'requestMerge'>,
   opts: { sync?: boolean } = {},
 ): Promise<{ push: PushCheck; keysRemoved: boolean }> {
   if (opts.sync && deps.online()) await deps.syncNow().catch(() => undefined);
@@ -571,9 +568,10 @@ async function fileMergeSuggestions(
   let changed = false;
   for (const s of unfiledSuggestions(state)) {
     // A person whose project could not be stored does not exist: nothing to propose.
-    const ok = saved.has(s.sourceId) && saved.has(s.targetId)
-      ? await requestMerge(s.sourceId, s.targetId, s.name).catch(() => false)
-      : true;
+    const ok =
+      saved.has(s.sourceId) && saved.has(s.targetId)
+        ? await requestMerge(s.sourceId, s.targetId, s.name).catch(() => false)
+        : true;
     if (!ok) continue;
     (state.mergeFiled ??= []).push(`${s.sourceId}|${s.targetId}`);
     changed = true;

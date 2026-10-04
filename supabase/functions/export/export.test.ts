@@ -502,3 +502,217 @@ describe('export — GET ?job=<id>', () => {
     expect((await get(handler, '')).status).toBe(422);
   });
 });
+
+// ------------------------------------------------------------------------------------------
+// Staff sheet (brief §9.3 "all fields"): export_staff_rows
+// ------------------------------------------------------------------------------------------
+
+const STAFF_COLUMNS = [
+  { key: 'project_code', header: 'رمز المشروع', kind: 'text' },
+  { key: 'person_name_ar', header: 'الاسم (عربي)', kind: 'text' },
+  { key: 'role', header: 'الدور', kind: 'enum', enum: 'staff_role' },
+  { key: 'gender', header: 'الجنس', kind: 'enum', enum: 'gender' },
+  { key: 'phone', header: 'الهاتف', kind: 'text' },
+  { key: 'salary_amount', header: 'الراتب الشهري', kind: 'number' },
+];
+
+const COLUMNS_WITH_STAFF = {
+  ...COLUMNS,
+  capabilities: { people: true, restricted: true, staff: true },
+  staff_columns: STAFF_COLUMNS,
+  enums: {
+    ...COLUMNS.enums,
+    staff_role: { imam: 'إمام', teacher: 'معلم' },
+    gender: { male: 'ذكر', female: 'أنثى' },
+  },
+};
+
+const STAFF_ROWS = [
+  {
+    project_code: 'TZ-PN-000001',
+    person_name_ar: 'سالم',
+    role: 'imam',
+    gender: 'male',
+    phone: '+255700000001',
+    salary_amount: 250000,
+  },
+  {
+    project_code: 'TZ-PN-000001',
+    person_name_ar: 'خديجة',
+    role: 'teacher',
+    gender: 'female',
+    phone: null,
+    salary_amount: null,
+  },
+  {
+    project_code: 'TZ-PN-000003',
+    person_name_ar: '?',
+    role: 'teacher',
+    gender: null,
+    phone: '+255•••••••678',
+    salary_amount: 90000,
+  },
+];
+
+/** export_staff_rows: keyset pages, including an EMPTY page in the middle (more follow). */
+function serveStaff(theJob: Record<string, unknown>, rows = STAFF_ROWS): void {
+  api.on('POST', '/rest/v1/rpc/export_staff_rows', (req) => {
+    const after = req.json<{ p_after: { n: number } | null }>().p_after;
+    const n = after === null ? 0 : after.n;
+    // pages: [r0, r1], [], [r2]
+    const pages = [rows.slice(0, 2), [], rows.slice(2)];
+    const done = n >= pages.length - 1;
+    return jsonResponse({
+      job_id: theJob.id,
+      rows: pages[n] ?? [],
+      count: (pages[n] ?? []).length,
+      done,
+      next: done ? null : { n: n + 1 },
+    });
+  });
+}
+
+describe('export — staff sheet', () => {
+  it('XLSX: a second sheet «الكادر» with the staff, translated, after the projects sheet', async () => {
+    const XLSXNS = await import('xlsx');
+    const XLSX = (XLSXNS as unknown as { default?: typeof XLSXNS }).default ?? XLSXNS;
+    const handler = await loadHandler();
+    const theJob = job({ format: 'xlsx' });
+    api.on('POST', '/rest/v1/rpc/export_request', jsonResponse(theJob));
+    serveExport(theJob);
+    serveStaff(theJob);
+    api.on('POST', '/rest/v1/rpc/export_columns', jsonResponse(COLUMNS_WITH_STAFF));
+
+    expect((await post(handler, { format: 'xlsx', lang: 'ar' })).status).toBe(202);
+    const done = await waitForFinish('done');
+    const path = `${userId}/${theJob.id}.xlsx`;
+    expect(done).toMatchObject({ p_storage_path: path, p_row_count: 3 });
+    const bytes = await uploadedBytes(
+      api.callsTo('POST', `/storage/v1/object/exports/${path}`)[0]!,
+    );
+
+    const wb = XLSX.read(bytes, { type: 'array' });
+    expect(wb.SheetNames).toEqual(['المشاريع', 'الكادر']);
+    const staff = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets['الكادر']!, {
+      header: 1,
+      defval: '',
+    });
+    expect(staff[0]).toEqual(STAFF_COLUMNS.map((c) => c.header));
+    expect(staff.slice(1)).toEqual([
+      ['TZ-PN-000001', 'سالم', 'إمام', 'ذكر', '+255700000001', 250000],
+      ['TZ-PN-000001', 'خديجة', 'معلم', 'أنثى', '', ''],
+      ['TZ-PN-000003', '?', 'معلم', '', '+255•••••••678', 90000],
+    ]);
+    // the first sheet is unchanged
+    expect((await readXlsx(bytes, { maxRows: 100 })).rows).toHaveLength(4);
+
+    // staff pages with the caller's token, following the cursor through the empty page
+    expect(api.rpcCalls('export_staff_rows').map((c) => c.json())).toEqual([
+      { p_job_id: theJob.id, p_after: null, p_limit: 1000 },
+      { p_job_id: theJob.id, p_after: { n: 1 }, p_limit: 1000 },
+      { p_job_id: theJob.id, p_after: { n: 2 }, p_limit: 1000 },
+    ]);
+    for (const c of api.rpcCalls('export_staff_rows')) expect(c.bearer()).toBe(token);
+    // the projects are read completely before the first staff page
+    const lastRows = api.calls.map((c) => c.path).lastIndexOf('/rest/v1/rpc/export_rows');
+    const firstStaff = api.calls.findIndex((c) => c.path.endsWith('/export_staff_rows'));
+    expect(lastRows).toBeLessThan(firstStaff);
+    const stats = api
+      .callsTo('PATCH', '/rest/v1/export_jobs')[0]!
+      .json<{ stats: Record<string, unknown> }>();
+    expect(stats.stats).toMatchObject({ staff_rows: 3, format_delivered: 'xlsx' });
+  });
+
+  it('XLSX without staff columns (viewer): one sheet, export_staff_rows is never called', async () => {
+    const handler = await loadHandler();
+    const theJob = job({ format: 'xlsx' });
+    api.on('POST', '/rest/v1/rpc/export_request', jsonResponse(theJob));
+    serveExport(theJob);
+    serveStaff(theJob);
+    api.on('POST', '/rest/v1/rpc/export_columns', jsonResponse({ ...COLUMNS, staff_columns: [] }));
+
+    expect((await post(handler, { format: 'xlsx', lang: 'ar' })).status).toBe(202);
+    await waitForFinish('done');
+    expect(api.rpcCalls('export_staff_rows')).toHaveLength(0);
+  });
+
+  it('CSV with filters.dataset = "staff": the staff table alone, named istiqama-staff-…', async () => {
+    const handler = await loadHandler();
+    const theJob = job({ filters: { dataset: 'staff', country_id: 'x' } });
+    api.on('POST', '/rest/v1/rpc/export_request', jsonResponse(theJob));
+    serveExport(theJob);
+    serveStaff(theJob);
+    api.on('POST', '/rest/v1/rpc/export_columns', jsonResponse(COLUMNS_WITH_STAFF));
+
+    expect(
+      (await post(handler, { format: 'csv', lang: 'ar', filters: { dataset: 'staff' } })).status,
+    ).toBe(202);
+    const done = await waitForFinish('done');
+    expect(done).toMatchObject({ p_storage_path: `${userId}/${theJob.id}.csv`, p_row_count: 3 });
+    expect(String(done.p_file_name)).toMatch(/^istiqama-staff-\d{8}-[0-9a-f]{8}\.csv$/);
+    expect(api.rpcCalls('export_rows')).toHaveLength(0);
+    const bytes = await uploadedBytes(
+      api.callsTo('POST', `/storage/v1/object/exports/${userId}/${theJob.id}.csv`)[0]!,
+    );
+    const table = parseCsv(new TextDecoder().decode(bytes).replace(BOM, '')).rows;
+    expect(table[0]).toEqual(STAFF_COLUMNS.map((c) => c.header));
+    // CSV injection guard (brief §9): a leading "+" gets the apostrophe, as manager_phone does
+    expect(table[1]).toEqual(['TZ-PN-000001', 'سالم', 'إمام', 'ذكر', `'+255700000001`, '250000']);
+    expect(table).toHaveLength(4);
+  });
+
+  it('XLSX with filters.dataset = "staff": one sheet «الكادر»', async () => {
+    const handler = await loadHandler();
+    const theJob = job({ format: 'xlsx', filters: { dataset: 'staff' } });
+    api.on('POST', '/rest/v1/rpc/export_request', jsonResponse(theJob));
+    serveExport(theJob);
+    serveStaff(theJob);
+    api.on('POST', '/rest/v1/rpc/export_columns', jsonResponse(COLUMNS_WITH_STAFF));
+
+    expect((await post(handler, { format: 'xlsx', lang: 'ar' })).status).toBe(202);
+    const done = await waitForFinish('done');
+    const bytes = await uploadedBytes(
+      api.callsTo('POST', `/storage/v1/object/exports/${String(done.p_storage_path)}`)[0]!,
+    );
+    const sheet = await readXlsx(bytes, { maxRows: 100 });
+    expect(sheet.name).toBe('الكادر');
+    expect(sheet.rows[0]).toEqual(STAFF_COLUMNS.map((c) => c.header));
+    expect(sheet.rows).toHaveLength(4);
+    expect(api.rpcCalls('export_rows')).toHaveLength(0);
+  });
+
+  it('a staff export without staff columns fails (the database refuses such a job anyway)', async () => {
+    const handler = await loadHandler();
+    const theJob = job({ filters: { dataset: 'staff' } });
+    api.on('POST', '/rest/v1/rpc/export_request', jsonResponse(theJob));
+    serveExport(theJob);
+    serveStaff(theJob);
+
+    expect((await post(handler, { format: 'csv', filters: { dataset: 'staff' } })).status).toBe(
+      202,
+    );
+    const failed = await waitForFinish('failed');
+    expect(String(failed.p_error)).toContain('no_staff_access');
+    expect(api.rpcCalls('export_staff_rows')).toHaveLength(0);
+  });
+
+  it('XLSX overflow with a staff sheet falls back to the projects CSV and says the staff were omitted', async () => {
+    const handler = await loadHandler({ EXPORT_XLSX_MAX_ROWS: '2' });
+    const theJob = job({ format: 'xlsx' });
+    api.on('POST', '/rest/v1/rpc/export_request', jsonResponse(theJob));
+    serveExport(theJob, ROWS.slice(0, 2));
+    serveStaff(theJob);
+    api.on('POST', '/rest/v1/rpc/export_columns', jsonResponse(COLUMNS_WITH_STAFF));
+
+    expect((await post(handler, { format: 'xlsx', lang: 'ar' })).status).toBe(202);
+    const done = await waitForFinish('done');
+    expect(done).toMatchObject({ p_storage_path: `${userId}/${theJob.id}.csv`, p_row_count: 2 });
+    const stats = api
+      .callsTo('PATCH', '/rest/v1/export_jobs')[0]!
+      .json<{ stats: Record<string, unknown> }>();
+    expect(stats.stats).toMatchObject({
+      format_delivered: 'csv',
+      fallback: { from: 'xlsx', to: 'csv', reason: 'row_limit', limit: 2, staff_omitted: true },
+    });
+  });
+});

@@ -35,7 +35,8 @@ function parse(argv: string[]): Options {
     const value = argv[i + 1];
     if (flag === '--out' && value) opts.out = path.resolve(value);
     else if (flag === '--maxzoom' && value) opts.maxZoom = Number(value);
-    else if (flag === '--bbox' && value) opts.bbox = value.split(',').map(Number) as Options['bbox'];
+    else if (flag === '--bbox' && value)
+      opts.bbox = value.split(',').map(Number) as Options['bbox'];
     else throw new UsageError(`unknown option ${flag}`);
     i++;
   }
@@ -47,12 +48,19 @@ function parse(argv: string[]): Options {
 }
 
 /** Tiles of zoom z covering a lon/lat box. */
-export function tilesInBbox(z: number, bbox: [number, number, number, number]): Array<[number, number]> {
+export function tilesInBbox(
+  z: number,
+  bbox: [number, number, number, number],
+): Array<[number, number]> {
   const n = 2 ** z;
-  const x = (lon: number): number => Math.min(n - 1, Math.max(0, Math.floor(((lon + 180) / 360) * n)));
+  const x = (lon: number): number =>
+    Math.min(n - 1, Math.max(0, Math.floor(((lon + 180) / 360) * n)));
   const y = (lat: number): number => {
     const r = (Math.max(-85.05, Math.min(85.05, lat)) * Math.PI) / 180;
-    return Math.min(n - 1, Math.max(0, Math.floor(((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * n)));
+    return Math.min(
+      n - 1,
+      Math.max(0, Math.floor(((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * n)),
+    );
   };
   const out: Array<[number, number]> = [];
   for (let tx = x(bbox[0]); tx <= x(bbox[2]); tx++)
@@ -149,7 +157,9 @@ async function main(): Promise<void> {
   });
   await mkdir(path.dirname(opts.out), { recursive: true });
   await writeFile(opts.out, archive);
-  console.log(`wrote ${opts.out}: ${tiles.length} tiles, ${(archive.length / 1024 / 1024).toFixed(1)} MB`);
+  console.log(
+    `wrote ${opts.out}: ${tiles.length} tiles, ${(archive.length / 1024 / 1024).toFixed(1)} MB`,
+  );
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]).endsWith(`dev-basemap.ts`)) {

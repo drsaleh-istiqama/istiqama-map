@@ -109,7 +109,8 @@ export function parseOptions(argv: readonly string[]): BuildOptions {
   if (args[0] === 'list' || args[0] === 'build') opts.command = args.shift() as 'list' | 'build';
   while (args.length > 0) {
     const arg = args.shift()!;
-    const [flag, inline] = arg.startsWith('--') && arg.includes('=') ? arg.split(/=(.*)/s, 2) : [arg, undefined];
+    const [flag, inline] =
+      arg.startsWith('--') && arg.includes('=') ? arg.split(/=(.*)/s, 2) : [arg, undefined];
     const value = (): string => {
       const v = inline ?? args.shift();
       if (v === undefined || v === '') throw new UsageError(`${flag} needs a value`);
@@ -118,7 +119,8 @@ export function parseOptions(argv: readonly string[]): BuildOptions {
     switch (flag) {
       case '--country':
         opts.country = value().toUpperCase();
-        if (!/^[A-Z]{2}$/.test(opts.country)) throw new UsageError('--country must be an ISO2 code');
+        if (!/^[A-Z]{2}$/.test(opts.country))
+          throw new UsageError('--country must be an ISO2 code');
         break;
       case '--area':
         opts.area = value();

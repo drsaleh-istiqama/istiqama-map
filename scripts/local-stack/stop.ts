@@ -10,7 +10,10 @@ console.log(stopByPidFile('postgrest') ? 'PostgREST stopped' : 'PostgREST was no
 
 if (!args['keep-db']) {
   if (await isPortOpen(cfg.pgPort)) {
-    spawnSync(pgBin('pg_ctl'), ['-D', PG_DATA, '-m', 'fast', '-w', 'stop'], { stdio: 'ignore', windowsHide: true });
+    spawnSync(pgBin('pg_ctl'), ['-D', PG_DATA, '-m', 'fast', '-w', 'stop'], {
+      stdio: 'ignore',
+      windowsHide: true,
+    });
     console.log('PostgreSQL stopped');
   } else console.log('PostgreSQL was not running');
 }

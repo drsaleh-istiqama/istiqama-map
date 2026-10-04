@@ -48,7 +48,8 @@ const u64 = (v: DataView, o: number): number =>
 
 /** Parses the first 127 bytes; throws `InvalidArchiveError` when they are not a v3 header. */
 export function parseHeader(bytes: Uint8Array): PmtilesHeader {
-  if (bytes.length < HEADER_BYTES) throw new InvalidArchiveError('file shorter than a PMTiles header');
+  if (bytes.length < HEADER_BYTES)
+    throw new InvalidArchiveError('file shorter than a PMTiles header');
   const magic = new TextDecoder().decode(bytes.subarray(0, 7));
   if (magic !== MAGIC)
     throw new InvalidArchiveError(

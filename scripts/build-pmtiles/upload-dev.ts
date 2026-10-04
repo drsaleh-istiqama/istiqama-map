@@ -30,7 +30,12 @@ interface Options {
 }
 
 function parse(argv: string[]): Options {
-  const opts: Options = { file: DEFAULT_SOURCE, object: BASEMAP_OBJECT, fit: false, tool: DEFAULT_TOOL };
+  const opts: Options = {
+    file: DEFAULT_SOURCE,
+    object: BASEMAP_OBJECT,
+    fit: false,
+    tool: DEFAULT_TOOL,
+  };
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
     if (flag === '--fit') {
@@ -103,7 +108,9 @@ async function main(): Promise<void> {
         file = fitted;
         checked = result;
         ok = true;
-        console.log(`fit       z${result.header.minZoom}–${result.header.maxZoom}: ${mb(result.bytes)}`);
+        console.log(
+          `fit       z${result.header.minZoom}–${result.header.maxZoom}: ${mb(result.bytes)}`,
+        );
         break;
       }
     }

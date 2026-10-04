@@ -17,14 +17,29 @@ const expand = (pattern: string): string[] => {
   const abs = path.resolve(ROOT, pattern);
   if (!pattern.includes('*')) return [abs];
   const dir = path.dirname(abs);
-  const rx = new RegExp('^' + path.basename(abs).replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$');
-  return fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => rx.test(f)).map((f) => path.join(dir, f)) : [];
+  const rx = new RegExp(
+    '^' +
+      path
+        .basename(abs)
+        .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+        .replace(/\*/g, '.*') +
+      '$',
+  );
+  return fs.existsSync(dir)
+    ? fs
+        .readdirSync(dir)
+        .filter((f) => rx.test(f))
+        .map((f) => path.join(dir, f))
+    : [];
 };
 
 let files = args._.length
   ? args._.flatMap(expand)
   : fs.existsSync(testsDir)
-    ? fs.readdirSync(testsDir).filter((f) => f.endsWith('.sql')).map((f) => path.join(testsDir, f))
+    ? fs
+        .readdirSync(testsDir)
+        .filter((f) => f.endsWith('.sql'))
+        .map((f) => path.join(testsDir, f))
     : [];
 files = [...new Set(files)].sort();
 if (!files.length) {
@@ -37,9 +52,13 @@ let totalOk = 0;
 let totalNotOk = 0;
 const t0 = Date.now();
 for (const f of files) {
-  const res = capture(pgBin('psql'), [...psqlArgs(db), '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=0', '-f', f], {
-    env: PG_ENV,
-  });
+  const res = capture(
+    pgBin('psql'),
+    [...psqlArgs(db), '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=0', '-f', f],
+    {
+      env: PG_ENV,
+    },
+  );
   const lines = (res.stdout + '\n' + res.stderr).split(/\r?\n/);
   let plan = -1;
   let ok = 0;
@@ -51,7 +70,10 @@ for (const f of files) {
     if ((m = /^1\.\.(\d+)/.exec(t))) plan = Number(m[1]);
     else if (/^ok \d+/.test(t)) ok++;
     else if (/^not ok \d+/.test(t)) {
-      const diag = lines.slice(i + 1, i + 8).filter((l) => l.trim().startsWith('#')).join('\n');
+      const diag = lines
+        .slice(i + 1, i + 8)
+        .filter((l) => l.trim().startsWith('#'))
+        .join('\n');
       failures.push(`${t}\n${diag}`);
     } else if (/psql:.*(ERROR|FATAL):/.test(t) || /^(ERROR|FATAL):/.test(t)) errors.push(t);
     else if (/^# Looks like you planned \d+ tests? but ran \d+/.test(t)) errors.push(t);
@@ -63,7 +85,9 @@ for (const f of files) {
   if (passed) console.log(`✓ ${rel}  (${ok}/${plan})`);
   else {
     failedFiles++;
-    console.log(`✗ ${rel}  (${ok} ok, ${failures.length} failed, plan ${plan < 0 ? 'missing' : plan})`);
+    console.log(
+      `✗ ${rel}  (${ok} ok, ${failures.length} failed, plan ${plan < 0 ? 'missing' : plan})`,
+    );
     for (const x of failures) console.log('   ' + x.replace(/\n/g, '\n   '));
     for (const x of errors.slice(0, 15)) console.log('   ' + x);
   }

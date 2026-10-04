@@ -15,14 +15,14 @@ projects only — in `project_duplicates`, `search` (projects, staff and donor h
 points too). For callers whose people scope covers their read scope nothing is added to the
 query.
 
-| RPC | Volatility / verb | Rate limit | Typical latency¹ |
-|---|---|---|---|
-| `locate_point(p_lon, p_lat)` → jsonb | STABLE (GET or POST) | — | ~1 ms |
-| `admin_area_shapes(p_country_id, p_level)` → jsonb | STABLE (GET or POST) | — | payload-bound |
-| `project_duplicates(p_type, p_lon, p_lat, p_name, p_locality_id, p_exclude_id default null)` → jsonb | STABLE (GET or POST) | — | ~2 ms |
-| `search(p_q, p_limit default 20, p_kinds default null)` → jsonb | VOLATILE (**POST only**) | 300 / minute / caller | 10–60 ms; 100–250 ms for the typo fallback |
-| `projects_page(p_filters, p_after, p_limit default 50)` → jsonb | VOLATILE (**POST only**) | 300 / minute / caller | 3–20 ms |
-| `tile_projects(z, x, y, p_filters default '{}')` → MVT bytes (`bytea` domain) | STABLE (**GET**) | in the `tiles` Edge Function | 1–15 ms |
+| RPC                                                                                                  | Volatility / verb        | Rate limit                   | Typical latency¹                           |
+| ---------------------------------------------------------------------------------------------------- | ------------------------ | ---------------------------- | ------------------------------------------ |
+| `locate_point(p_lon, p_lat)` → jsonb                                                                 | STABLE (GET or POST)     | —                            | ~1 ms                                      |
+| `admin_area_shapes(p_country_id, p_level)` → jsonb                                                   | STABLE (GET or POST)     | —                            | payload-bound                              |
+| `project_duplicates(p_type, p_lon, p_lat, p_name, p_locality_id, p_exclude_id default null)` → jsonb | STABLE (GET or POST)     | —                            | ~2 ms                                      |
+| `search(p_q, p_limit default 20, p_kinds default null)` → jsonb                                      | VOLATILE (**POST only**) | 300 / minute / caller        | 10–60 ms; 100–250 ms for the typo fallback |
+| `projects_page(p_filters, p_after, p_limit default 50)` → jsonb                                      | VOLATILE (**POST only**) | 300 / minute / caller        | 3–20 ms                                    |
+| `tile_projects(z, x, y, p_filters default '{}')` → MVT bytes (`bytea` domain)                        | STABLE (**GET**)         | in the `tiles` Edge Function | 1–15 ms                                    |
 
 ¹ Measured on the development machine (8 cores, shared) with 100,000 projects / 500,000 persons /
 500,000 staff links, single connection, warm cache. With 8 connections firing without think time:
@@ -42,15 +42,41 @@ Country and administrative chain of a WGS84 point, plus nearby localities (form 
 
 ```jsonc
 {
-  "country": { "id": "…", "iso2": "TZ", "name_ar": "تنزانيا", "name_en": "Tanzania", "name_sw": "Tanzania", "active": true },   // null when no polygon contains the point
-  "admin_area_id": "…",          // deepest area containing the point (what the projects trigger will store), or null
-  "areas": [                     // ascending level, at most one per level 1..3
-    { "id": "…", "level": 1, "code": "TZ-…", "parent_id": null, "name_ar": "…", "name_en": "…", "name_sw": "…" }
+  "country": {
+    "id": "…",
+    "iso2": "TZ",
+    "name_ar": "تنزانيا",
+    "name_en": "Tanzania",
+    "name_sw": "Tanzania",
+    "active": true,
+  }, // null when no polygon contains the point
+  "admin_area_id": "…", // deepest area containing the point (what the projects trigger will store), or null
+  "areas": [
+    // ascending level, at most one per level 1..3
+    {
+      "id": "…",
+      "level": 1,
+      "code": "TZ-…",
+      "parent_id": null,
+      "name_ar": "…",
+      "name_en": "…",
+      "name_sw": "…",
+    },
   ],
-  "localities": [                // <= 10 nearest within 10 km, nearest first, approved and proposed
-    { "id": "…", "name_ar": "…", "name_latin": "…", "status": "approved", "admin_area_id": "…",
-      "country_id": "…", "lon": 39.75, "lat": -5.0527, "distance_m": 298.6 }
-  ]
+  "localities": [
+    // <= 10 nearest within 10 km, nearest first, approved and proposed
+    {
+      "id": "…",
+      "name_ar": "…",
+      "name_latin": "…",
+      "status": "approved",
+      "admin_area_id": "…",
+      "country_id": "…",
+      "lon": 39.75,
+      "lat": -5.0527,
+      "distance_m": 298.6,
+    },
+  ],
 }
 ```
 
@@ -89,13 +115,25 @@ GeoJSON for offline geofill on the device (point-in-polygon in `src/lib/geo.ts`)
 Duplicate detection before saving (§7.3). Returns a jsonb array (max 20, best first):
 
 ```jsonc
-[ { "id": "…", "code": "TZ-PN-000123", "name_ar": "…", "name_latin": "…",
-    "type": "mosque", "status": "active", "record_state": "approved",
-    "lon": 39.75, "lat": -5.05, "locality_id": null, "admin_area_id": "…",
+[
+  {
+    "id": "…",
+    "code": "TZ-PN-000123",
+    "name_ar": "…",
+    "name_latin": "…",
+    "type": "mosque",
+    "status": "active",
+    "record_state": "approved",
+    "lon": 39.75,
+    "lat": -5.05,
+    "locality_id": null,
+    "admin_area_id": "…",
     "created_by_me": false,
-    "distance_m": 99.9,        // null when no coordinates were given
-    "similarity": 0.812,       // 0..1 on the normalised names; null when no name was given
-    "reason": "nearby" } ]     // "nearby" | "similar_name" | "both"
+    "distance_m": 99.9, // null when no coordinates were given
+    "similarity": 0.812, // 0..1 on the normalised names; null when no name was given
+    "reason": "nearby",
+  },
+] // "nearby" | "similar_name" | "both"
 ```
 
 - **nearby**: a project of the same type within **150 m** (geodesic). `combined` overlaps with both
@@ -116,19 +154,75 @@ localities, staff, donors), at most `p_limit` (capped at **50**) in total. `p_ki
 
 ```jsonc
 [
-  { "kind": "project", "id": "<project id>", "score": 0.93, "name_ar": "…", "name_latin": "…", "code": "TZ-PN-000123",
-    "type": "mosque", "status": "active", "record_state": "approved", "lon": 39.75, "lat": -5.05,
-    "country_id": "…", "admin_area_id": "…", "locality_id": null },
-  { "kind": "locality", "id": "<locality id>", "score": 0.93, "name_ar": "…", "name_latin": "…", "status": "approved",
-    "lon": 39.74, "lat": -5.0, "country_id": "…", "admin_area_id": "…" },
-  { "kind": "staff", "id": "<person id>", "score": 0.93, "name_ar": "…", "name_latin": "…",
+  {
+    "kind": "project",
+    "id": "<project id>",
+    "score": 0.93,
+    "name_ar": "…",
+    "name_latin": "…",
+    "code": "TZ-PN-000123",
+    "type": "mosque",
+    "status": "active",
+    "record_state": "approved",
+    "lon": 39.75,
+    "lat": -5.05,
+    "country_id": "…",
+    "admin_area_id": "…",
+    "locality_id": null,
+  },
+  {
+    "kind": "locality",
+    "id": "<locality id>",
+    "score": 0.93,
+    "name_ar": "…",
+    "name_latin": "…",
+    "status": "approved",
+    "lon": 39.74,
+    "lat": -5.0,
+    "country_id": "…",
+    "admin_area_id": "…",
+  },
+  {
+    "kind": "staff",
+    "id": "<person id>",
+    "score": 0.93,
+    "name_ar": "…",
+    "name_latin": "…",
     "projects_count": 2,
-    "projects": [ { "id": "…", "code": "…", "name_ar": "…", "name_latin": "…", "type": "mosque", "status": "active",
-                    "lon": 39.75, "lat": -5.05, "role": "imam" } ] },          // <= 5, current assignments first
-  { "kind": "donor", "id": "<donor id>", "score": 0.93, "name_ar": "…", "name_latin": "…",
+    "projects": [
+      {
+        "id": "…",
+        "code": "…",
+        "name_ar": "…",
+        "name_latin": "…",
+        "type": "mosque",
+        "status": "active",
+        "lon": 39.75,
+        "lat": -5.05,
+        "role": "imam",
+      },
+    ],
+  }, // <= 5, current assignments first
+  {
+    "kind": "donor",
+    "id": "<donor id>",
+    "score": 0.93,
+    "name_ar": "…",
+    "name_latin": "…",
     "projects_count": 14,
-    "projects": [ { "id": "…", "code": "…", "name_ar": "…", "name_latin": "…", "type": "school", "status": "active",
-                    "lon": 39.1, "lat": -5.07 } ] }                            // <= 5; list the rest with projects_page({donor_id})
+    "projects": [
+      {
+        "id": "…",
+        "code": "…",
+        "name_ar": "…",
+        "name_latin": "…",
+        "type": "school",
+        "status": "active",
+        "lon": 39.1,
+        "lat": -5.07,
+      },
+    ],
+  }, // <= 5; list the rest with projects_page({donor_id})
 ]
 ```
 
@@ -177,28 +271,47 @@ Keyset-paged project list (§5). Never `OFFSET`.
 
 `p_filters` (all optional)
 
-| Key | Value | Meaning |
-|---|---|---|
-| `sort` | `"name"` (default) \| `"updated"` | `(name_ar, id)` ascending in code-point order (`COLLATE "C"`, identical to a plain JS string comparison) \| `(updated_at desc, id desc)` |
-| `country_id`, `branch_id` | uuid | intersected with the caller's scope |
-| `admin_area_id` | uuid of any level | the area and all its descendants |
-| `locality_id`, `donor_id` | uuid | |
-| `type`, `status`, `record_state` | string or array of strings | |
-| `q` | text | every word must occur in the project's search text (names + code + locality names) |
-| `incomplete` | `true` | `completeness < 100` ("incomplete records" list, §7.5) |
-| `created_by_me` | `true` | rows created by the caller |
-| `has_open_maintenance` | `true` | at least one `open` / `in_progress` maintenance entry |
+| Key                              | Value                             | Meaning                                                                                                                                  |
+| -------------------------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `sort`                           | `"name"` (default) \| `"updated"` | `(name_ar, id)` ascending in code-point order (`COLLATE "C"`, identical to a plain JS string comparison) \| `(updated_at desc, id desc)` |
+| `country_id`, `branch_id`        | uuid                              | intersected with the caller's scope                                                                                                      |
+| `admin_area_id`                  | uuid of any level                 | the area and all its descendants                                                                                                         |
+| `locality_id`, `donor_id`        | uuid                              |                                                                                                                                          |
+| `type`, `status`, `record_state` | string or array of strings        |                                                                                                                                          |
+| `q`                              | text                              | every word must occur in the project's search text (names + code + locality names)                                                       |
+| `incomplete`                     | `true`                            | `completeness < 100` ("incomplete records" list, §7.5)                                                                                   |
+| `created_by_me`                  | `true`                            | rows created by the caller                                                                                                               |
+| `has_open_maintenance`           | `true`                            | at least one `open` / `in_progress` maintenance entry                                                                                    |
 
 Row (light list item)
 
 ```jsonc
-{ "id": "…", "code": "TZ-PN-000123", "name_ar": "…", "name_latin": "…", "type": "mosque", "status": "active",
-  "record_state": "approved", "completeness": 80, "capacity": 100, "lon": 39.75, "lat": -5.05,
-  "country_id": "…", "branch_id": "…", "admin_area_id": "…", "locality_id": null,
-  "area_level": 1, "area_name_ar": "…", "area_name_en": "…", "area_name_sw": "…",   // the project's (deepest) admin area
-  "locality_name_ar": null, "locality_name_latin": null,
-  "cover_thumb": "projects/TZ/<project>/<photo>_thumb.webp",   // storage path in bucket "photos" (cover, else first uploaded photo), or null
-  "updated_at": "2026-10-03T10:00:00.123456+00:00", "version": 3 }
+{
+  "id": "…",
+  "code": "TZ-PN-000123",
+  "name_ar": "…",
+  "name_latin": "…",
+  "type": "mosque",
+  "status": "active",
+  "record_state": "approved",
+  "completeness": 80,
+  "capacity": 100,
+  "lon": 39.75,
+  "lat": -5.05,
+  "country_id": "…",
+  "branch_id": "…",
+  "admin_area_id": "…",
+  "locality_id": null,
+  "area_level": 1,
+  "area_name_ar": "…",
+  "area_name_en": "…",
+  "area_name_sw": "…", // the project's (deepest) admin area
+  "locality_name_ar": null,
+  "locality_name_latin": null,
+  "cover_thumb": "projects/TZ/<project>/<photo>_thumb.webp", // storage path in bucket "photos" (cover, else first uploaded photo), or null
+  "updated_at": "2026-10-03T10:00:00.123456+00:00",
+  "version": 3,
+}
 ```
 
 `PT422`: unknown `sort`, or a cursor that belongs to the other sort order.
@@ -222,11 +335,11 @@ Accept: application/vnd.mapbox-vector-tile          → 200, Content-Type: appli
 `application/octet-stream` yields `406` — always send the explicit media type (verified against
 the local PostgREST). `PT422` → HTTP 422, missing/`anon` token → 401.
 
-| Layer | Zoom | One feature per | Attributes |
-|---|---|---|---|
+| Layer      | Zoom | One feature per                                                                                                                         | Attributes                                                                                                                                                                                                |
+| ---------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `clusters` | 0–13 | grid cell with ≥ 1 visible project (8 × 8 cells per tile, i.e. 64 px on a 512 px tile), placed at the **mean position** of its projects | `count`, `capacity` (sum), `mosque`, `school`, `combined`, `st_active`, `st_maintenance`, `st_building`, `st_inactive` (all integers); for single-project cells also `id` (uuid string), `type`, `status` |
-| `points` | ≥ 14 | project | `id` (uuid string), `code`, `name_ar`, `name_latin`, `type`, `status`, `record_state`, `capacity` |
-| `needs` | all | cell (z < 14) or project (z ≥ 14) with at least one non-zero weight | `maintenance` (open + in-progress entries), `quran_need` (copies), `housing` (teacher housing missing + imam housing missing), `transport` (projects needing student transport); `id` on z ≥ 14 |
+| `points`   | ≥ 14 | project                                                                                                                                 | `id` (uuid string), `code`, `name_ar`, `name_latin`, `type`, `status`, `record_state`, `capacity`                                                                                                         |
+| `needs`    | all  | cell (z < 14) or project (z ≥ 14) with at least one non-zero weight                                                                     | `maintenance` (open + in-progress entries), `quran_need` (copies), `housing` (teacher housing missing + imam housing missing), `transport` (projects needing student transport); `id` on z ≥ 14           |
 
 - `clusters` and cluster-level `needs` features carry a numeric feature id that is stable per cell
   and zoom (`(cell_y << (z + 3)) | cell_x`) — usable with `feature-state`.
@@ -258,9 +371,11 @@ Data freshness
 ```ts
 map.addSource('projects', {
   type: 'vector',
-  tiles: [`${FUNCTIONS_URL}/tiles/{z}/{x}/{y}?f=${encodeURIComponent(JSON.stringify(filters))}&e=${scopeEpoch}`],
+  tiles: [
+    `${FUNCTIONS_URL}/tiles/{z}/{x}/{y}?f=${encodeURIComponent(JSON.stringify(filters))}&e=${scopeEpoch}`,
+  ],
   minzoom: 0,
-  maxzoom: 14,          // z > 14 over-zooms the z14 tile ("points" layer)
+  maxzoom: 14, // z > 14 over-zooms the z14 tile ("points" layer)
 });
 // clusters: source-layer "clusters" — circle radius by ["get","count"], label when count > 1,
 //           colour by ["get","type"] / ["get","status"] when count = 1; click → open ["get","id"]
@@ -276,13 +391,13 @@ The function forwards the caller's `Authorization` and `x-device-id` headers to
 `GET /rest/v1/rpc/tile_projects?z=…&x=…&y=…&p_filters=…` with
 `Accept: application/vnd.mapbox-vector-tile` and answers with:
 
-| Header | Value |
-|---|---|
-| `Content-Type` | `application/vnd.mapbox-vector-tile` |
+| Header          | Value                                                                                                           |
+| --------------- | --------------------------------------------------------------------------------------------------------------- |
+| `Content-Type`  | `application/vnd.mapbox-vector-tile`                                                                            |
 | `Cache-Control` | z < 14: `private, max-age=300, stale-while-revalidate=600` · z ≥ 14: `private, max-age=30` · errors: `no-store` |
-| `Vary` | `Authorization` |
-| `ETag` | strong hash of the body; answer `304` to a matching `If-None-Match` |
-| status | `200` with the body, `204` for a zero-length tile (same cache headers) |
+| `Vary`          | `Authorization`                                                                                                 |
+| `ETag`          | strong hash of the body; answer `304` to a matching `If-None-Match`                                             |
+| status          | `200` with the body, `204` for a zero-length tile (same cache headers)                                          |
 
 - Tiles depend on the caller's scope: **never `public`**, never a shared/CDN cache keyed by URL only.
 - The `e=<scope_epoch>` query parameter (from `my_context()`) is ignored by the server; it changes
@@ -294,14 +409,14 @@ The function forwards the caller's `Authorization` and `x-device-id` headers to
 
 ## 7. Private objects (not part of the API)
 
-| Object | Purpose |
-|---|---|
-| `private.mv_project_clusters` | cluster pyramid: one row per `(zoom 0..13, tile tx/ty, cell cx/cy, country_id, branch_id, type, status, record_state)` with `n`, `capacity`, `sum_mx`, `sum_my` (EPSG:3857 metres, centroid = sum / n), `maint_open`, `maint_projects`, `quran_need`, `housing_gaps`, `transport_needs`, `single_id`. Missing country/branch = nil UUID. Unique index `mv_project_clusters_key` (also the tile lookup index). No grants to API roles. |
-| `private.refresh_clusters()` | `REFRESH MATERIALIZED VIEW CONCURRENTLY` (readers never block). ~660,000 rows / ~190 MB for 100,000 projects; 10–15 s plain, 30–40 s concurrent on the development machine. |
-| `private.search_candidates(kind, fuzzy, q, tokens, all, countries, branches, cap)` | step 1 of `search`: candidate ids from the trigram index, bitmap plans only. |
-| domain `public."application/vnd.mapbox-vector-tile"` | PostgREST media type handler for `tile_projects`. |
-| `private.like_escape(text)`, `private.jsonb_text_array(jsonb)` | LIKE escaping; `"x"` or `["x","y"]` → `text[]`. |
-| indexes `projects_page_name_idx (name_ar COLLATE "C", id)`, `projects_page_updated_idx (updated_at, id)` | keyset orders of `projects_page` (partial: live rows). |
+| Object                                                                                                   | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `private.mv_project_clusters`                                                                            | cluster pyramid: one row per `(zoom 0..13, tile tx/ty, cell cx/cy, country_id, branch_id, type, status, record_state)` with `n`, `capacity`, `sum_mx`, `sum_my` (EPSG:3857 metres, centroid = sum / n), `maint_open`, `maint_projects`, `quran_need`, `housing_gaps`, `transport_needs`, `single_id`. Missing country/branch = nil UUID. Unique index `mv_project_clusters_key` (also the tile lookup index). No grants to API roles. |
+| `private.refresh_clusters()`                                                                             | `REFRESH MATERIALIZED VIEW CONCURRENTLY` (readers never block). ~660,000 rows / ~190 MB for 100,000 projects; 10–15 s plain, 30–40 s concurrent on the development machine.                                                                                                                                                                                                                                                           |
+| `private.search_candidates(kind, fuzzy, q, tokens, all, countries, branches, cap)`                       | step 1 of `search`: candidate ids from the trigram index, bitmap plans only.                                                                                                                                                                                                                                                                                                                                                          |
+| domain `public."application/vnd.mapbox-vector-tile"`                                                     | PostgREST media type handler for `tile_projects`.                                                                                                                                                                                                                                                                                                                                                                                     |
+| `private.like_escape(text)`, `private.jsonb_text_array(jsonb)`                                           | LIKE escaping; `"x"` or `["x","y"]` → `text[]`.                                                                                                                                                                                                                                                                                                                                                                                       |
+| indexes `projects_page_name_idx (name_ar COLLATE "C", id)`, `projects_page_updated_idx (updated_at, id)` | keyset orders of `projects_page` (partial: live rows).                                                                                                                                                                                                                                                                                                                                                                                |
 
 ## 8. Operational requirements
 

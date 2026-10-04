@@ -16,17 +16,31 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import jwt from 'jsonwebtoken';
-import { DOWNLOADS, LOCAL, LOG_DIR, PG_DATA, PG_HOME, ROOT, RUN_DIR, capture, pgBin, run } from './lib.ts';
+import {
+  DOWNLOADS,
+  LOCAL,
+  LOG_DIR,
+  PG_DATA,
+  PG_HOME,
+  ROOT,
+  RUN_DIR,
+  capture,
+  pgBin,
+  run,
+} from './lib.ts';
 
 const VERSIONS = {
   pg: 'https://get.enterprisedb.com/postgresql/postgresql-17.6-1-windows-x64-binaries.zip',
   postgis: 'https://download.osgeo.org/postgis/windows/pg17/postgis-bundle-pg17-3.6.2x64.zip',
-  postgrest: 'https://github.com/PostgREST/postgrest/releases/download/v16.4/postgrest-v16.4-windows-x86-64.zip',
+  postgrest:
+    'https://github.com/PostgREST/postgrest/releases/download/v16.4/postgrest-v16.4-windows-x86-64.zip',
   pgtap: 'https://api.pgxn.org/dist/pgtap/1.3.4/pgtap-1.3.4.zip',
 };
 
 if (process.platform !== 'win32' || process.arch !== 'x64') {
-  console.error('The portable local stack supports Windows x64 only. Elsewhere run `supabase start` (Docker).');
+  console.error(
+    'The portable local stack supports Windows x64 only. Elsewhere run `supabase start` (Docker).',
+  );
   process.exit(1);
 }
 
@@ -38,9 +52,29 @@ const python = ['python', 'py', 'python3'].find((p) => {
   }
 });
 const fetcher = path.join(ROOT, 'scripts', 'local-stack', 'zip_range_fetch.py');
-const rangeFetch = (url: string, dest: string, cache: string, include: string, exclude: string | null, strip: number): void => {
-  if (!python) throw new Error('Python 3 is required for the selective download (python.org) — or unzip the archives manually.');
-  const a = [fetcher, url, dest, '--cache', path.join(DOWNLOADS, cache), '--include', include, '--strip', String(strip)];
+const rangeFetch = (
+  url: string,
+  dest: string,
+  cache: string,
+  include: string,
+  exclude: string | null,
+  strip: number,
+): void => {
+  if (!python)
+    throw new Error(
+      'Python 3 is required for the selective download (python.org) — or unzip the archives manually.',
+    );
+  const a = [
+    fetcher,
+    url,
+    dest,
+    '--cache',
+    path.join(DOWNLOADS, cache),
+    '--include',
+    include,
+    '--strip',
+    String(strip),
+  ];
   if (exclude) a.push('--exclude', exclude);
   run(python, a);
 };
@@ -99,7 +133,10 @@ if (!fs.existsSync(path.join(extDir, 'pgtap.control'))) {
   await download(VERSIONS.pgtap, zip);
   const src = path.join(LOCAL, 'src');
   fs.mkdirSync(src, { recursive: true });
-  run('tar', ['-xf', zip, '-C', src], { shell: false, env: { ...process.env, PATH: `C:\\Windows\\System32;${process.env.PATH}` } });
+  run('tar', ['-xf', zip, '-C', src], {
+    shell: false,
+    env: { ...process.env, PATH: `C:\\Windows\\System32;${process.env.PATH}` },
+  });
   const dir = path.join(src, 'pgtap-1.3.4');
   const control = fs.readFileSync(path.join(dir, 'pgtap.control'), 'utf8');
   const version = /default_version\s*=\s*'([^']+)'/.exec(control)![1]!;
@@ -120,7 +157,9 @@ if (!fs.existsSync(path.join(postgrestDir, 'postgrest.exe'))) {
   const zip = path.join(DOWNLOADS, path.basename(VERSIONS.postgrest));
   await download(VERSIONS.postgrest, zip);
   fs.mkdirSync(postgrestDir, { recursive: true });
-  run('tar', ['-xf', zip, '-C', postgrestDir], { env: { ...process.env, PATH: `C:\\Windows\\System32;${process.env.PATH}` } });
+  run('tar', ['-xf', zip, '-C', postgrestDir], {
+    env: { ...process.env, PATH: `C:\\Windows\\System32;${process.env.PATH}` },
+  });
 }
 
 // 5. .env.local with random development secrets (never committed)
@@ -128,7 +167,8 @@ const envFile = path.join(ROOT, '.env.local');
 if (!fs.existsSync(envFile)) {
   const secret = crypto.randomBytes(48).toString('base64url');
   const tenYears = 60 * 60 * 24 * 365 * 10;
-  const key = (role: string): string => jwt.sign({ role, iss: 'supabase-local' }, secret, { algorithm: 'HS256', expiresIn: tenYears });
+  const key = (role: string): string =>
+    jwt.sign({ role, iss: 'supabase-local' }, secret, { algorithm: 'HS256', expiresIn: tenYears });
   const anon = key('anon');
   const service = key('service_role');
   const example = fs.readFileSync(path.join(ROOT, '.env.example'), 'utf8');
@@ -143,7 +183,18 @@ if (!fs.existsSync(envFile)) {
 
 // 6. initdb + tuning
 if (!fs.existsSync(path.join(PG_DATA, 'PG_VERSION'))) {
-  run(pgBin('initdb'), ['-D', PG_DATA, '-U', 'postgres', '-A', 'trust', '-E', 'UTF8', '--locale=C', '--no-instructions']);
+  run(pgBin('initdb'), [
+    '-D',
+    PG_DATA,
+    '-U',
+    'postgres',
+    '-A',
+    'trust',
+    '-E',
+    'UTF8',
+    '--locale=C',
+    '--no-instructions',
+  ]);
 }
 const conf = path.join(PG_DATA, 'postgresql.conf');
 const marker = '# --- istiqama-map local stack ---';

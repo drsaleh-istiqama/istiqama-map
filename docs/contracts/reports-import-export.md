@@ -14,32 +14,33 @@ starts with `private.require_session()`: no JWT user → `PT401`; a revoked sess
 (`x-device-id`) → `PT403` with message `session_revoked` — the same error as `sync_pull` /
 `sync_push`, so the client signs out. The check runs before any rate limit, read or write; it
 also covers the owner-only RPCs (`import_preview`, `import_set_action`, `import_commit`,
-`import_rollback`, `export_rows`, `export_cancel`) whose owner check uses no scope helper. A
+`import_rollback`, `export_rows`, `export_staff_rows`, `export_cancel`) whose owner check uses no scope helper. A
 revoked session in the middle of an export makes `export_rows` fail (the job ends `failed`), it
 never returns an empty "done" page.
 Functions that write (rate limit, access log, jobs) are `VOLATILE` → call them with **POST**
 (`supabase.rpc()` default). `export_columns`, `import_template`, `import_preview` are `STABLE`.
 
-| RPC | Caller | Volatile |
-|---|---|---|
-| `dashboard(p_scope_type text, p_scope_id uuid default null)` → jsonb | any role with read scope | yes |
-| `report_project(p_id uuid)` → jsonb | read scope of the project | yes |
-| `report_donor(p_id uuid)` → jsonb | any role; the donor must be visible to the caller | yes |
-| `report_country(p_id uuid)` → jsonb | read scope of the country | yes |
-| `export_request(p_format text, p_lang text default 'ar', p_filters jsonb default '{}')` → jsonb | any role | yes |
-| `export_columns(p_lang text default 'ar')` → jsonb | any role | no |
-| `export_rows(p_job_id uuid, p_after jsonb default null, p_limit int default 1000)` → jsonb | job owner | yes |
-| `export_cancel(p_job_id uuid)` → jsonb | job owner | yes |
-| `export_finish(p_job_id uuid, p_state text, p_storage_path text default null, p_row_count int default null, p_error text default null, p_file_name text default null, p_bytes bigint default null)` → jsonb | **service role** | yes |
-| `import_template(p_lang text default 'ar')` → jsonb | any signed-in user | no |
-| `import_stage(p_meta jsonb, p_rows jsonb)` → jsonb | writers | yes |
-| `import_preview(p_batch_id uuid, p_after int default 0, p_limit int default 100, p_only text default null)` → jsonb | batch owner, hq_admin | no |
-| `import_set_action(p_batch_id uuid, p_row_no int, p_action text, p_target_id uuid default null)` → jsonb | batch owner | yes |
-| `import_commit(p_batch_id uuid)` → jsonb | batch owner | yes |
-| `import_rollback(p_batch_id uuid)` → jsonb | batch owner, hq_admin | yes |
-| `refresh_reports()` → jsonb | **service role / cron** | yes |
-| `photos_to_purge(p_limit int default 500)` → setof record | **service role** | no |
-| `mark_photos_purged(p_ids uuid[])` → int | **service role** | yes |
+| RPC                                                                                                                                                                                                         | Caller                                            | Volatile |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- | -------- |
+| `dashboard(p_scope_type text, p_scope_id uuid default null)` → jsonb                                                                                                                                        | any role with read scope                          | yes      |
+| `report_project(p_id uuid)` → jsonb                                                                                                                                                                         | read scope of the project                         | yes      |
+| `report_donor(p_id uuid)` → jsonb                                                                                                                                                                           | any role; the donor must be visible to the caller | yes      |
+| `report_country(p_id uuid)` → jsonb                                                                                                                                                                         | read scope of the country                         | yes      |
+| `export_request(p_format text, p_lang text default 'ar', p_filters jsonb default '{}')` → jsonb                                                                                                             | any role                                          | yes      |
+| `export_columns(p_lang text default 'ar')` → jsonb                                                                                                                                                          | any role                                          | no       |
+| `export_rows(p_job_id uuid, p_after jsonb default null, p_limit int default 1000)` → jsonb                                                                                                                  | job owner                                         | yes      |
+| `export_staff_rows(p_job_id uuid, p_after jsonb default null, p_limit int default 1000)` → jsonb                                                                                                            | job owner (people scope)                          | yes      |
+| `export_cancel(p_job_id uuid)` → jsonb                                                                                                                                                                      | job owner                                         | yes      |
+| `export_finish(p_job_id uuid, p_state text, p_storage_path text default null, p_row_count int default null, p_error text default null, p_file_name text default null, p_bytes bigint default null)` → jsonb | **service role**                                  | yes      |
+| `import_template(p_lang text default 'ar')` → jsonb                                                                                                                                                         | any signed-in user                                | no       |
+| `import_stage(p_meta jsonb, p_rows jsonb)` → jsonb                                                                                                                                                          | writers                                           | yes      |
+| `import_preview(p_batch_id uuid, p_after int default 0, p_limit int default 100, p_only text default null)` → jsonb                                                                                         | batch owner, hq_admin                             | no       |
+| `import_set_action(p_batch_id uuid, p_row_no int, p_action text, p_target_id uuid default null)` → jsonb                                                                                                    | batch owner                                       | yes      |
+| `import_commit(p_batch_id uuid)` → jsonb                                                                                                                                                                    | batch owner                                       | yes      |
+| `import_rollback(p_batch_id uuid)` → jsonb                                                                                                                                                                  | batch owner, hq_admin                             | yes      |
+| `refresh_reports()` → jsonb                                                                                                                                                                                 | **service role / cron**                           | yes      |
+| `photos_to_purge(p_limit int default 500)` → setof record                                                                                                                                                   | **service role**                                  | no       |
+| `mark_photos_purged(p_ids uuid[])` → int                                                                                                                                                                    | **service role**                                  | yes      |
 
 "Service role" = the request carries the service-role key (JWT `role = service_role`) or there is
 no JWT at all (pg_cron, migrations). `authenticated` has no `EXECUTE` on these functions.
@@ -52,18 +53,19 @@ Refreshed together by `refresh_reports()`; every view has a unique index and is 
 `CONCURRENTLY`. A missing country / branch / level-1 area is stored as the nil UUID
 (`private.nil_uuid()`) and returned as JSON `null`.
 
-| View | Grain | Measures |
-|---|---|---|
-| `mv_project_totals` | country, branch, level-1 area, type, status | `project_count`, `capacity_sum`, `draft_count`, `submitted_count`, `approved_count`, `returned_count` |
-| `mv_maintenance_open` | country, branch, priority, currency | `open_count`, `cost_sum` (states `open`, `in_progress`) |
-| `mv_maintenance_items` | one row per open maintenance entry | project code/names, priority, `priority_rank`, state, date, description, cost |
-| `mv_staff_roles` | country, branch, role | `assignment_count`, `person_count` (current assignments: `end_date` null or in the future) |
-| `mv_payroll` (restricted) | country, branch, currency | `staff_paid`, `monthly_total`, `usd_per_unit`, `rate_date`, `monthly_total_usd` |
-| `mv_needs` | country, branch | `quran_need`, `quran_count`, `quran_need_projects`, `teacher_housing_gaps`, `imam_housing_gaps`, `transport_needed`, `expandable_sites` |
-| `mv_completeness` | country, branch | `project_count`, `completeness_sum`, `incomplete_count` (< 100), `below_half_count` (< 50) |
-| `mv_entry_activity` | ISO week (UTC, Monday), user, country, branch — last 12 weeks | `created_count`, `updated_count` |
+| View                      | Grain                                                         | Measures                                                                                                                                |
+| ------------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `mv_project_totals`       | country, branch, level-1 area, type, status                   | `project_count`, `capacity_sum`, `draft_count`, `submitted_count`, `approved_count`, `returned_count`                                   |
+| `mv_maintenance_open`     | country, branch, priority, currency                           | `open_count`, `cost_sum` (states `open`, `in_progress`)                                                                                 |
+| `mv_maintenance_items`    | one row per open maintenance entry                            | project code/names, priority, `priority_rank`, state, date, description, cost                                                           |
+| `mv_staff_roles`          | country, branch, role                                         | `assignment_count`, `person_count` (current assignments: `end_date` null or in the future)                                              |
+| `mv_payroll` (restricted) | country, branch, currency                                     | `staff_paid`, `monthly_total`, `usd_per_unit`, `rate_date`, `monthly_total_usd`                                                         |
+| `mv_needs`                | country, branch                                               | `quran_need`, `quran_count`, `quran_need_projects`, `teacher_housing_gaps`, `imam_housing_gaps`, `transport_needed`, `expandable_sites` |
+| `mv_completeness`         | country, branch                                               | `project_count`, `completeness_sum`, `incomplete_count` (< 100), `below_half_count` (< 50)                                              |
+| `mv_entry_activity`       | ISO week (UTC, Monday), user, country, branch — last 12 weeks | `created_count`, `updated_count`                                                                                                        |
 
 Rules:
+
 - All non-deleted projects are counted whatever their `record_state`; the split by record state is
   in `totals.by_record_state`. Every view except `mv_payroll` also groups by `approved`
   (`record_state = 'approved'`, boolean) so that a viewer's dashboard / country report can sum the
@@ -97,6 +99,7 @@ gateway timer (local) with the service key. Other cron jobs created the same way
 
 Access: `global` needs a global role; `country` a global role or a role on that country;
 `branch` a global role, a role on the branch's country, or a role on that branch. Otherwise `PT403`.
+
 - `payroll` is present only when the caller has restricted access to the scope's country
   (`country_manager` of it or `hq_admin`, both at AAL2); each call that returns it writes one
   `restricted_access_log` row (`table_name = staff_compensation`, empty id list,
@@ -164,6 +167,7 @@ In `by_area` / `by_country` / `by_branch`, `maintenance` = projects whose **stat
 ## 3. Print / PDF data
 
 ### `report_project(p_id)`
+
 `PT404` when the project does not exist, is deleted, or is outside the caller's read scope.
 
 ```jsonc
@@ -190,6 +194,7 @@ In `by_area` / `by_country` / `by_branch`, `maintenance` = projects whose **stat
   "sensitive": { /* community_sensitive row */ } | null      // key ABSENT without restricted access
 }
 ```
+
 Photos are paths in bucket `photos`; lists must show the thumbnail and sign the full path on demand.
 Restricted reads are logged (`context = 'report_project:<id>'`).
 
@@ -203,6 +208,7 @@ and `null` in every person column (role, dates, `person_id` and — with restric
 salary of the assignment stay). Render it as "hidden person". `staff_count` counts all assignments.
 
 ### `report_donor(p_id)`
+
 `PT404` when the donor does not exist, is deleted, **or is not visible to the caller** — the rule of
 the RLS policy `donors_select`, `sync_pull` and `sync_push` (sync.md §5.5): global readers see every
 donor, everybody else the donors he created and the donors linked by a `project_donors` row to a
@@ -229,6 +235,7 @@ without any role. Only the donor's projects inside the caller's read scope are c
 ```
 
 ### `report_country(p_id)`
+
 Same access rule as `dashboard('country', p_id)` (`PT403` otherwise). Returns the complete
 `dashboard('country', …)` document **plus**:
 
@@ -240,6 +247,7 @@ Same access rule as `dashboard('country', p_id)` (`PT403` otherwise). Returns th
                 "expandable_sites", "completeness_average", "incomplete",
                 "payroll": { "by_currency": [ { "currency", "staff_paid", "monthly_total", "monthly_total_usd" } ], "monthly_total_usd" } } ]   // payroll only with restricted access
 ```
+
 Every branch of the country is listed (also empty ones); projects without a branch form a row with
 `branch_id: null`.
 
@@ -265,30 +273,64 @@ Flow driven by the `export` Edge Function:
    (or `'failed'` with `p_error`). That inserts the notification:
    - `kind = 'export.ready'`, payload `{ job_id, format, lang, bucket: "exports", storage_path, file_name, bytes, row_count, expires_at }`
    - `kind = 'export.failed'`, payload `{ job_id, format, lang, error }`
-   The client creates a signed URL for `storage_path` (own folder → allowed by the storage policy).
-   `export_finish(job, 'running')` may be used to count attempts. `export_cancel(job)` lets the owner stop a job
-   (the next `export_rows` call then fails with `PT409`).
+     The client creates a signed URL for `storage_path` (own folder → allowed by the storage policy).
+     `export_finish(job, 'running')` may be used to count attempts. `export_cancel(job)` lets the owner stop a job
+     (the next `export_rows` call then fails with `PT409`).
 
 `p_filters` (all optional, same keys as `projects_page`): `country_id`, `branch_id`,
 `admin_area_id` (descendants included), `locality_id`, `donor_id`, `type`, `status`, `record_state`
 (string or array), `q`, `incomplete`, `created_by_me`, `has_open_maintenance`, plus `ids`
-(array of project ids).
+(array of project ids) and `dataset` (migration 0073):
+
+| `dataset`                       | CSV                                                                                  | XLSX                                                                                                                                           |
+| ------------------------------- | ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `projects` (default, or absent) | projects table (`export_rows`)                                                       | sheet «المشاريع» + sheet «الكادر» / `Wafanyakazi` / `Staff` (`export_staff_rows`) when the caller has people scope (`staff_columns` not empty) |
+| `staff`                         | staff table alone (`export_staff_rows`), file `istiqama-staff-YYYYMMDD-xxxxxxxx.csv` | one sheet «الكادر»                                                                                                                             |
+
+A CSV file holds one table, so the staff table as CSV is its own job (`dataset = "staff"`); a ZIP of
+two CSV files was rejected because it would change the delivered format of every CSV export
+(brief §9: «CSV وXLSX»). `export_request` answers `PT422` for any other `dataset` value and `PT403`
+for `dataset = "staff"` without people scope (viewers). The staff sheet of a `projects` job covers
+exactly the job's projects (filters, scope and owner decision ح are evaluated once, in
+`private.export_job_project_ids`). When an XLSX workbook overflows the row limit the CSV fallback
+holds the main table only (`stats.fallback.staff_omitted = true`); `stats.staff_rows` counts the
+staff sheet.
 
 ### `export_columns(p_lang)`
+
 ```jsonc
-{ "lang": "ar", "dir": "rtl", "list_separator": " | ",
-  "capabilities": { "people": true, "restricted": false },
-  "columns": [ { "key": "code", "header": "رمز المشروع", "kind": "text" },
-               { "key": "type", "header": "النوع", "kind": "enum", "enum": "project_type" },
-               { "key": "land_expandable", "header": "قابلية التوسع", "kind": "boolean", "enum": "boolean" } ],
-  "enums": { "project_type": { "mosque": "مسجد", "school": "مدرسة قرآن", "combined": "مسجد ومدرسة" },
-             "project_status": { "active": "يعمل", "maintenance": "يحتاج صيانة", "building": "قيد الإنشاء", "inactive": "متوقف" },
-             "boolean": { "true": "نعم", "false": "لا" }, "…": {} } }
+{
+  "lang": "ar",
+  "dir": "rtl",
+  "list_separator": " | ",
+  "capabilities": { "people": true, "restricted": false, "staff": true },
+  "staff_columns": [
+    { "key": "role", "header": "الدور", "kind": "enum", "enum": "staff_role" },
+    "…",
+  ],
+  "columns": [
+    { "key": "code", "header": "رمز المشروع", "kind": "text" },
+    { "key": "type", "header": "النوع", "kind": "enum", "enum": "project_type" },
+    { "key": "land_expandable", "header": "قابلية التوسع", "kind": "boolean", "enum": "boolean" },
+  ],
+  "enums": {
+    "project_type": { "mosque": "مسجد", "school": "مدرسة قرآن", "combined": "مسجد ومدرسة" },
+    "project_status": {
+      "active": "يعمل",
+      "maintenance": "يحتاج صيانة",
+      "building": "قيد الإنشاء",
+      "inactive": "متوقف",
+    },
+    "boolean": { "true": "نعم", "false": "لا" },
+    "…": {},
+  },
+}
 ```
+
 `kind`: `text` | `integer` | `number` | `date` (`YYYY-MM-DD`) | `datetime` (ISO 8601) | `boolean` | `enum` | `list`
-(`list` = text already joined with ` | `). Enum keys: `project_type`, `project_status`, `record_state`,
+(`list` = text already joined with `|`). Enum keys: `project_type`, `project_status`, `record_state`,
 `location_source`, `land_ownership`, `student_transport`, `students_origin`, `maintenance_priority`,
-`maintenance_state`, `staff_role`, `guest_financial_capacity`, `boolean`.
+`maintenance_state`, `staff_role`, `guest_financial_capacity`, `gender`, `boolean`.
 Sw/en examples: `mosque` → `Msikiti` / `Mosque`; `active` → `Inafanya kazi` / `Active`.
 
 Column keys in order (the list returned to a caller contains only the groups it may see):
@@ -296,26 +338,45 @@ Column keys in order (the list returned to a caller contains only the groups it 
 - **all**: `code`, `name_ar`, `name_latin`, `type`, `status`, `record_state`, `capacity`, `country`, `country_iso2`,
   `area_level1`, `area_level2`, `area_level3`, `admin_area_code`, `locality`, `branch`, `lat`, `lon`, `gps_accuracy_m`,
   `location_source`, `builder`, `build_year`, `build_date`, `completeness`, `review_note`,
+  `migration_note`, `reviewed_at`,
   `land_ownership`, `land_owner_name`, `land_area_m2`, `land_utilization_pct`, `land_expandable`, `land_notes`,
   `teacher_housing`, `imam_housing`, `guest_housing`, `library`, `quran_count`, `quran_need`, `hall`, `hall_capacity`,
   `student_transport`, `students_origin`,
   `community_branch_name`, `population`, `muslim_pct`, `daawa_activities`, `social_features`, `livelihoods`,
   `religious_issues`, `religious_challenges`, `social_challenges`, `proposed_activities` (option names in the job
   language followed by the free "other" text),
-  `donors`, `maintenance_open`, `maintenance_total`, `maintenance_last_reported`, `maintenance_open_details`,
+  `donors`, `maintenance_open`, `maintenance_total`, `maintenance_closed` (done + cancelled entries:
+  the closed maintenance history), `maintenance_last_reported`, `maintenance_open_details`,
   `maintenance_open_cost`, `photo_count`, `staff_count`
-- **people** (not for viewers): `manager_name`, `manager_phone`, `staff_list`, `entered_by`
+- **people** (not for viewers): `manager_name`, `manager_phone`, `staff_list`, `entered_by`,
+  `reviewed_by` (name of the reviewer's account)
 - **restricted** (country_manager / hq_admin): `monthly_payroll` (per currency, e.g. `TZS 250000 | USD 100`),
   `monthly_payroll_usd`, `ibadi_families`, `omani_families`, `omani_student_pct`, `ibadi_student_pct`,
   `omani_teacher_pct`, `ibadi_teacher_pct`, `guest_financial_capacity`
 - **all** (last): `external_id`, `id`, `created_at`, `updated_at`
 
 ### `export_rows(p_job_id, p_after, p_limit)`
+
 ```jsonc
-{ "job_id": "…", "count": 1000, "done": false, "next": { "id": "<last project id>" },
-  "rows": [ { "code": "TZ-PN-000001", "type": "mosque", "status": "active", "land_expandable": true,
-              "country": "تنزانيا", "staff_list": "… (إمام) | … (معلم)", "…": "one key per column" } ] }
+{
+  "job_id": "…",
+  "count": 1000,
+  "done": false,
+  "next": { "id": "<last project id>" },
+  "rows": [
+    {
+      "code": "TZ-PN-000001",
+      "type": "mosque",
+      "status": "active",
+      "land_expandable": true,
+      "country": "تنزانيا",
+      "staff_list": "… (إمام) | … (معلم)",
+      "…": "one key per column",
+    },
+  ],
+}
 ```
+
 - Rows are ordered by project id (UUIDv7 = creation order). `next` is `null` on the last page.
 - Enum columns carry the **code**, booleans JSON booleans (translate with `export_columns().enums`);
   names of countries / areas / branches / option values, staff roles and maintenance priorities
@@ -331,6 +392,52 @@ Column keys in order (the list returned to a caller contains only the groups it 
 - Restricted pages are logged (`context = 'export:<job id>'`, ids of the compensation / sensitive rows read).
 - Rate limit 600 calls / minute.
 
+### `export_staff_rows(p_job_id, p_after, p_limit)` (migration 0073)
+
+```jsonc
+{
+  "job_id": "…",
+  "count": 1000,
+  "done": false,
+  "next": { "project_id": "…", "staff_id": "…" }, // staff_id null = after that whole project
+  "rows": [
+    {
+      "project_code": "TZ-PN-000001",
+      "role": "imam",
+      "gender": "male",
+      "phone": "+255700000001",
+      "salary_amount": 250000,
+      "salary_currency": "TZS",
+      "salary_effective_from": "2024-01-01",
+      "salary_usd": 100,
+      "…": "one key per staff column",
+    },
+  ],
+}
+```
+
+- One row per **current** assignment (`project_staff` live, `end_date` null or not past, person
+  live) of the job's projects that lie in the caller's **people** scope (`project_staff_select`).
+  Ordered by (project id, assignment id). A page may hold fewer rows than `p_limit`, even none,
+  while `done = false` (projects without staff are skipped page by page): follow `next`.
+- Staff columns (`export_columns().staff_columns`, ar / sw / en headers): `project_code`,
+  `project_name` (Arabic name for `ar`, Latin name otherwise, with fallback), `country`, `branch`,
+  `person_name_ar`, `person_name_latin`, `role` (enum `staff_role`), `start_date`, `end_date`,
+  `gender` (enum `gender`), `birth_year`, `birth_date`, `education_level`, `graduated_from`,
+  `home_area_level1..3` (names of the person's home admin area chain in the job language),
+  `home_area_text`, `phone`; **restricted**: `salary_amount`, `salary_currency`,
+  `salary_effective_from`, `salary_usd` (current compensation = latest `effective_from <= today`;
+  USD through the latest `fx_rates` row, `null` without a rate); last: `person_id`, `staff_id`,
+  `project_id`.
+- Person fields follow the **person's** scope (`persons_select`): outside it `person_name_ar = "?"`,
+  the other person fields and `person_id` are `null`, and `phone` is masked
+  (`private.mask_phone`, the rule of `person_candidates`).
+- Salary keys exist only for callers with restricted access somewhere and are filled only for
+  projects in the restricted scope; every page with salaries is logged
+  (`private.log_restricted('staff_compensation', ids, 'export:<job id>')`).
+- Without people scope: an empty `done` page. `PT404` / `PT409` as `export_rows`. Rate limit
+  600 calls / minute (`export_staff_rows`).
+
 ---
 
 ## 5. Import
@@ -340,6 +447,7 @@ an array of row objects and calls `import_stage` **with the caller's JWT**; ever
 called by the web app.
 
 ### `import_template(p_lang)`
+
 ```jsonc
 { "version": 1, "lang": "ar", "dir": "rtl", "max_rows": 5000, "list_separator": "|", "date_format": "YYYY-MM-DD",
   "merge_key": "external_id",
@@ -348,7 +456,8 @@ called by the web app.
                  "allowed": [ { "code": "mosque", "label": "مسجد" }, … ],      // enum, boolean and list columns
                  "min": 0, "max": 100 } ] }                                     // numeric columns
 ```
-Columns: `external_id`, `name_ar`*, `name_latin`, `type`*, `status`, `capacity`, `lat`*, `lon`*, `gps_accuracy_m`,
+
+Columns: `external_id`, `name_ar`_, `name_latin`, `type`_, `status`, `capacity`, `lat`_, `lon`_, `gps_accuracy_m`,
 `country`* (ISO code or name), `area` (admin-area code or name), `locality` (name), `branch` (code or name),
 `builder`, `build_year`, `build_date`, `land_ownership`, `land_owner_name`, `land_area_m2`, `land_utilization_pct`,
 `land_expandable`, `land_notes`, `teacher_housing`, `imam_housing`, `guest_housing`, `library`, `quran_count`,
@@ -358,6 +467,7 @@ Columns: `external_id`, `name_ar`*, `name_latin`, `type`*, `status`, `capacity`,
 Staff, salaries and sensitive community data are deliberately **not importable**.
 
 ### `import_stage(p_meta, p_rows)`
+
 `p_rows`: JSON array (1…5,000) of objects `header → cell`. A header may be the column `key` or its
 header in **any** of the three languages (normalised comparison); `country_iso2` and
 `admin_area_code` are accepted as aliases, so an exported file can be re-imported. Unknown headers
@@ -373,6 +483,7 @@ numbers may use Arabic-Indic digits; dates `YYYY-MM-DD` or `DD/MM/YYYY`; list ce
 Access: `PT403` unless the caller has a writer role; 30 batches / hour.
 
 Validation per row:
+
 - required cells (new records), enumerations, numbers and ranges, dates, coordinates;
 - country: from the point (admin boundary containing it), else the `country` cell, else the batch
   default, else the caller's only writable country;
@@ -380,7 +491,7 @@ Validation per row:
   is a **warning** (`point_outside_area`, `point_outside_country`) — the point wins;
 - `branch`: the cell, else the batch default, else the caller's only branch in that country, else
   the only branch whose `admin_area_ids` cover the area;
-- `locality`: matched by name inside the country, otherwise a *proposed* locality is created on commit
+- `locality`: matched by name inside the country, otherwise a _proposed_ locality is created on commit
   (warning `locality_new`). Only done in a country whose localities the caller may read
   (`localities_select`); a row in any other country is `out_of_scope` anyway and gets neither a
   `locality_id` nor `locality_new`;
@@ -412,33 +523,59 @@ warnings `possible_duplicate` (+ `candidates`: first 5 results of `project_dupli
 `area_not_found`, `donor_details_without_name`.
 
 Summary (returned by `import_stage`, and the base of every other import response):
+
 ```jsonc
-{ "batch_id": "…", "state": "validated", "source_kind": "csv", "file_name": "…", "row_count": 4,
-  "counts": { "total": 4, "valid": 1, "invalid": 2, "duplicate": 1, "with_warnings": 2,
-              "create": 1, "update": 0, "skip": 1,                       // what a commit would do now
-              "applied_created": 0, "applied_updated": 0, "skipped": 0, "reverted": 0 },
-  "ignored_columns": [ "unknown column" ],
-  "first_errors": [ { "row_no": 2, "errors": [ { "field": "type", "code": "invalid_value", "message": "…" } ] } ],   // first 20 invalid rows
-  "committed_at": null, "rolled_back_at": null }
+{
+  "batch_id": "…",
+  "state": "validated",
+  "source_kind": "csv",
+  "file_name": "…",
+  "row_count": 4,
+  "counts": {
+    "total": 4,
+    "valid": 1,
+    "invalid": 2,
+    "duplicate": 1,
+    "with_warnings": 2,
+    "create": 1,
+    "update": 0,
+    "skip": 1, // what a commit would do now
+    "applied_created": 0,
+    "applied_updated": 0,
+    "skipped": 0,
+    "reverted": 0,
+  },
+  "ignored_columns": ["unknown column"],
+  "first_errors": [
+    { "row_no": 2, "errors": [{ "field": "type", "code": "invalid_value", "message": "…" }] },
+  ], // first 20 invalid rows
+  "committed_at": null,
+  "rolled_back_at": null,
+}
 ```
 
 ### `import_preview(p_batch_id, p_after, p_limit, p_only)`
+
 Summary + `"rows": [ { "row_no", "state", "action", "external_id", "errors", "warnings", "duplicate_of", "target_id", "raw", "parsed" } ]`
-+ `"next": <row_no> | null`. Keyset by `row_no` (`p_after` = last row number seen, start with 0), max 500 per page.
-`p_only`: `invalid` | `duplicate` | `valid` | `warnings` | `create` | `update` | `skip`.
-`parsed` = `{ project: {… resolved ids, lon, lat …}, land?, facilities?, community?, locality_new?, donor?, maintenance?,
+
+- `"next": <row_no> | null`. Keyset by `row_no` (`p_after` = last row number seen, start with 0), max 500 per page.
+  `p_only`: `invalid` | `duplicate` | `valid` | `warnings` | `create` | `update` | `skip`.
+  `parsed` = `{ project: {… resolved ids, lon, lat …}, land?, facilities?, community?, locality_new?, donor?, maintenance?,
 given: ["<template keys that had a cell>"], dup_place? }` (`given` / `dup_place` are internal).
 
 ### `import_set_action(p_batch_id, p_row_no, p_action, p_target_id)`
+
 Only while the batch is `validated`; invalid rows cannot be changed (`PT422`).
+
 - `skip` — leave the row out;
 - `create` — force a duplicate ("different project");
 - `update` — merge into `p_target_id` (default: the row's `target_id` or `duplicate_of`) — "it is the same one".
   Needs the right to update the target (`PT403` otherwise); the merge writes only the cells of the
   file (defaults such as status `active` or the default branch are not applied).
-Returns the row (`row_no`, `state`, `action`, `errors`, `warnings`, `duplicate_of`, `target_id`).
+  Returns the row (`row_no`, `state`, `action`, `errors`, `warnings`, `duplicate_of`, `target_id`).
 
 ### `import_commit(p_batch_id)`
+
 All-or-nothing. New projects: `record_state = 'draft'`, `location_source = 'import'`,
 `import_batch_id = batch`, created by the caller; child rows (`project_land`, `project_facilities`,
 `community_profiles`), donor link and maintenance entry are created when the row has such cells.
@@ -447,22 +584,26 @@ The donor of `parsed.donor` is re-checked at commit time: if it is no longer vis
 among the visible donors, else a new donor is created.
 Updates write **only the cells present in the file** (per field), never touch `record_state`, and
 store `import_rows.pre_image`:
+
 ```jsonc
 { "projects": { "id": "…", "before": { "capacity": 120 }, "after": { "capacity": 150 } },   // changed columns only (lon/lat for the point)
   "project_land": { "id": "…", "before": {…}, "after": {…} } | { "id": "…", "created": true },
   "project_facilities": …, "community_profiles": …,
   "created": { "project_donors": ["…"], "project_maintenance": ["…"] } }
 ```
+
 Response: summary + `"committed": true`. When a row fails at commit time nothing is written,
 the row becomes `invalid` with a `commit_failed` error and the response is
 summary + `{ "committed": false, "failed_row": 17, "error": { "code": "<sqlstate>", "message": "…" } }`
 (HTTP 200) — fix or skip the row and commit again. 30 commits / hour.
 
 ### `import_rollback(p_batch_id)`
+
 Only for a `committed` batch (owner or hq_admin).
+
 - **Rights are re-checked at rollback time, per record**, with the commit's rule
   (`private.import_can_update`): reviewers of the record's scope (hq_admin: every record), or its
-  creator inside the caller's *current* write scope while the record is not approved. The rights the
+  creator inside the caller's _current_ write scope while the record is not approved. The rights the
   importer had at commit time do not carry over. A row whose record the caller may no longer change
   (role removed, record moved to another branch, or — for a collector — record approved since) is
   left as it is: the row stays `applied` and is counted in `kept` **and** in `no_access`. The batch
@@ -494,6 +635,7 @@ photos_to_purge(p_limit int default 500)        -- max 5000
   → [ { id, project_id, bucket: "photos", storage_path_full, storage_path_thumb, deleted_at } ]
 mark_photos_purged(p_ids uuid[]) → int           -- rows stamped
 ```
+
 A photo is returned when `purged_at is null` and either the photo itself or its project was
 soft-deleted **more than 90 days ago**; oldest first. After removing both objects from storage the
 function calls `mark_photos_purged` (eligibility is re-checked; it sets `purged_at` and, for photos of

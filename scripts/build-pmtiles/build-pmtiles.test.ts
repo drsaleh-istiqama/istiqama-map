@@ -52,7 +52,12 @@ describe('PMTiles writer', () => {
     );
     const reader = new PMTiles(new BufferSource(archive), undefined, nodeDecompress);
     const header = await reader.getHeader();
-    expect(header).toMatchObject({ minZoom: 0, maxZoom: 9, numAddressedTiles: 4, numTileContents: 3 });
+    expect(header).toMatchObject({
+      minZoom: 0,
+      maxZoom: 9,
+      numAddressedTiles: 4,
+      numTileContents: 3,
+    });
     expect(header.minLon).toBeCloseTo(39);
     expect(new Uint8Array((await reader.getZxy(5, 20, 16))!.data)).toEqual(tile(2));
     expect(new Uint8Array((await reader.getZxy(9, 312, 263))!.data)).toEqual(tile(3, 4000));
@@ -74,11 +79,14 @@ describe('PMTiles writer', () => {
       const x = rnd(16384);
       const y = rnd(16384);
       const n = tiles.size;
-      const data = Uint8Array.from({ length: 4 + (n % 97) }, (_, i) => (n >> (i % 3) * 8) & 0xff);
+      const data = Uint8Array.from({ length: 4 + (n % 97) }, (_, i) => (n >> ((i % 3) * 8)) & 0xff);
       tiles.set(`${x}/${y}`, { z: 14, x, y, data });
     }
     const list = [...tiles.values()];
-    const archive = buildArchive(list, { tileCompression: COMPRESSION.none, bounds: [-180, -85, 180, 85] });
+    const archive = buildArchive(list, {
+      tileCompression: COMPRESSION.none,
+      bounds: [-180, -85, 180, 85],
+    });
     const header = parseHeader(archive.subarray(0, 127));
     expect(header.leafDirectoryLength).toBeGreaterThan(0);
     expect(header.rootDirectoryOffset + header.rootDirectoryLength).toBeLessThanOrEqual(16384);
@@ -151,7 +159,14 @@ describe('command line', () => {
 
   it('refuses a remote source unless explicitly allowed', () => {
     expect(() =>
-      parseOptions(['--country', 'TZ', '--area', 'PN', '--source', 'https://build.protomaps.com/20261003.pmtiles']),
+      parseOptions([
+        '--country',
+        'TZ',
+        '--area',
+        'PN',
+        '--source',
+        'https://build.protomaps.com/20261003.pmtiles',
+      ]),
     ).toThrow(/--allow-remote/);
     expect(
       parseOptions([
@@ -165,8 +180,12 @@ describe('command line', () => {
 
   it('validates values and required options', () => {
     expect(() => parseOptions(['--area', 'PN'])).toThrow(UsageError);
-    expect(() => parseOptions(['--country', 'TZ', '--area', 'PN', '--maxzoom', '20'])).toThrow(/maxzoom/);
-    expect(() => parseOptions(['--country', 'TZ', '--area', 'PN', '--code', 'a b'])).toThrow(/code/);
+    expect(() => parseOptions(['--country', 'TZ', '--area', 'PN', '--maxzoom', '20'])).toThrow(
+      /maxzoom/,
+    );
+    expect(() => parseOptions(['--country', 'TZ', '--area', 'PN', '--code', 'a b'])).toThrow(
+      /code/,
+    );
     expect(() => parseOptions(['--country', 'TZ', '--area', 'PN', '--bogus'])).toThrow(/unknown/);
     expect(parseOptions(['list', '--country', 'KE', '--level', '2'])).toMatchObject({
       command: 'list',
@@ -180,10 +199,25 @@ describe('command line', () => {
 
   it('passes the region file and zoom range to pmtiles extract', () => {
     expect(
-      extractArgs({ tool: 'pmtiles', source: 's.pmtiles', out: 'o.pmtiles', regionFile: 'r.geojson', minZoom: 0, maxZoom: 13 }),
+      extractArgs({
+        tool: 'pmtiles',
+        source: 's.pmtiles',
+        out: 'o.pmtiles',
+        regionFile: 'r.geojson',
+        minZoom: 0,
+        maxZoom: 13,
+      }),
     ).toEqual(['extract', 's.pmtiles', 'o.pmtiles', '--region=r.geojson', '--maxzoom=13']);
     expect(
-      extractArgs({ tool: 'p', source: 's', out: 'o', bbox: [1, 2, 3, 4], minZoom: 2, maxZoom: 9, dryRun: true }),
+      extractArgs({
+        tool: 'p',
+        source: 's',
+        out: 'o',
+        bbox: [1, 2, 3, 4],
+        minZoom: 2,
+        maxZoom: 9,
+        dryRun: true,
+      }),
     ).toEqual(['extract', 's', 'o', '--bbox=1,2,3,4', '--maxzoom=9', '--minzoom=2', '--dry-run']);
   });
 });
@@ -208,9 +242,15 @@ const AREA: AreaRow = {
 describe('pack rows', () => {
   it('names packs after the area and stores them under packs/<ISO2>/', () => {
     expect(packCode(AREA)).toBe('TZ-PN');
-    expect(packCode({ ...AREA, level: 2, short_code: null, parent_short_code: 'PN', name_en: 'Wete District' })).toBe(
-      'TZ-PN-WETE-DISTRICT',
-    );
+    expect(
+      packCode({
+        ...AREA,
+        level: 2,
+        short_code: null,
+        parent_short_code: 'PN',
+        name_en: 'Wete District',
+      }),
+    ).toBe('TZ-PN-WETE-DISTRICT');
     expect(packCode({ ...AREA, short_code: null, name_en: 'São Tomé' })).toBe('TZ-SAO-TOME');
     expect(packStoragePath('tz', 'TZ-PN')).toBe('packs/TZ/TZ-PN.pmtiles');
     expect(encodePath('packs/TZ/a b.pmtiles')).toBe('packs/TZ/a%20b.pmtiles');
@@ -218,10 +258,16 @@ describe('pack rows', () => {
 
   it('builds the map_packs row: three names, bytes, bbox, zoom range, sha256', () => {
     const header = parseHeader(
-      buildArchive([{ z: 4, x: 9, y: 8, data: tile(1) }, { z: 13, x: 4996, y: 4210, data: tile(2) }], {
-        tileCompression: COMPRESSION.none,
-        bounds: [39, -6, 40, -4],
-      }),
+      buildArchive(
+        [
+          { z: 4, x: 9, y: 8, data: tile(1) },
+          { z: 13, x: 4996, y: 4210, data: tile(2) },
+        ],
+        {
+          tileCompression: COMPRESSION.none,
+          bounds: [39, -6, 40, -4],
+        },
+      ),
     );
     const row = mapPackRow({
       area: AREA,
@@ -251,23 +297,42 @@ describe('pack rows', () => {
       sha256: 'ab'.repeat(32),
       active: true,
     });
-    expect(mapPackRow({ area: { ...AREA, name_ar: null }, code: 'X', storagePath: 'p', bytes: 1, sha256: 's', header, tilesVersion: null }).name_ar).toBe(
-      'North Pemba',
-    );
+    expect(
+      mapPackRow({
+        area: { ...AREA, name_ar: null },
+        code: 'X',
+        storagePath: 'p',
+        bytes: 1,
+        sha256: 's',
+        header,
+        tilesVersion: null,
+      }).name_ar,
+    ).toBe('North Pemba');
   });
 
   it('upserts by code and revives a soft-deleted pack', async () => {
     const calls: Array<{ sql: string; params: unknown[] }> = [];
     const db: Queryable = {
-      query: async <T,>(sql: string, params: unknown[] = []) => {
+      query: async <T>(sql: string, params: unknown[] = []) => {
         calls.push({ sql, params });
         return { rows: [{ id: 'pack-1' }] as T[] };
       },
     };
     const header = parseHeader(
-      buildArchive([{ z: 0, x: 0, y: 0, data: tile(1) }], { tileCompression: 1, bounds: [0, 0, 1, 1] }),
+      buildArchive([{ z: 0, x: 0, y: 0, data: tile(1) }], {
+        tileCompression: 1,
+        bounds: [0, 0, 1, 1],
+      }),
     );
-    const row = mapPackRow({ area: AREA, code: 'TZ-PN', storagePath: 'p', bytes: 1, sha256: 's', header, tilesVersion: null });
+    const row = mapPackRow({
+      area: AREA,
+      code: 'TZ-PN',
+      storagePath: 'p',
+      bytes: 1,
+      sha256: 's',
+      header,
+      tilesVersion: null,
+    });
     expect(await upsertMapPack(db, row)).toBe('pack-1');
     expect(calls[0]!.sql).toMatch(/on conflict \(code\) do update set .*deleted_at = null/s);
     expect(calls[0]!.sql).not.toMatch(/code = excluded\.code/);
