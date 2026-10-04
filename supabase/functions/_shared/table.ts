@@ -26,7 +26,9 @@ export interface TableObjects {
 function charClass(codes: Array<number | [number, number]>): string {
   return codes
     .map((c) =>
-      Array.isArray(c) ? `\\u{${c[0].toString(16)}}-\\u{${c[1].toString(16)}}` : `\\u{${c.toString(16)}}`,
+      Array.isArray(c)
+        ? `\\u{${c[0].toString(16)}}-\\u{${c[1].toString(16)}}`
+        : `\\u{${c.toString(16)}}`,
     )
     .join('');
 }

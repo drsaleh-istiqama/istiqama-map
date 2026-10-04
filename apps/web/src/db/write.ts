@@ -10,6 +10,8 @@
  *   - updates of a synced row are ONE update: union of the fields, earliest `base_version`;
  *   - an operation that was ever handed to the transport (`attempts > 0`) is frozen — the
  *     server may have applied it under its `op_id` — so later edits get a new operation;
+ *   - an edit is folded only into an operation of the same user (operations are pushed
+ *     under the identity of the user who queued them);
  *   - two `record_state` transitions of a synced project are never folded into one;
  *   - an edit that points to a row created later in the queue (e.g. a new locality) gets its
  *     own operation behind that row, so a parent always precedes its children;
@@ -22,10 +24,17 @@ import {
   completenessChildren,
   decorate,
   invalidateDeriveCaches,
+  refreshLocalityProjects,
   refreshProjects,
   type StoredProject,
 } from './derive';
-import { db, type DeleteSnapshot, type FailedOp, type OutboxOp, type RestrictedLocalRecord } from './dexie';
+import {
+  db,
+  type DeleteSnapshot,
+  type FailedOp,
+  type OutboxOp,
+  type RestrictedLocalRecord,
+} from './dexie';
 import { getLocalSession, type LocalSession } from './meta';
 import {
   COMPLETENESS_CHILD_TABLES,
@@ -85,7 +94,8 @@ export interface LocalHit {
 export async function findLocal(table: TableName, id: string): Promise<LocalHit | undefined> {
   if (tableDef(table).restricted) {
     const rec = await db.restricted_local.get(id);
-    if (rec && rec.table === table) return { row: rec.row as unknown as AnyRecord, where: 'restricted_local' };
+    if (rec && rec.table === table)
+      return { row: rec.row as unknown as AnyRecord, where: 'restricted_local' };
   }
   const row = (await db.table(table).get(id)) as AnyRecord | undefined;
   return row ? { row, where: 'store' } : undefined;
@@ -142,7 +152,10 @@ export async function afterChildChange(table: TableName, projectId: string | nul
  *   project_staff  → its compensation rows
  *   project_photos → its stored blobs
  */
-export async function removeLocalRow(table: TableName, id: string): Promise<DeleteSnapshot | undefined> {
+export async function removeLocalRow(
+  table: TableName,
+  id: string,
+): Promise<DeleteSnapshot | undefined> {
   const hit = await findLocal(table, id);
   const snapshot: DeleteSnapshot = { row: hit?.row ?? { id } };
   const children: NonNullable<DeleteSnapshot['children']> = {};
@@ -190,7 +203,11 @@ export async function removeLocalRow(table: TableName, id: string): Promise<Dele
 
   if (Object.keys(children).length > 0) snapshot.children = children;
   if (restricted.length > 0) snapshot.restricted = restricted;
-  return hit ? snapshot : Object.keys(children).length > 0 || restricted.length > 0 ? snapshot : undefined;
+  return hit
+    ? snapshot
+    : Object.keys(children).length > 0 || restricted.length > 0
+      ? snapshot
+      : undefined;
 }
 
 // ---------------------------------------------------------------------------------------
@@ -283,7 +300,8 @@ function checkPoint(def: SyncTableDef, row: AnyRecord): void {
   const lon = row.lon ?? null;
   const lat = row.lat ?? null;
   if (lon === null && lat === null) return;
-  if (!isValidLonLat({ lon, lat })) throw new DbError('invalid_coordinates', `${String(lon)}, ${String(lat)}`);
+  if (!isValidLonLat({ lon, lat }))
+    throw new DbError('invalid_coordinates', `${String(lon)}, ${String(lat)}`);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -326,7 +344,12 @@ export async function mutate<T extends TableName>(
   });
 }
 
-async function insertRow(def: SyncTableDef, id: string, changes: AnyRecord, session: LocalSession): Promise<void> {
+async function insertRow(
+  def: SyncTableDef,
+  id: string,
+  changes: AnyRecord,
+  session: LocalSession,
+): Promise<void> {
   const table = def.name;
   if (!canPush(table, 'insert')) throw new DbError('table_not_writable', table);
   const nowMs = Date.now();
@@ -359,9 +382,16 @@ async function insertRow(def: SyncTableDef, id: string, changes: AnyRecord, sess
   if (table === 'projects') {
     const p = row as unknown as StoredProject;
     p._u = nowMs;
-    p._cmp = completenessScore(p, { photos: false, land: false, facilities: false, staff: false, community: false });
+    p._cmp = completenessScore(p, {
+      photos: false,
+      land: false,
+      facilities: false,
+      staff: false,
+      community: false,
+    });
   }
-  const where: LocalHit['where'] = def.restricted && !session.canSeeRestricted ? 'restricted_local' : 'store';
+  const where: LocalHit['where'] =
+    def.restricted && !session.canSeeRestricted ? 'restricted_local' : 'store';
   await putLocal(table, row, where, projectId);
   await db.outbox.add({
     op_id: uuidv7(),
@@ -391,7 +421,11 @@ function crossesStateTransition(table: TableName, last: OutboxOp, diff: AnyRecor
 }
 
 /** True when the edit points to a row whose insert is queued behind `last`. */
-async function referencesLaterRow(def: SyncTableDef, last: OutboxOp, diff: AnyRecord): Promise<boolean> {
+async function referencesLaterRow(
+  def: SyncTableDef,
+  last: OutboxOp,
+  diff: AnyRecord,
+): Promise<boolean> {
   for (const [col, refTable] of Object.entries(def.refs)) {
     const refId = diff[col];
     if (typeof refId !== 'string') continue;
@@ -399,6 +433,25 @@ async function referencesLaterRow(def: SyncTableDef, last: OutboxOp, diff: AnyRe
     if (refOps.some((o) => (o.seq ?? 0) > (last.seq ?? 0) && isInsertOp(o))) return true;
   }
   return false;
+}
+
+/**
+ * Fields of a blind write of a restricted row (sync.md §4.4): every writable column that has a
+ * value (natural key and parent included), `created_at` of the row (validated as an insert),
+ * and an explicit null for a field the user just cleared — the op may land on an existing row,
+ * where an omitted field would keep its old value.
+ */
+function blindRowFields(def: SyncTableDef, row: AnyRecord, diff: AnyRecord): AnyRecord {
+  const writable = writableColumns(def.name);
+  const fields: AnyRecord = {};
+  for (const c of def.columns) {
+    if (!writable.has(c)) continue;
+    const v = row[c];
+    if (v !== null && v !== undefined) fields[c] = v;
+    else if (c in diff) fields[c] = null;
+  }
+  if (typeof row.created_at === 'string') fields.created_at = row.created_at;
+  return fields;
 }
 
 async function updateRow(
@@ -431,13 +484,49 @@ async function updateRow(
   const next: AnyRecord = { ...current, ...diff, _dirty: 1 };
   const projectId = await projectIdOf(table, next);
 
+  // Operations are pushed under the identity of the user who queued them (the engine never
+  // pushes another user's work), so an edit is never folded into somebody else's operation.
+  const mine = (op: Pick<OutboxOp, 'user_id'>): boolean => (op.user_id ?? null) === session.userId;
+
   // A rejected operation proves the server stored nothing, so its content may be changed:
   // editing a row that "needs attention" folds the rejected operations into the new one.
-  const failed = (await failedOpsForRow(table, id)).filter((f) => f.kind === 'upsert');
+  const failed = (await failedOpsForRow(table, id)).filter((f) => f.kind === 'upsert' && mine(f));
   const ops = await opsForRow(table, id);
   const last = ops[ops.length - 1];
 
-  if (failed.length > 0) {
+  if (hit.where === 'restricted_local') {
+    // Blind write (sync.md §4.4): the server addresses the row by its natural key and answers
+    // without row_id / version, so EVERY op carries the complete row, shaped like an insert —
+    // also an edit made while the insert is in flight. Never a diff.
+    const fields = blindRowFields(def, next, diff);
+    if (failed.length > 0) {
+      await db.failed_ops.bulkDelete(failed.map((f) => f.id!));
+      delete next._failed;
+    }
+    if (
+      last &&
+      last.kind === 'upsert' &&
+      last.state === 'pending' &&
+      last.attempts === 0 &&
+      mine(last)
+    ) {
+      await db.outbox.update(last.seq!, { fields, base_version: 0 });
+    } else {
+      await db.outbox.add({
+        op_id: uuidv7(),
+        table,
+        row_id: id,
+        kind: 'upsert',
+        base_version: 0,
+        fields,
+        state: 'pending',
+        attempts: 0,
+        created_at: new Date(nowMs).toISOString(),
+        project_id: projectId,
+        user_id: session.userId,
+      });
+    }
+  } else if (failed.length > 0) {
     let fields: AnyRecord = {};
     let before: AnyRecord = {};
     let base = typeof current.version === 'number' ? current.version : 0;
@@ -474,6 +563,7 @@ async function updateRow(
     last.kind === 'upsert' &&
     last.state === 'pending' &&
     last.attempts === 0 &&
+    mine(last) &&
     !crossesStateTransition(table, last, diff) &&
     !(await referencesLaterRow(def, last, diff))
   ) {
@@ -517,6 +607,9 @@ async function updateRow(
   }
   await putLocal(table, next, hit.where, projectId);
   await afterChildChange(table, projectId);
+  // The search tokens of a project include the names of its locality.
+  if (table === 'localities' && ('name_ar' in diff || 'name_latin' in diff))
+    await refreshLocalityProjects([id]);
 }
 
 // ---------------------------------------------------------------------------------------

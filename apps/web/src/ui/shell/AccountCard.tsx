@@ -47,7 +47,8 @@ export function AccountCard({ onNavigate }: { onNavigate?: () => void }) {
         {summary.initial || '?'}
       </span>
       <span class="account__text">
-        <strong class="account__name" data-testid="account-name">
+        {/* dir="auto": an Arabic name keeps its own direction (and its ellipsis) in the LTR interface, and vice versa */}
+        <strong class="account__name" data-testid="account-name" dir="auto">
           {summary.name || t('common.unnamedUser')}
         </strong>
         <span class="account__role" data-testid="account-role">

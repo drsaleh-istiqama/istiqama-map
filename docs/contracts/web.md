@@ -7,8 +7,13 @@ folder (`schema.md`, `sync.md`, `authz.md`, `geo-search-tiles.md`, `people-admin
 
 ## 1. Stack and rules
 
-- Preact 10 + `@preact/signals`, TypeScript `strict` + `noUncheckedIndexedAccess`, Vite,
+- Preact 11 + `@preact/signals` 2, TypeScript `strict` + `noUncheckedIndexedAccess`, Vite 8,
   `vite-plugin-pwa` (`injectManifest`, service worker source `src/sw.ts`).
+- `src/contract.typecheck.ts` re-states §3 as type assertions: `tsc` (typecheck, build) fails
+  when a module drops a name or changes a shape incompatibly. Additive changes are allowed;
+  change that file together with this contract.
+- `npm run size -w apps/web` (after a build) reports the gzip size of every chunk and fails
+  when the initial JS (entry + modulepreloads + their static imports) exceeds 200 kB.
 - JSX runtime: `preact` (`jsxImportSource: "preact"`). Function components + hooks only.
 - **Initial JS ≤ 200 kB gzip.** Everything below is a lazy chunk (dynamic `import()`):
   MapLibre + PMTiles + RTL-text plugin, `xlsx`, Sentry, every route view except the shell and
@@ -26,8 +31,11 @@ folder (`schema.md`, `sync.md`, `authz.md`, `geo-search-tiles.md`, `people-admin
   `unicode-bidi: isolate`. Colour contrast AA. Corporate palette: navy `#0f2545`, gold
   `#c8a24a`, background `#f6f7f9`, text `#1b2433`; status colours: active `#1f7a4d`,
   maintenance `#b54708`, building `#175cd3`, inactive `#667085`.
-- `localStorage` is allowed only through `src/lib/prefs.ts` (UI preferences: language,
-  per-view filters, Wi-Fi-only flag, dismissed hints). All data lives in IndexedDB (Dexie).
+- `localStorage` is allowed only through `src/lib/prefs.ts` (UI preferences: language
+  `locale`, per-view filters `filters.*`, Wi-Fi-only flag `sync.wifiOnly`, dismissed hints;
+  keys are namespaced by module). All data lives in IndexedDB (Dexie).
+- Without a connection (`navigator.onLine === false`) no module starts a request: cached data
+  stays in use and the refresh runs on the `online` event (an offline unlock is silent).
 - Every interactive element has a stable `data-testid` (kebab-case, listed per feature below).
 - Accessibility: keyboard operable, visible focus, `aria-current="page"` on active nav item,
   dialogs trap focus and restore it, form errors linked with `aria-describedby`,
@@ -38,24 +46,24 @@ folder (`schema.md`, `sync.md`, `authz.md`, `geo-search-tiles.md`, `people-admin
 
 ## 2. Directory ownership
 
-| Path | Contents |
-|---|---|
-| `src/main.tsx`, `src/app.tsx`, `src/routes.ts`, `src/env.ts`, `src/version.ts`, `index.html`, `vite.config.ts`, `src/sw.ts`, `public/` | shell, routing, PWA |
-| `src/lib/` | pure utilities (`uuidv7`, `normalize`, `geo`, `similarity`, `csv`, `prefs`, `debounce`, `completeness`) |
-| `src/i18n/` | `t`, locale switching, direction, `Intl` formatters, `pickName` |
-| `src/ui/` | design tokens and shared components |
-| `src/db/` | Dexie schema, row types, repositories, local search |
-| `src/sync/` | engine, outbox, push/pull, transport, photo upload queue, status |
-| `src/auth/` | Supabase client, session, login, MFA, PIN lock, capability flags |
-| `src/photos/` | compression, EXIF, photo editor component, thumbnail/full image loading |
-| `src/map/` | MapLibre view, layers, picker, locate, offline packs |
-| `src/projects/` | form, details, register list, maintenance view, incomplete list, review queue |
-| `src/people/` | directory, candidate picker, merge UI |
-| `src/reports/` | dashboard, heat-map toggles, print/PDF views, export |
-| `src/import/` | CSV/XLSX import wizard, template |
-| `src/migration/` | v2 → v3 migration |
-| `src/admin/` | users, roles, countries, branches, options, FX, devices, sync status |
-| `src/settings/` | language, storage, map packs, Wi-Fi only, PIN, about |
+| Path                                                                                                                                   | Contents                                                                                                |
+| -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `src/main.tsx`, `src/app.tsx`, `src/routes.ts`, `src/env.ts`, `src/version.ts`, `index.html`, `vite.config.ts`, `src/sw.ts`, `public/` | shell, routing, PWA                                                                                     |
+| `src/lib/`                                                                                                                             | pure utilities (`uuidv7`, `normalize`, `geo`, `similarity`, `csv`, `prefs`, `debounce`, `completeness`) |
+| `src/i18n/`                                                                                                                            | `t`, locale switching, direction, `Intl` formatters, `pickName`                                         |
+| `src/ui/`                                                                                                                              | design tokens and shared components                                                                     |
+| `src/db/`                                                                                                                              | Dexie schema, row types, repositories, local search                                                     |
+| `src/sync/`                                                                                                                            | engine, outbox, push/pull, transport, photo upload queue, status                                        |
+| `src/auth/`                                                                                                                            | Supabase client, session, login, MFA, PIN lock, capability flags                                        |
+| `src/photos/`                                                                                                                          | compression, EXIF, photo editor component, thumbnail/full image loading                                 |
+| `src/map/`                                                                                                                             | MapLibre view, layers, picker, locate, offline packs                                                    |
+| `src/projects/`                                                                                                                        | form, details, register list, maintenance view, incomplete list, review queue                           |
+| `src/people/`                                                                                                                          | directory, candidate picker, merge UI                                                                   |
+| `src/reports/`                                                                                                                         | dashboard, heat-map toggles, print/PDF views, export                                                    |
+| `src/import/`                                                                                                                          | CSV/XLSX import wizard, template                                                                        |
+| `src/migration/`                                                                                                                       | v2 → v3 migration                                                                                       |
+| `src/admin/`                                                                                                                           | users, roles, countries, branches, options, FX, devices, sync status                                    |
+| `src/settings/`                                                                                                                        | language, storage, map packs, Wi-Fi only, PIN, about                                                    |
 
 ## 3. Public APIs between modules
 
@@ -72,10 +80,13 @@ export function norm(text: string): string;
 export function similarity(a: string, b: string): number;
 // geo.ts
 export function haversineMeters(a: LonLat, b: LonLat): number;
-export function pointInPolygon(p: LonLat, geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon): boolean;
+export function pointInPolygon(
+  p: LonLat,
+  geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon,
+): boolean;
 export type LonLat = { lon: number; lat: number };
 // completeness.ts — twin of the SQL formula in docs/contracts/schema.md
-export function projectCompleteness(bundle: ProjectBundle): number;   // 0..100
+export function projectCompleteness(bundle: ProjectBundle): number; // 0..100
 // prefs.ts
 export function getPref<T>(key: string, fallback: T): T;
 export function setPref<T>(key: string, value: T): void;
@@ -87,11 +98,20 @@ export function toCsv(rows: unknown[][]): string;
 
 ```ts
 export type Locale = 'ar' | 'sw' | 'en';
-export const locale: Signal<Locale>;                       // persisted via prefs
-export function setLocale(l: Locale): Promise<void>;       // loads JSON, sets <html lang dir>
+export const locale: Signal<Locale>; // persisted via prefs
+export function setLocale(l: Locale): Promise<void>; // loads JSON, sets <html lang dir>
 export function t(key: string, params?: Record<string, string | number>): string;
 export function dir(): 'rtl' | 'ltr';
-export function pickName(row: { name_ar?: string | null; name_en?: string | null; name_sw?: string | null; name_latin?: string | null } | undefined): string;
+export function pickName(
+  row:
+    | {
+        name_ar?: string | null;
+        name_en?: string | null;
+        name_sw?: string | null;
+        name_latin?: string | null;
+      }
+    | undefined,
+): string;
 export const fmt: {
   number(n: number): string;
   percent(n: number): string;
@@ -158,29 +178,53 @@ and not yet acknowledged carry `_dirty: 1`.
 ### 3.5 `src/sync`
 
 ```ts
-export const syncStatus: Signal<{ online: boolean; state: 'idle' | 'pushing' | 'pulling' | 'error'; pendingOps: number; pendingPhotos: number; failedOps: number; lastSyncAt: number | null; lastError: string | null }>;
-export function startSync(): void;          // online event, every 2 minutes while online, visibilitychange
+export const syncStatus: Signal<{
+  online: boolean;
+  state: 'idle' | 'pushing' | 'pulling' | 'error';
+  pendingOps: number;
+  pendingPhotos: number;
+  failedOps: number;
+  lastSyncAt: number | null;
+  lastError: string | null;
+}>;
+export function startSync(): void; // online event, every 2 minutes while online, visibilitychange
 export function stopSync(): void;
-export function syncNow(): Promise<void>;   // "sync now" button
-export function resetLocalData(): Promise<void>;       // scope_epoch changed or sign-out
+export function syncNow(): Promise<void>; // "sync now" button
+export function resetLocalData(): Promise<void>; // scope_epoch changed or sign-out
 export function enqueuePhotoUpload(photoId: string): Promise<void>;
-export interface Transport { push(ops: PushOp[], deviceId: string): Promise<PushResult[]>; pull(cursor: unknown | null, limit: number): Promise<PullPage>; rpc<T>(fn: string, args?: Record<string, unknown>): Promise<T> }
-export const transport: Transport;          // supabase-js implementation; replaceable in tests
+export interface Transport {
+  push(ops: PushOp[], deviceId: string): Promise<PushResult[]>;
+  pull(cursor: unknown | null, limit: number): Promise<PullPage>;
+  rpc<T>(fn: string, args?: Record<string, unknown>): Promise<T>;
+}
+export const transport: Transport; // supabase-js implementation; replaceable in tests
 ```
 
 ### 3.6 `src/auth`
 
 ```ts
-export const supabase: SupabaseClient;       // the only place that creates the client
+export const supabase: SupabaseClient; // the only place that creates the client
 export const session: Signal<Session | null>;
-export const me: Signal<MyContext | null>;   // result of rpc my_context()
-export const can: { review: ReadonlySignal<boolean>; seeRestricted: ReadonlySignal<boolean>; seePeople: ReadonlySignal<boolean>; write: ReadonlySignal<boolean>; admin: ReadonlySignal<boolean> };
+export const me: Signal<MyContext | null>; // result of rpc my_context()
+export const can: {
+  review: ReadonlySignal<boolean>;
+  seeRestricted: ReadonlySignal<boolean>;
+  seePeople: ReadonlySignal<boolean>;
+  write: ReadonlySignal<boolean>;
+  admin: ReadonlySignal<boolean>;
+};
 export function signInWithEmailOtp(email: string): Promise<void>;
 export function signInWithPhoneOtp(phone: string): Promise<void>;
 export function verifyOtp(identifier: string, code: string, kind: 'email' | 'sms'): Promise<void>;
 export function signOut(): Promise<void>;
-export const pin: { isSet(): Promise<boolean>; set(pin: string): Promise<void>; unlock(pin: string): Promise<boolean>; lock(): void; locked: Signal<boolean> };
-export function deviceId(): string;          // stable per installation, sent as x-device-id header
+export const pin: {
+  isSet(): Promise<boolean>;
+  set(pin: string): Promise<void>;
+  unlock(pin: string): Promise<boolean>;
+  lock(): void;
+  locked: Signal<boolean>;
+};
+export function deviceId(): string; // stable per installation, sent as x-device-id header
 ```
 
 ### 3.7 `src/photos`
@@ -203,33 +247,36 @@ export function fitToFilter(filter: ProjectFilter): Promise<void>;
 
 ### 3.9 Routes (`src/routes.ts`)
 
-| Path | Lazy module (default export) | Test id of nav item |
-|---|---|---|
-| `/login` | `auth/LoginView` | — |
-| `/` , `/map` | `map/MapPage` | `nav-map` |
-| `/projects` | `projects/ProjectsPage` | `nav-projects` |
-| `/projects/new`, `/projects/:id/edit` | `projects/ProjectFormPage` | `add-project` |
-| `/projects/:id` | `projects/ProjectDetailsPage` | — |
-| `/maintenance` | `projects/MaintenancePage` | `nav-maintenance` |
-| `/incomplete` | `projects/IncompletePage` | `nav-incomplete` |
-| `/review` | `projects/ReviewPage` | `nav-review` |
-| `/people` | `people/PeoplePage` | `nav-people` |
-| `/reports` | `reports/ReportsPage` | `nav-reports` |
-| `/reports/print/:kind/:id` | `reports/PrintPage` | — |
-| `/import` | `import/ImportPage` | `nav-import` |
-| `/admin/*` | `admin/AdminPage` | `nav-admin` |
-| `/settings` | `settings/SettingsPage` | `nav-settings` |
+| Path                                  | Lazy module (default export)  | Test id of nav item |
+| ------------------------------------- | ----------------------------- | ------------------- |
+| `/login`                              | `auth/LoginView`              | —                   |
+| `/` , `/map`                          | `map/MapPage`                 | `nav-map`           |
+| `/projects`                           | `projects/ProjectsPage`       | `nav-projects`      |
+| `/projects/new`, `/projects/:id/edit` | `projects/ProjectFormPage`    | `add-project`       |
+| `/projects/:id`                       | `projects/ProjectDetailsPage` | —                   |
+| `/maintenance`                        | `projects/MaintenancePage`    | `nav-maintenance`   |
+| `/incomplete`                         | `projects/IncompletePage`     | `nav-incomplete`    |
+| `/review`                             | `projects/ReviewPage`         | `nav-review`        |
+| `/people`                             | `people/PeoplePage`           | `nav-people`        |
+| `/reports`                            | `reports/ReportsPage`         | `nav-reports`       |
+| `/reports/print/:kind/:id`            | `reports/PrintPage`           | —                   |
+| `/import`                             | `import/ImportPage`           | `nav-import`        |
+| `/admin/*`                            | `admin/AdminPage`             | `nav-admin`         |
+| `/settings`                           | `settings/SettingsPage`       | `nav-settings`      |
 
 Navigation: `navigate(path: string, opts?: { replace?: boolean })`, `useRoute()`.
 The mobile bottom bar shows: map, projects, add, maintenance, reports.
 
 ## 4. Test ids used by the e2e suite
 
-`login-email`, `login-submit`, `login-code`, `login-verify`, `pin-input`, `nav-*`,
+`login-email`, `login-submit`, `login-code`, `login-verify`, `pin-input`, `pin-confirm`
+(PIN setup only), `pin-submit`, `nav-*`, `view-title`, `offline-banner`, `settings-page`,
 `add-project`, `form-type-mosque|school|combined`, `form-name`, `form-gps`, `form-pick-map`,
 `form-lat`, `form-lon`, `form-country`, `form-area`, `form-status`, `form-photo-input`,
 `form-save`, `form-cancel`, `form-completeness`, `map-pick-confirm`, `map-pick-cancel`,
 `map-locate`, `project-row`, `search-input`, `filter-type`, `filter-status`, `filter-reset`,
-`sync-badge`, `sync-now`, `sync-pending-ops`, `sync-pending-photos`, `conflict-row`,
+`sync-badge` (`data-state` = `ok | syncing | offline | error`), `sync-last` (`data-at` =
+`lastSyncAt` in ms, empty before the first sync), `sync-now`, `sync-pending-ops`,
+`sync-pending-photos`, `conflict-row`,
 `conflict-keep-server`, `conflict-keep-client`, `review-approve`, `review-return`,
 `v2-migrate-accept`, `v2-import-file`, `lang-ar`, `lang-sw`, `lang-en`.

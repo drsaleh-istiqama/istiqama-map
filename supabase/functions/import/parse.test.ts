@@ -32,12 +32,41 @@ describe('parseImportFile — CSV', () => {
       `EXT-1,مسجد النور,مسجد,-5.05,39.75,TZ\r\n` +
       `EXT-2,"مدرسة ""الهداية"", الجديدة",مدرسة قرآن,-4.953,39.752,تنزانيا\r\n`;
     const { rows, info } = await parseImportFile(enc(csv), { maxRows: 5000 });
-    expect(info).toMatchObject({ kind: 'csv', encoding: 'utf-8', delimiter: ',', header_row: 1, rows: 2, skipped_blank_rows: 0, warnings: [] });
-    expect(info.headers).toEqual(['المعرّف الخارجي', 'اسم المشروع (عربي)', 'النوع', 'خط العرض', 'خط الطول', 'الدولة']);
+    expect(info).toMatchObject({
+      kind: 'csv',
+      encoding: 'utf-8',
+      delimiter: ',',
+      header_row: 1,
+      rows: 2,
+      skipped_blank_rows: 0,
+      warnings: [],
+    });
+    expect(info.headers).toEqual([
+      'المعرّف الخارجي',
+      'اسم المشروع (عربي)',
+      'النوع',
+      'خط العرض',
+      'خط الطول',
+      'الدولة',
+    ]);
     expect(info.source_rows).toBeUndefined();
     expect(rows).toEqual([
-      { 'المعرّف الخارجي': 'EXT-1', 'اسم المشروع (عربي)': 'مسجد النور', النوع: 'مسجد', 'خط العرض': '-5.05', 'خط الطول': '39.75', الدولة: 'TZ' },
-      { 'المعرّف الخارجي': 'EXT-2', 'اسم المشروع (عربي)': 'مدرسة "الهداية", الجديدة', النوع: 'مدرسة قرآن', 'خط العرض': '-4.953', 'خط الطول': '39.752', الدولة: 'تنزانيا' },
+      {
+        'المعرّف الخارجي': 'EXT-1',
+        'اسم المشروع (عربي)': 'مسجد النور',
+        النوع: 'مسجد',
+        'خط العرض': '-5.05',
+        'خط الطول': '39.75',
+        الدولة: 'TZ',
+      },
+      {
+        'المعرّف الخارجي': 'EXT-2',
+        'اسم المشروع (عربي)': 'مدرسة "الهداية", الجديدة',
+        النوع: 'مدرسة قرآن',
+        'خط العرض': '-4.953',
+        'خط الطول': '39.752',
+        الدولة: 'تنزانيا',
+      },
     ]);
   });
 
@@ -58,12 +87,17 @@ describe('parseImportFile — CSV', () => {
   it('keeps formula-looking cells as text and removes the export guard', async () => {
     const csv = `name_ar,review_note,builder\n=1+1,'=HYPERLINK("x"),'+255700000001\n`;
     const { rows } = await parseImportFile(enc(csv), { maxRows: 10 });
-    expect(rows).toEqual([{ name_ar: '=1+1', review_note: '=HYPERLINK("x")', builder: '+255700000001' }]);
+    expect(rows).toEqual([
+      { name_ar: '=1+1', review_note: '=HYPERLINK("x")', builder: '+255700000001' },
+    ]);
   });
 
   it('decodes windows-1256 files and says so', async () => {
     // "النوع,type\nمسجد,x\n" in windows-1256
-    const bytes = new Uint8Array([0xc7, 0xe1, 0xe4, 0xe6, 0xda, 0x2c, 0x74, 0x79, 0x70, 0x65, 0x0a, 0xe3, 0xd3, 0xcc, 0xcf, 0x2c, 0x78, 0x0a]);
+    const bytes = new Uint8Array([
+      0xc7, 0xe1, 0xe4, 0xe6, 0xda, 0x2c, 0x74, 0x79, 0x70, 0x65, 0x0a, 0xe3, 0xd3, 0xcc, 0xcf,
+      0x2c, 0x78, 0x0a,
+    ]);
     const { rows, info } = await parseImportFile(bytes, { maxRows: 10 });
     expect(rows).toEqual([{ النوع: 'مسجد', type: 'x' }]);
     expect(info.encoding).toBe('windows-1256');
@@ -71,7 +105,9 @@ describe('parseImportFile — CSV', () => {
   });
 
   it('reports duplicate and unnamed columns', async () => {
-    const { rows, info } = await parseImportFile(enc('name,name,,type\na,b,c,d\n'), { maxRows: 10 });
+    const { rows, info } = await parseImportFile(enc('name,name,,type\na,b,c,d\n'), {
+      maxRows: 10,
+    });
     expect(rows).toEqual([{ name: 'a', type: 'd' }]);
     expect(info.warnings).toEqual(['duplicate_headers', 'unnamed_columns']);
   });
@@ -88,9 +124,15 @@ describe('parseImportFile — CSV', () => {
   });
 
   it('rejects empty files, header-only files and binary data', async () => {
-    expect((await failure(parseImportFile(new Uint8Array(0), { maxRows: 10 }))).message).toBe('empty_file');
-    expect((await failure(parseImportFile(enc('\n\n  \n'), { maxRows: 10 }))).message).toBe('empty_file');
-    expect((await failure(parseImportFile(enc('a,b,c\n'), { maxRows: 10 }))).message).toBe('empty_file');
+    expect((await failure(parseImportFile(new Uint8Array(0), { maxRows: 10 }))).message).toBe(
+      'empty_file',
+    );
+    expect((await failure(parseImportFile(enc('\n\n  \n'), { maxRows: 10 }))).message).toBe(
+      'empty_file',
+    );
+    expect((await failure(parseImportFile(enc('a,b,c\n'), { maxRows: 10 }))).message).toBe(
+      'empty_file',
+    );
     const binary = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 13, 0, 1, 2, 3]);
     const e = await failure(parseImportFile(binary, { maxRows: 10 }));
     expect(e.status).toBe(415);
@@ -109,30 +151,63 @@ describe('parseImportFile — XLSX', () => {
       'القالب',
     );
     const { rows, info } = await parseImportFile(bytes, { maxRows: 5000 });
-    expect(info).toMatchObject({ kind: 'xlsx', sheet: 'القالب', sheets: ['القالب'], header_row: 1, rows: 2, warnings: [] });
+    expect(info).toMatchObject({
+      kind: 'xlsx',
+      sheet: 'القالب',
+      sheets: ['القالب'],
+      header_row: 1,
+      rows: 2,
+      warnings: [],
+    });
     expect(rows).toEqual([
-      { external_id: 'EXT-1', name_ar: 'مسجد النور', type: 'مسجد', capacity: 150, lat: -5.05, lon: 39.75, land_expandable: true },
-      { external_id: 1002, name_ar: 'مدرسة الهداية', type: 'school', lat: -4.953, lon: 39.752, land_expandable: 'نعم' },
+      {
+        external_id: 'EXT-1',
+        name_ar: 'مسجد النور',
+        type: 'مسجد',
+        capacity: 150,
+        lat: -5.05,
+        lon: 39.75,
+        land_expandable: true,
+      },
+      {
+        external_id: 1002,
+        name_ar: 'مدرسة الهداية',
+        type: 'school',
+        lat: -4.953,
+        lon: 39.752,
+        land_expandable: 'نعم',
+      },
     ]);
   });
 
   it('re-imports a file produced by our own export writer (guard removed, numbers kept)', async () => {
     const bytes = await buildXlsx(
-      { sheetName: 'المشاريع', rtl: true, columns: [{ header: 'رمز المشروع' }, { header: 'هاتف المسؤول' }, { header: 'خط العرض' }] },
+      {
+        sheetName: 'المشاريع',
+        rtl: true,
+        columns: [{ header: 'رمز المشروع' }, { header: 'هاتف المسؤول' }, { header: 'خط العرض' }],
+      },
       [['TZ-PN-000001', '+255700000001', -5.05]],
     );
     const { rows, info } = await parseImportFile(bytes, { maxRows: 10 });
     expect(info.sheet).toBe('المشاريع');
-    expect(rows).toEqual([{ 'رمز المشروع': 'TZ-PN-000001', 'هاتف المسؤول': '+255700000001', 'خط العرض': -5.05 }]);
+    expect(rows).toEqual([
+      { 'رمز المشروع': 'TZ-PN-000001', 'هاتف المسؤول': '+255700000001', 'خط العرض': -5.05 },
+    ]);
   });
 
   it('uses cached values of formulas and reports them; nothing is evaluated', async () => {
-    const ws = XLSX.utils.aoa_to_sheet([['name_ar', 'capacity'], ['x', 1]]);
+    const ws = XLSX.utils.aoa_to_sheet([
+      ['name_ar', 'capacity'],
+      ['x', 1],
+    ]);
     ws.B2 = { t: 'n', v: 42, f: '6*7' };
     ws.A2 = { t: 's', v: 'cached', f: 'WEBSERVICE("http://evil.example")' };
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'S');
-    const bytes = new Uint8Array(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer);
+    const bytes = new Uint8Array(
+      XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer,
+    );
     const { rows, info } = await parseImportFile(bytes, { maxRows: 10 });
     expect(rows).toEqual([{ name_ar: 'cached', capacity: 42 }]);
     expect(info.warnings).toEqual(['formulas_ignored']);
@@ -150,10 +225,16 @@ describe('parseImportFile — XLSX', () => {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['h'], ['first']]), 'One');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['h'], ['second']]), 'Two');
-    const bytes = new Uint8Array(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer);
+    const bytes = new Uint8Array(
+      XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer,
+    );
     expect((await parseImportFile(bytes, { maxRows: 10 })).rows).toEqual([{ h: 'first' }]);
-    expect((await parseImportFile(bytes, { maxRows: 10, sheet: 'Two' })).rows).toEqual([{ h: 'second' }]);
-    expect((await failure(parseImportFile(bytes, { maxRows: 10, sheet: 'Three' }))).message).toBe('no_sheet');
+    expect((await parseImportFile(bytes, { maxRows: 10, sheet: 'Two' })).rows).toEqual([
+      { h: 'second' },
+    ]);
+    expect((await failure(parseImportFile(bytes, { maxRows: 10, sheet: 'Three' }))).message).toBe(
+      'no_sheet',
+    );
   });
 
   it('enforces the row limit without reading the whole sheet', async () => {
@@ -171,13 +252,20 @@ describe('parseImportFile — XLSX', () => {
     expect(legacy.message).toBe('unsupported_file_type');
 
     const good = workbookBytes([['a'], ['b']]);
-    const damaged = await failure(parseImportFile(good.subarray(0, good.byteLength - 40), { maxRows: 10 }));
+    const damaged = await failure(
+      parseImportFile(good.subarray(0, good.byteLength - 40), { maxRows: 10 }),
+    );
     expect(damaged.status).toBe(422);
     expect(damaged.message).toBe('invalid_file');
   });
 
   it('an empty sheet is an empty file', async () => {
-    expect((await failure(parseImportFile(workbookBytes([]), { maxRows: 10 }))).message).toBe('empty_file');
-    expect((await failure(parseImportFile(workbookBytes([['only', 'header']]), { maxRows: 10 }))).message).toBe('empty_file');
+    expect((await failure(parseImportFile(workbookBytes([]), { maxRows: 10 }))).message).toBe(
+      'empty_file',
+    );
+    expect(
+      (await failure(parseImportFile(workbookBytes([['only', 'header']]), { maxRows: 10 })))
+        .message,
+    ).toBe('empty_file');
   });
 });

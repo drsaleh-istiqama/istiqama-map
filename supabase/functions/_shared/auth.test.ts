@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { bearerToken, decodeJwt, identify, isServiceRequest, requireServiceRole, requireUser, safeEqual } from './auth.ts';
+import {
+  bearerToken,
+  decodeJwt,
+  identify,
+  isServiceRequest,
+  requireServiceRole,
+  requireUser,
+  safeEqual,
+} from './auth.ts';
 import { HttpError } from './http.ts';
 
 function b64url(value: unknown): string {
@@ -52,7 +60,13 @@ describe('token helpers', () => {
 
 describe('identify', () => {
   it('returns the caller of a signed-in user token', () => {
-    const t = token({ sub: USER, role: 'authenticated', aal: 'aal2', session_id: 's1', exp: now + 3600 });
+    const t = token({
+      sub: USER,
+      role: 'authenticated',
+      aal: 'aal2',
+      session_id: 's1',
+      exp: now + 3600,
+    });
     const caller = identify(request({ authorization: `Bearer ${t}` }));
     expect(caller).toMatchObject({ userId: USER, aal: 'aal2', sessionId: 's1', token: t });
   });
@@ -65,10 +79,22 @@ describe('identify', () => {
   it.each([
     ['no header', {}],
     ['malformed token', { authorization: 'Bearer garbage' }],
-    ['anon key (role anon, no sub)', { authorization: `Bearer ${token({ role: 'anon', exp: now + 3600 })}` }],
-    ['service key (no sub)', { authorization: `Bearer ${token({ role: 'service_role', exp: now + 3600 })}` }],
-    ['sub is not a uuid', { authorization: `Bearer ${token({ sub: 'me', role: 'authenticated', exp: now + 3600 })}` }],
-    ['expired', { authorization: `Bearer ${token({ sub: USER, role: 'authenticated', exp: now - 10 })}` }],
+    [
+      'anon key (role anon, no sub)',
+      { authorization: `Bearer ${token({ role: 'anon', exp: now + 3600 })}` },
+    ],
+    [
+      'service key (no sub)',
+      { authorization: `Bearer ${token({ role: 'service_role', exp: now + 3600 })}` },
+    ],
+    [
+      'sub is not a uuid',
+      { authorization: `Bearer ${token({ sub: 'me', role: 'authenticated', exp: now + 3600 })}` },
+    ],
+    [
+      'expired',
+      { authorization: `Bearer ${token({ sub: USER, role: 'authenticated', exp: now - 10 })}` },
+    ],
   ])('refuses: %s', (_name, headers) => {
     let error: unknown;
     try {
@@ -78,7 +104,10 @@ describe('identify', () => {
     }
     expect(error).toBeInstanceOf(HttpError);
     expect((error as HttpError).status).toBe(401);
-    expect((error as HttpError).body()).toMatchObject({ code: 'PT401', message: 'not_authenticated' });
+    expect((error as HttpError).body()).toMatchObject({
+      code: 'PT401',
+      message: 'not_authenticated',
+    });
   });
 });
 
@@ -97,9 +126,13 @@ describe('requireUser with FUNCTIONS_VERIFY_JWT=getuser', () => {
     vi.stubEnv('FUNCTIONS_VERIFY_JWT', 'getuser');
     vi.stubEnv('SUPABASE_URL', 'http://auth.test');
     vi.stubEnv('SUPABASE_ANON_KEY', 'anon');
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: USER }), { status: 200 }));
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ id: USER }), { status: 200 }),
+    );
     vi.stubGlobal('fetch', fetchMock);
-    await expect(requireUser(request({ authorization: `Bearer ${t}` }))).resolves.toMatchObject({ userId: USER });
+    await expect(requireUser(request({ authorization: `Bearer ${t}` }))).resolves.toMatchObject({
+      userId: USER,
+    });
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe('http://auth.test/auth/v1/user');
     expect((init.headers as Record<string, string>).authorization).toBe(`Bearer ${t}`);
@@ -109,23 +142,35 @@ describe('requireUser with FUNCTIONS_VERIFY_JWT=getuser', () => {
     vi.stubEnv('FUNCTIONS_VERIFY_JWT', 'getuser');
     vi.stubEnv('SUPABASE_URL', 'http://auth.test');
     vi.stubEnv('SUPABASE_ANON_KEY', 'anon');
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"code":"bad_jwt"}', { status: 403 })));
-    await expect(requireUser(request({ authorization: `Bearer ${t}` }))).rejects.toMatchObject({ status: 401 });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('{"code":"bad_jwt"}', { status: 403 })),
+    );
+    await expect(requireUser(request({ authorization: `Bearer ${t}` }))).rejects.toMatchObject({
+      status: 401,
+    });
   });
 
   it('reports an unreachable Auth server as 502, not as "unauthenticated"', async () => {
     vi.stubEnv('FUNCTIONS_VERIFY_JWT', 'getuser');
     vi.stubEnv('SUPABASE_URL', 'http://auth.test');
     vi.stubEnv('SUPABASE_ANON_KEY', 'anon');
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('down', { status: 503 })));
-    await expect(requireUser(request({ authorization: `Bearer ${t}` }))).rejects.toMatchObject({ status: 502 });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('down', { status: 503 })),
+    );
+    await expect(requireUser(request({ authorization: `Bearer ${t}` }))).rejects.toMatchObject({
+      status: 502,
+    });
   });
 });
 
 describe('service-only functions', () => {
   it('accepts exactly the service-role key, as bearer or apikey', () => {
     vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'service-key-value');
-    expect(() => requireServiceRole(request({ authorization: 'Bearer service-key-value' }))).not.toThrow();
+    expect(() =>
+      requireServiceRole(request({ authorization: 'Bearer service-key-value' })),
+    ).not.toThrow();
     expect(() => requireServiceRole(request({ apikey: 'service-key-value' }))).not.toThrow();
     expect(isServiceRequest(request({ authorization: 'Bearer service-key-value' }))).toBe(true);
   });

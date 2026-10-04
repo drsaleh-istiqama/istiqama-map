@@ -40,8 +40,15 @@ const COLUMNS_EN: ExportColumns = {
   ...COLUMNS_AR,
   lang: 'en',
   dir: 'ltr',
-  columns: COLUMNS_AR.columns.map((c, i) => ({ ...c, header: ['Code', 'Type', 'Status', 'Capacity', 'Expandable', 'Review note'][i]! })),
-  enums: { project_type: { mosque: 'Mosque', school: "Qur'an school" }, project_status: { active: 'Active' }, boolean: { true: 'Yes', false: 'No' } },
+  columns: COLUMNS_AR.columns.map((c, i) => ({
+    ...c,
+    header: ['Code', 'Type', 'Status', 'Capacity', 'Expandable', 'Review note'][i]!,
+  })),
+  enums: {
+    project_type: { mosque: 'Mosque', school: "Qur'an school" },
+    project_status: { active: 'Active' },
+    boolean: { true: 'Yes', false: 'No' },
+  },
 };
 
 function row(i: number): Record<string, unknown> {
@@ -61,7 +68,9 @@ function fakePages(total: number, size: number): { fetch: PageFetcher; cursors: 
   const fetch: PageFetcher = async (after) => {
     cursors.push(after);
     const start = after === null ? 0 : (after as { n: number }).n;
-    const rows = Array.from({ length: Math.min(size, total - start) }, (_v, k) => row(start + k + 1));
+    const rows = Array.from({ length: Math.min(size, total - start) }, (_v, k) =>
+      row(start + k + 1),
+    );
     const end = start + rows.length;
     const page: ExportPage = { rows, done: end >= total, next: end >= total ? null : { n: end } };
     return page;
@@ -82,7 +91,14 @@ describe('cellPages', () => {
     for await (const page of cellPages(COLUMNS_AR, fetch)) pages.push(page);
     expect(cursors).toEqual([null, { n: 2 }, { n: 4 }]);
     expect(pages.map((p) => p.length)).toEqual([2, 2, 1]);
-    expect(pages[0]![0]).toEqual(['TZ-PN-000001', 'مسجد', 'يعمل', 101, 'لا', '=HYPERLINK("http://evil","x")']);
+    expect(pages[0]![0]).toEqual([
+      'TZ-PN-000001',
+      'مسجد',
+      'يعمل',
+      101,
+      'لا',
+      '=HYPERLINK("http://evil","x")',
+    ]);
     expect(pages[0]![1]).toEqual(['TZ-PN-000002', 'مدرسة قرآن', 'يعمل', 102, 'لا', null]);
     expect(pages[1]![0]![4]).toBe('نعم');
   });
@@ -109,7 +125,9 @@ describe('cellPages', () => {
 describe('CSV export', () => {
   it('streams BOM + Arabic header + translated rows with the injection guard', async () => {
     const progress = fresh();
-    const bytes = await collect(csvStream(COLUMNS_AR, cellPages(COLUMNS_AR, fakePages(3, 2).fetch), progress));
+    const bytes = await collect(
+      csvStream(COLUMNS_AR, cellPages(COLUMNS_AR, fakePages(3, 2).fetch), progress),
+    );
     expect([...bytes.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
     const text = new TextDecoder().decode(bytes);
     const lines = text.split('\r\n');
@@ -124,15 +142,21 @@ describe('CSV export', () => {
   });
 
   it('writes other languages the same way', async () => {
-    const bytes = await collect(csvStream(COLUMNS_EN, cellPages(COLUMNS_EN, fakePages(2, 10).fetch), fresh()));
+    const bytes = await collect(
+      csvStream(COLUMNS_EN, cellPages(COLUMNS_EN, fakePages(2, 10).fetch), fresh()),
+    );
     const lines = new TextDecoder().decode(bytes).split('\r\n');
-    expect(lines[0]!.replace(String.fromCharCode(0xfeff), '')).toBe('Code,Type,Status,Capacity,Expandable,Review note');
+    expect(lines[0]!.replace(String.fromCharCode(0xfeff), '')).toBe(
+      'Code,Type,Status,Capacity,Expandable,Review note',
+    );
     expect(lines[2]).toBe("TZ-PN-000002,Qur'an school,Active,102,No,");
   });
 
   it('an export without rows still has the header', async () => {
     const progress = fresh();
-    const bytes = await collect(csvStream(COLUMNS_AR, cellPages(COLUMNS_AR, fakePages(0, 10).fetch), progress));
+    const bytes = await collect(
+      csvStream(COLUMNS_AR, cellPages(COLUMNS_AR, fakePages(0, 10).fetch), progress),
+    );
     expect(new TextDecoder().decode(bytes).split('\r\n')).toHaveLength(2);
     expect(progress.rows).toBe(0);
   });
@@ -152,9 +176,15 @@ describe('CSV export', () => {
   });
 
   it('csvChunks produces the same bytes as the stream', async () => {
-    const a = await collect(csvStream(COLUMNS_AR, cellPages(COLUMNS_AR, fakePages(25, 10).fetch), fresh()));
+    const a = await collect(
+      csvStream(COLUMNS_AR, cellPages(COLUMNS_AR, fakePages(25, 10).fetch), fresh()),
+    );
     const progress = fresh();
-    const chunks = await csvChunks(COLUMNS_AR, cellPages(COLUMNS_AR, fakePages(25, 10).fetch), progress);
+    const chunks = await csvChunks(
+      COLUMNS_AR,
+      cellPages(COLUMNS_AR, fakePages(25, 10).fetch),
+      progress,
+    );
     expect(chunks).toHaveLength(4); // header + 3 pages: memory is bounded by the page size
     expect(new Uint8Array(await new Blob(chunks as BlobPart[]).arrayBuffer())).toEqual(a);
     expect(progress.rows).toBe(25);
@@ -162,9 +192,18 @@ describe('CSV export', () => {
 });
 
 describe('XLSX export', () => {
-  async function build(columns: ExportColumns, total: number, maxRows = 1000): Promise<{ bytes: Uint8Array; progress: Progress }> {
+  async function build(
+    columns: ExportColumns,
+    total: number,
+    maxRows = 1000,
+  ): Promise<{ bytes: Uint8Array; progress: Progress }> {
     const progress = fresh();
-    const outcome = await buildXlsxExport(columns, cellPages(columns, fakePages(total, 7).fetch), progress, maxRows);
+    const outcome = await buildXlsxExport(
+      columns,
+      cellPages(columns, fakePages(total, 7).fetch),
+      progress,
+      maxRows,
+    );
     if (outcome.overflow) throw new Error('unexpected overflow');
     const bytes = new Uint8Array(await new Blob(outcome.chunks as BlobPart[]).arrayBuffer());
     expect(bytes.byteLength).toBe(outcome.size);
@@ -180,8 +219,22 @@ describe('XLSX export', () => {
     expect(wb.Workbook?.Views?.[0]?.RTL).toBe(true);
     const rows = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets['المشاريع']!, { header: 1 });
     expect(rows).toHaveLength(21);
-    expect(rows[0]).toEqual(['رمز المشروع', 'النوع', 'الحالة', 'السعة', 'قابلية التوسع', 'ملاحظة المراجعة']);
-    expect(rows[1]).toEqual(['TZ-PN-000001', 'مسجد', 'يعمل', 101, 'لا', `'=HYPERLINK("http://evil","x")`]);
+    expect(rows[0]).toEqual([
+      'رمز المشروع',
+      'النوع',
+      'الحالة',
+      'السعة',
+      'قابلية التوسع',
+      'ملاحظة المراجعة',
+    ]);
+    expect(rows[1]).toEqual([
+      'TZ-PN-000001',
+      'مسجد',
+      'يعمل',
+      101,
+      'لا',
+      `'=HYPERLINK("http://evil","x")`,
+    ]);
     expect(rows[3]).toEqual(['TZ-PN-000003', 'مسجد', 'يعمل', 103, 'نعم']);
     const entry = readZipDirectory(bytes).find((e) => e.name === 'xl/worksheets/sheet1.xml')!;
     const xml = new TextDecoder().decode(await readZipEntry(bytes, entry, 10_000_000));
@@ -205,14 +258,23 @@ describe('XLSX export', () => {
     // it stopped paging as soon as the limit was crossed (3 pages of 10 → 30 > 25)
     expect(cursors).toHaveLength(3);
     // exactly at the limit is fine
-    const exact = await buildXlsxExport(COLUMNS_AR, cellPages(COLUMNS_AR, fakePages(25, 10).fetch), fresh(), 25);
+    const exact = await buildXlsxExport(
+      COLUMNS_AR,
+      cellPages(COLUMNS_AR, fakePages(25, 10).fetch),
+      fresh(),
+      25,
+    );
     expect(exact.overflow).toBe(false);
   });
 });
 
 describe('exportFileName', () => {
   it('is ASCII, dated and tied to the job', () => {
-    const name = exportFileName('01a1027f-fc21-7a83-8e7f-64628ffed1be', 'csv', new Date('2026-10-03T16:01:44Z'));
+    const name = exportFileName(
+      '01a1027f-fc21-7a83-8e7f-64628ffed1be',
+      'csv',
+      new Date('2026-10-03T16:01:44Z'),
+    );
     expect(name).toBe('istiqama-projects-20261003-8ffed1be.csv');
     expect(name).toMatch(/^[\x20-\x7e]+$/);
   });

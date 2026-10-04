@@ -95,7 +95,10 @@ export class FakeLock implements LockPort {
   /** Simulates another tab holding the lock. */
   heldElsewhere = false;
 
-  async run<T>(fn: () => Promise<T>, opts: { wait: boolean }): Promise<{ acquired: true; value: T } | { acquired: false }> {
+  async run<T>(
+    fn: () => Promise<T>,
+    opts: { wait: boolean },
+  ): Promise<{ acquired: true; value: T } | { acquired: false }> {
     if (this.heldElsewhere) return { acquired: false };
     while (this.held) {
       if (!opts.wait) return { acquired: false };
@@ -162,7 +165,11 @@ export class FakeUploader implements ResumableUploader {
     }
     if (plan.kind === 'hang') {
       await new Promise<never>((_resolve, reject) => {
-        req.signal.addEventListener('abort', () => reject(new SyncError('aborted', 'upload aborted')), { once: true });
+        req.signal.addEventListener(
+          'abort',
+          () => reject(new SyncError('aborted', 'upload aborted')),
+          { once: true },
+        );
       });
     }
     req.onProgress(req.blob.size, req.blob.size);

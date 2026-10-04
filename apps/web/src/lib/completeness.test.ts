@@ -17,8 +17,20 @@ import {
   type CompletenessProject,
 } from './completeness';
 
-const NO_CHILDREN: CompletenessChildren = { photos: false, land: false, facilities: false, staff: false, community: false };
-const ALL_CHILDREN: CompletenessChildren = { photos: true, land: true, facilities: true, staff: true, community: true };
+const NO_CHILDREN: CompletenessChildren = {
+  photos: false,
+  land: false,
+  facilities: false,
+  staff: false,
+  community: false,
+};
+const ALL_CHILDREN: CompletenessChildren = {
+  photos: true,
+  land: true,
+  facilities: true,
+  staff: true,
+  community: true,
+};
 
 const EMPTY: CompletenessProject = {
   name_ar: '',
@@ -76,9 +88,12 @@ describe('completenessScore', () => {
     ['admin_area', { admin_area_id: 'x' }, 5],
     ['capacity', { capacity: 1 }, 5],
     ['build_year', { build_year: 1999 }, 5],
-  ] as Array<[string, Partial<CompletenessProject>, number]>)('%s alone is worth its weight', (_key, patch, weight) => {
-    expect(completenessScore({ ...EMPTY, ...patch }, NO_CHILDREN)).toBe(weight);
-  });
+  ] as Array<[string, Partial<CompletenessProject>, number]>)(
+    '%s alone is worth its weight',
+    (_key, patch, weight) => {
+      expect(completenessScore({ ...EMPTY, ...patch }, NO_CHILDREN)).toBe(weight);
+    },
+  );
 
   it.each([
     ['photos', 15],
@@ -86,9 +101,12 @@ describe('completenessScore', () => {
     ['facilities', 10],
     ['staff', 10],
     ['community', 10],
-  ] as Array<[keyof CompletenessChildren, number]>)('child %s alone is worth its weight', (key, weight) => {
-    expect(completenessScore(EMPTY, { ...NO_CHILDREN, [key]: true })).toBe(weight);
-  });
+  ] as Array<[keyof CompletenessChildren, number]>)(
+    'child %s alone is worth its weight',
+    (key, weight) => {
+      expect(completenessScore(EMPTY, { ...NO_CHILDREN, [key]: true })).toBe(weight);
+    },
+  );
 
   it('blank names do not count (SQL btrim removes blanks only)', () => {
     expect(completenessScore({ ...EMPTY, name_ar: '   ', name_latin: '  ' }, NO_CHILDREN)).toBe(0);
@@ -118,7 +136,14 @@ describe('completenessScore', () => {
   });
 });
 
-const std = { created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:00Z', created_by: null, updated_by: null, version: 1, deleted_at: null };
+const std = {
+  created_at: '2026-10-01T00:00:00Z',
+  updated_at: '2026-10-01T00:00:00Z',
+  created_by: null,
+  updated_by: null,
+  version: 1,
+  deleted_at: null,
+};
 
 function bundle(): ProjectBundle {
   const project = {
@@ -154,20 +179,42 @@ describe('projectCompleteness (bundle)', () => {
   it('counts live children only; maintenance, donors and restricted data do not count', () => {
     const b = bundle();
     b.land = { ...std, id: 'l1', project_id: 'p1' } as Row<'project_land'>;
-    b.facilities = { ...std, id: 'f1', project_id: 'p1', deleted_at: '2026-10-02T00:00:00Z' } as Row<'project_facilities'>;
+    b.facilities = {
+      ...std,
+      id: 'f1',
+      project_id: 'p1',
+      deleted_at: '2026-10-02T00:00:00Z',
+    } as Row<'project_facilities'>;
     b.community = { ...std, id: 'c1', project_id: 'p1' } as Row<'community_profiles'>;
     b.sensitive = { ...std, id: 's1', project_id: 'p1' } as Row<'community_sensitive'>;
-    b.photos = [{ ...std, id: 'ph1', project_id: 'p1', deleted_at: '2026-10-02T00:00:00Z' } as Row<'project_photos'>];
-    b.staff = [{ ...std, id: 'st1', project_id: 'p1', person_id: 'x', role: 'imam' } as Row<'project_staff'>];
+    b.photos = [
+      {
+        ...std,
+        id: 'ph1',
+        project_id: 'p1',
+        deleted_at: '2026-10-02T00:00:00Z',
+      } as Row<'project_photos'>,
+    ];
+    b.staff = [
+      { ...std, id: 'st1', project_id: 'p1', person_id: 'x', role: 'imam' } as Row<'project_staff'>,
+    ];
     b.maintenance = [{ ...std, id: 'm1', project_id: 'p1' } as Row<'project_maintenance'>];
     b.donors = [{ ...std, id: 'd1', project_id: 'p1', donor_id: 'dn' } as Row<'project_donors'>];
-    expect(bundleChildren(b)).toEqual({ photos: false, land: true, facilities: false, staff: true, community: true });
+    expect(bundleChildren(b)).toEqual({
+      photos: false,
+      land: true,
+      facilities: false,
+      staff: true,
+      community: true,
+    });
     expect(projectCompleteness(b)).toBe(45 + 10 + 10 + 10);
   });
 
   it('a pending photo counts (any upload_state)', () => {
     const b = bundle();
-    b.photos = [{ ...std, id: 'ph1', project_id: 'p1', upload_state: 'pending' } as Row<'project_photos'>];
+    b.photos = [
+      { ...std, id: 'ph1', project_id: 'p1', upload_state: 'pending' } as Row<'project_photos'>,
+    ];
     expect(projectCompleteness(b)).toBe(60);
   });
 

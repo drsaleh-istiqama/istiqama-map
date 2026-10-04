@@ -1,7 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HttpError } from '../_shared/http.ts';
 import { handler } from './index.ts';
-import { MVT, bodyEtag, etagMatches, parseTileFilters, parseTilePath, tileCacheControl } from './path.ts';
+import {
+  MVT,
+  bodyEtag,
+  etagMatches,
+  parseTileFilters,
+  parseTilePath,
+  tileCacheControl,
+} from './path.ts';
 
 function b64url(value: unknown): string {
   return btoa(JSON.stringify(value)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -33,7 +40,16 @@ describe('parseTilePath', () => {
   });
 
   it('returns null for anything that is not a tile path', () => {
-    for (const p of ['/tiles', '/tiles/5/19', '/tiles/a/b/c', '/tiles/5/19/16/7', '/tiles/5/-1/3', '/tiles/5/1.5/3', '/other/5/19/16', '/tiles/5/19/16.png'])
+    for (const p of [
+      '/tiles',
+      '/tiles/5/19',
+      '/tiles/a/b/c',
+      '/tiles/5/19/16/7',
+      '/tiles/5/-1/3',
+      '/tiles/5/1.5/3',
+      '/other/5/19/16',
+      '/tiles/5/19/16.png',
+    ])
       expect(parseTilePath(p), p).toBeNull();
   });
 
@@ -49,7 +65,8 @@ describe('parseTilePath', () => {
 });
 
 describe('parseTileFilters', () => {
-  const q = (filters: unknown, key = 'f'): URLSearchParams => new URLSearchParams({ [key]: JSON.stringify(filters) });
+  const q = (filters: unknown, key = 'f'): URLSearchParams =>
+    new URLSearchParams({ [key]: JSON.stringify(filters) });
 
   it('no filter → {}', () => {
     expect(parseTileFilters(new URLSearchParams())).toEqual({});
@@ -59,7 +76,14 @@ describe('parseTileFilters', () => {
 
   it('keeps the documented keys in a fixed order and drops the rest', () => {
     const filters = parseTileFilters(
-      q({ status: ['active', 'maintenance'], type: 'mosque', layers: ['clusters', 'clusters'], admin_area_id: 'x', q: 'search', country_id: 'e2a6484f-39a5-3135-816a-03ad934d99fd' }),
+      q({
+        status: ['active', 'maintenance'],
+        type: 'mosque',
+        layers: ['clusters', 'clusters'],
+        admin_area_id: 'x',
+        q: 'search',
+        country_id: 'e2a6484f-39a5-3135-816a-03ad934d99fd',
+      }),
     );
     expect(filters).toEqual({
       country_id: 'e2a6484f-39a5-3135-816a-03ad934d99fd',
@@ -85,7 +109,11 @@ describe('parseTileFilters', () => {
       q({ layers: 'clusters' }),
       new URLSearchParams({ f: JSON.stringify({ type: 'x'.repeat(3000) }) }),
     ];
-    for (const params of bad) expect(status(() => parseTileFilters(params)), params.toString()).toBe(422);
+    for (const params of bad)
+      expect(
+        status(() => parseTileFilters(params)),
+        params.toString(),
+      ).toBe(422);
   });
 });
 
@@ -136,7 +164,11 @@ describe('tiles handler', () => {
   });
 
   const get = (path: string, headers: Record<string, string> = {}): Promise<Response> =>
-    handler(new Request(`http://fn.test${path}`, { headers: { authorization: auth, 'x-device-id': 'dev-1', ...headers } }));
+    handler(
+      new Request(`http://fn.test${path}`, {
+        headers: { authorization: auth, 'x-device-id': 'dev-1', ...headers },
+      }),
+    );
 
   const tile = (bytes: number): Response =>
     new Response(new Uint8Array(bytes).fill(7), { status: 200, headers: { 'content-type': MVT } });
@@ -146,7 +178,9 @@ describe('tiles handler', () => {
     const res = await get('/tiles/8/156/131?f=%7B%22type%22%3A%22mosque%22%7D&e=epoch1');
     expect(res.status).toBe(200);
     const [url, init] = fetchMock.mock.calls[0]!;
-    expect(url).toBe('http://api.test/rest/v1/rpc/tile_projects?z=8&x=156&y=131&p_filters=%7B%22type%22%3A%22mosque%22%7D');
+    expect(url).toBe(
+      'http://api.test/rest/v1/rpc/tile_projects?z=8&x=156&y=131&p_filters=%7B%22type%22%3A%22mosque%22%7D',
+    );
     const sent = new Headers(init!.headers);
     expect(init!.method).toBe('GET');
     expect(sent.get('accept')).toBe(MVT);
@@ -160,7 +194,9 @@ describe('tiles handler', () => {
     const res = await get('/tiles/8/156/131');
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe(MVT);
-    expect(res.headers.get('cache-control')).toBe('private, max-age=300, stale-while-revalidate=600');
+    expect(res.headers.get('cache-control')).toBe(
+      'private, max-age=300, stale-while-revalidate=600',
+    );
     expect(res.headers.get('vary')).toContain('Authorization');
     expect(res.headers.get('etag')).toMatch(/^"[0-9a-f]{32}"$/);
     expect(res.headers.get('server-timing')).toMatch(/db;dur=/);
@@ -168,7 +204,9 @@ describe('tiles handler', () => {
   });
 
   it('answers 204 for an empty tile, with the same cache headers', async () => {
-    fetchMock.mockResolvedValueOnce(new Response(null, { status: 200, headers: { 'content-type': MVT } }));
+    fetchMock.mockResolvedValueOnce(
+      new Response(null, { status: 200, headers: { 'content-type': MVT } }),
+    );
     const res = await get('/tiles/14/9997/8423');
     expect(res.status).toBe(204);
     expect(res.headers.get('cache-control')).toBe('private, max-age=30');
@@ -196,17 +234,22 @@ describe('tiles handler', () => {
     const packed = new Uint8Array(await res.arrayBuffer());
     expect(packed.byteLength).toBeLessThan(500);
     const plain = await new Response(
-      new Response(packed).body!.pipeThrough(new DecompressionStream('gzip') as unknown as ReadableWritablePair<Uint8Array, Uint8Array>),
+      new Response(packed).body!.pipeThrough(
+        new DecompressionStream('gzip') as unknown as ReadableWritablePair<Uint8Array, Uint8Array>,
+      ),
     ).arrayBuffer();
     expect(new Uint8Array(plain)).toEqual(new Uint8Array(5000).fill(7));
   });
 
   it('passes PostgREST errors through, uncached', async () => {
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ code: 'PT422', message: 'invalid_tile', details: null, hint: null }), {
-        status: 422,
-        headers: { 'content-type': 'application/json; charset=utf-8' },
-      }),
+      new Response(
+        JSON.stringify({ code: 'PT422', message: 'invalid_tile', details: null, hint: null }),
+        {
+          status: 422,
+          headers: { 'content-type': 'application/json; charset=utf-8' },
+        },
+      ),
     );
     const res = await get('/tiles/8/156/131');
     expect(res.status).toBe(422);
@@ -225,7 +268,12 @@ describe('tiles handler', () => {
     const anonymous = await handler(new Request('http://fn.test/tiles/8/156/131'));
     expect(anonymous.status).toBe(401);
     expect(anonymous.headers.get('cache-control')).toBe('no-store');
-    const post = await handler(new Request('http://fn.test/tiles/8/156/131', { method: 'POST', headers: { authorization: auth } }));
+    const post = await handler(
+      new Request('http://fn.test/tiles/8/156/131', {
+        method: 'POST',
+        headers: { authorization: auth },
+      }),
+    );
     expect(post.status).toBe(405);
     expect(fetchMock).not.toHaveBeenCalled();
   });

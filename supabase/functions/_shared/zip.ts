@@ -28,12 +28,7 @@ export function crc32(data: Uint8Array, seed = 0): number {
 export class ZipError extends Error {
   constructor(
     readonly code:
-      | 'not_a_zip'
-      | 'unsupported_zip'
-      | 'encrypted'
-      | 'too_large'
-      | 'corrupt'
-      | 'entry_not_found',
+      'not_a_zip' | 'unsupported_zip' | 'encrypted' | 'too_large' | 'corrupt' | 'entry_not_found',
     message: string,
   ) {
     super(message);
@@ -89,10 +84,20 @@ export class ZipEntryStream {
     await this.writer.write(data as BufferSource);
   }
 
-  async close(): Promise<{ chunks: Uint8Array[]; crc: number; size: number; compressedSize: number }> {
+  async close(): Promise<{
+    chunks: Uint8Array[];
+    crc: number;
+    size: number;
+    compressedSize: number;
+  }> {
     await this.writer.close();
     await this.pump;
-    return { chunks: this.chunks, crc: this.crc, size: this.size, compressedSize: this.compressedSize };
+    return {
+      chunks: this.chunks,
+      crc: this.crc,
+      size: this.size,
+      compressedSize: this.compressedSize,
+    };
   }
 }
 
@@ -295,7 +300,10 @@ export function openZipEntry(
       },
     });
     source = input.pipeThrough(
-      new DecompressionStream('deflate-raw') as unknown as ReadableWritablePair<Uint8Array, Uint8Array>,
+      new DecompressionStream('deflate-raw') as unknown as ReadableWritablePair<
+        Uint8Array,
+        Uint8Array
+      >,
     );
   } else {
     throw new ZipError('unsupported_zip', `compression method ${entry.method} is not supported`);
@@ -306,7 +314,9 @@ export function openZipEntry(
       transform(chunk, controller) {
         total += chunk.byteLength;
         if (total > maxBytes) {
-          controller.error(new ZipError('too_large', `entry ${entry.name} inflates beyond the limit`));
+          controller.error(
+            new ZipError('too_large', `entry ${entry.name} inflates beyond the limit`),
+          );
           return;
         }
         controller.enqueue(chunk);

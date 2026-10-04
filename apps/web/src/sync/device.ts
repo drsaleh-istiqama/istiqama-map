@@ -16,7 +16,10 @@ export interface DeviceDeps {
 const MAX_LABEL = 120;
 const MAX_VERSION = 40;
 
-export async function registerDevice(deps: DeviceDeps, signal?: AbortSignal): Promise<DeviceAnswer> {
+export async function registerDevice(
+  deps: DeviceDeps,
+  signal?: AbortSignal,
+): Promise<DeviceAnswer> {
   const answer = await deps.transport.rpc<DeviceAnswer | null>(
     'register_device',
     {
@@ -62,11 +65,16 @@ export function defaultDeviceLabel(): string {
   };
   const data = nav.userAgentData;
   if (data?.platform) {
-    const brand = data.brands?.map((b) => b.brand).find((b) => !/not.?a.?brand/i.test(b) && b !== 'Chromium');
+    const brand = data.brands
+      ?.map((b) => b.brand)
+      .find((b) => !/not.?a.?brand/i.test(b) && b !== 'Chromium');
     return [data.platform, data.mobile ? 'mobile' : '', brand ?? ''].filter(Boolean).join(' ');
   }
   const ua = nav.userAgent ?? '';
-  const os = /Android [\d.]+/.exec(ua)?.[0] ?? /iPhone|iPad|Windows|Mac OS X|Linux/.exec(ua)?.[0] ?? 'device';
+  const os =
+    /Android [\d.]+/.exec(ua)?.[0] ??
+    /iPhone|iPad|Windows|Mac OS X|Linux/.exec(ua)?.[0] ??
+    'device';
   const browser = /Firefox|Edg|Chrome|Safari/.exec(ua)?.[0] ?? '';
   return `${os} ${browser}`.trim();
 }

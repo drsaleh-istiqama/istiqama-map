@@ -79,7 +79,10 @@ export const fakeProvider: OtpProvider = {
   send(message: OtpMessage): Promise<void> {
     if (appEnv() === 'production')
       return Promise.reject(
-        new OtpProviderError('provider_not_configured', 'The fake OTP provider is disabled in production.'),
+        new OtpProviderError(
+          'provider_not_configured',
+          'The fake OTP provider is disabled in production.',
+        ),
       );
     const code = boolEnv('OTP_FAKE_LOG_CODES', true) ? message.code : '(hidden)';
     console.log(
@@ -103,9 +106,20 @@ export function providerNameFor(message: OtpMessage, hint?: string | null): stri
   return (perCountry ?? hint ?? env('OTP_PROVIDER') ?? 'fake').trim().toLowerCase();
 }
 
+/** True when the deployment chose a provider for this message (`OTP_PROVIDER[_<ISO2>]`). */
+export function providerConfigured(message: OtpMessage): boolean {
+  return (
+    (message.country !== null && env(`OTP_PROVIDER_${message.country}`) !== undefined) ||
+    env('OTP_PROVIDER') !== undefined
+  );
+}
+
 export function resolveProvider(name: string): OtpProvider {
   const provider = PROVIDERS[name];
   if (!provider)
-    throw new OtpProviderError('provider_not_configured', `OTP provider "${name}" is not implemented.`);
+    throw new OtpProviderError(
+      'provider_not_configured',
+      `OTP provider "${name}" is not implemented.`,
+    );
   return provider;
 }

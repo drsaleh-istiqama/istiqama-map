@@ -10,6 +10,8 @@ import type { Clock } from '../clock';
 
 interface Timer {
   at: number;
+  /** Delay that was requested when the timer was set. */
+  delay: number;
   fn: () => void;
   auto: boolean;
 }
@@ -37,7 +39,7 @@ export class TestClock implements Clock {
   setTimeout(fn: () => void, ms: number): number {
     const id = ++this.seq;
     const auto = ms <= this.autoUpToMs;
-    this.timers.set(id, { at: this.time + ms, fn, auto });
+    this.timers.set(id, { at: this.time + ms, delay: ms, fn, auto });
     this.delays.push(ms);
     if (auto) this.pump();
     return id;
@@ -47,8 +49,18 @@ export class TestClock implements Clock {
     this.timers.delete(handle as number);
   }
 
-  /** Delays of the timers that wait for `advance()`. */
+  /**
+   * Requested delays of the timers that wait for `advance()`. The requested delay, not the
+   * remaining time: a short auto timer that fires after a long one was set (a debounced
+   * counter refresh, say) moves the virtual time and would otherwise make assertions on the
+   * scheduling decision depend on the order of macrotasks.
+   */
   waiting(): number[] {
+    return [...this.timers.values()].filter((t) => !t.auto).map((t) => t.delay);
+  }
+
+  /** Remaining time of the timers that wait for `advance()`. */
+  remaining(): number[] {
     return [...this.timers.values()].filter((t) => !t.auto).map((t) => t.at - this.time);
   }
 

@@ -106,7 +106,8 @@ export async function requireUser(req: Request, opts: { verify?: boolean } = {})
     } catch (e) {
       throw errors.upstream('auth_unavailable', e instanceof Error ? e.message : String(e));
     }
-    if (res.status >= 500) throw errors.upstream('auth_unavailable', `Auth answered ${res.status}.`);
+    if (res.status >= 500)
+      throw errors.upstream('auth_unavailable', `Auth answered ${res.status}.`);
     const user = res.ok ? ((await res.json().catch(() => null)) as { id?: string } | null) : null;
     if (!res.ok) await res.body?.cancel().catch(() => undefined);
     if (!user || typeof user.id !== 'string' || user.id.toLowerCase() !== caller.userId)

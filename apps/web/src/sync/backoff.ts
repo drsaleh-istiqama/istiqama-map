@@ -16,7 +16,12 @@ export interface BackoffPolicy {
  * @param random  uniform [0, 1)
  * @param floorMs server hint (Retry-After): never wait less than this
  */
-export function backoffDelay(policy: BackoffPolicy, attempt: number, random: () => number, floorMs = 0): number {
+export function backoffDelay(
+  policy: BackoffPolicy,
+  attempt: number,
+  random: () => number,
+  floorMs = 0,
+): number {
   const factor = policy.factor ?? 2;
   const exp = Math.min(policy.maxMs, policy.baseMs * Math.pow(factor, Math.max(0, attempt)));
   const jittered = exp / 2 + random() * (exp / 2);

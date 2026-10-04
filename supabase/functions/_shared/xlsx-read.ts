@@ -15,11 +15,7 @@ import { ZipError, openZipEntry, readZipDirectory, readZipEntry, type ZipEntry }
 export type SheetCell = string | number | boolean | null;
 
 export type XlsxReadErrorCode =
-  | 'not_xlsx'
-  | 'encrypted_or_legacy'
-  | 'too_large'
-  | 'corrupt'
-  | 'no_sheet';
+  'not_xlsx' | 'encrypted_or_legacy' | 'too_large' | 'corrupt' | 'no_sheet';
 
 export class XlsxReadError extends Error {
   constructor(
@@ -70,7 +66,8 @@ export function decodeXml(text: string): string {
   return text.replace(/&(#x[0-9a-fA-F]{1,6}|#[0-9]{1,7}|[a-z]{2,4});/g, (whole, body: string) => {
     if (body[0] === '#') {
       const code = body[1] === 'x' ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
-      if (!Number.isFinite(code) || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return '';
+      if (!Number.isFinite(code) || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff))
+        return '';
       return String.fromCodePoint(code);
     }
     return NAMED_ENTITIES[body] ?? whole;
@@ -233,7 +230,11 @@ function parseWorkbook(
     const rel = rid ? rels.get(rid) : undefined;
     if (!rel || !/\/worksheet$/.test(rel.type)) continue; // chart sheets, macro sheets…
     const state = attr(tag, 'state');
-    sheets.push({ name, path: resolveTarget(rel.target), hidden: state !== undefined && state !== 'visible' });
+    sheets.push({
+      name,
+      path: resolveTarget(rel.target),
+      hidden: state !== undefined && state !== 'visible',
+    });
   }
   const pr = new RegExp(`<${P}workbookPr\\s([^>]*?)/?>`).exec(workbookXml);
   const d1904 = pr ? attr(pr[1]!, 'date1904') : undefined;
@@ -296,7 +297,8 @@ function parseRow(body: string, ctx: RowContext): SheetCell[] | null {
       else if (type === 's') value = ctx.strings[Number(raw)] ?? null;
       else if (type === 'str') value = decodeExcelEscapes(decodeXml(raw));
       else if (type === 'b') value = raw.trim() === '1' || raw.trim().toLowerCase() === 'true';
-      else if (type === 'e') value = null; // #N/A, #REF!… are not data
+      else if (type === 'e')
+        value = null; // #N/A, #REF!… are not data
       else if (type === 'd') value = decodeXml(raw).replace(/T00:00:00(?:\.0+)?Z?$/, '');
       else {
         const n = Number(raw);
@@ -331,7 +333,13 @@ async function readPart(bytes: Uint8Array, entry: ZipEntry, maxBytes: number): P
 
 /** Read one sheet of an XLSX workbook as rows of values. */
 export async function readXlsx(bytes: Uint8Array, opts: XlsxReadOptions): Promise<XlsxSheet> {
-  if (bytes.length >= 8 && bytes[0] === 0xd0 && bytes[1] === 0xcf && bytes[2] === 0x11 && bytes[3] === 0xe0)
+  if (
+    bytes.length >= 8 &&
+    bytes[0] === 0xd0 &&
+    bytes[1] === 0xcf &&
+    bytes[2] === 0x11 &&
+    bytes[3] === 0xe0
+  )
     throw new XlsxReadError(
       'encrypted_or_legacy',
       'password-protected workbooks and the legacy .xls format are not supported',
@@ -346,7 +354,8 @@ export async function readXlsx(bytes: Uint8Array, opts: XlsxReadOptions): Promis
     const workbookXml = await readPart(bytes, workbookEntry, SMALL);
     const relsXml = relsEntry ? await readPart(bytes, relsEntry, SMALL) : '';
     const wb = parseWorkbook(workbookXml, relsXml);
-    if (wb.sheets.length === 0) throw new XlsxReadError('no_sheet', 'the workbook has no worksheet');
+    if (wb.sheets.length === 0)
+      throw new XlsxReadError('no_sheet', 'the workbook has no worksheet');
 
     let chosen: SheetRef | undefined;
     if (typeof opts.sheet === 'number') chosen = wb.sheets[opts.sheet];
@@ -358,10 +367,14 @@ export async function readXlsx(bytes: Uint8Array, opts: XlsxReadOptions): Promis
 
     const stringsEntry = byName.get(wb.sharedStrings ?? 'xl/sharedStrings.xml');
     const strings = stringsEntry
-      ? parseSharedStrings(await readPart(bytes, stringsEntry, opts.maxStringsBytes ?? 64 * 1024 * 1024))
+      ? parseSharedStrings(
+          await readPart(bytes, stringsEntry, opts.maxStringsBytes ?? 64 * 1024 * 1024),
+        )
       : [];
     const stylesEntry = byName.get(wb.styles ?? 'xl/styles.xml');
-    const dateStyles = stylesEntry ? parseDateStyles(await readPart(bytes, stylesEntry, SMALL * 2)) : [];
+    const dateStyles = stylesEntry
+      ? parseDateStyles(await readPart(bytes, stylesEntry, SMALL * 2))
+      : [];
 
     const stats = { formulaCells: 0, columnsTruncated: false };
     const ctx: RowContext = {
@@ -376,7 +389,11 @@ export async function readXlsx(bytes: Uint8Array, opts: XlsxReadOptions): Promis
     let truncated = false;
     let lastRowNumber = 0;
 
-    const reader = openZipEntry(bytes, sheetEntry, opts.maxSheetBytes ?? 256 * 1024 * 1024).getReader();
+    const reader = openZipEntry(
+      bytes,
+      sheetEntry,
+      opts.maxSheetBytes ?? 256 * 1024 * 1024,
+    ).getReader();
     const decoder = new TextDecoder('utf-8');
     let buffer = '';
     let finished = false;

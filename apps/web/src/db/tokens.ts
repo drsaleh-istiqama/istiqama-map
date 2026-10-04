@@ -67,7 +67,10 @@ export function queryWords(q: string): string[] {
 }
 
 /** True when every query word is a prefix of at least one token. */
-export function matchesAllWords(tokens: readonly string[] | undefined, qWords: readonly string[]): boolean {
+export function matchesAllWords(
+  tokens: readonly string[] | undefined,
+  qWords: readonly string[],
+): boolean {
   if (!tokens || tokens.length === 0) return qWords.length === 0;
   for (const w of qWords) {
     let hit = false;
@@ -86,7 +89,10 @@ export function matchesAllWords(tokens: readonly string[] | undefined, qWords: r
  * 0..1 — how well the tokens answer the query: 1 when every word is a whole token, lower
  * when words only start a token (the shorter the completion, the better).
  */
-export function matchQuality(tokens: readonly string[] | undefined, qWords: readonly string[]): number {
+export function matchQuality(
+  tokens: readonly string[] | undefined,
+  qWords: readonly string[],
+): number {
   if (!tokens || qWords.length === 0) return 0;
   let sum = 0;
   for (const w of qWords) {

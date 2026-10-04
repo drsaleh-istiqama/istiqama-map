@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'preact/hooks';
 import { fmt, t } from '../i18n';
 import { getPref, setPref } from '../lib/prefs';
-import { syncStatus } from '../sync';
-import { WIFI_ONLY_PREF_KEY } from '../sync/network';
-import { storageEstimate, type StorageInfo } from '../sync/storage';
+// Only the public API of the sync module: it re-exports the storage estimate and the key of
+// the Wi-Fi-only preference, so this switch and the photo queue always agree on that key.
+import { storageEstimate, syncStatus, WIFI_ONLY_PREF_KEY, type StorageInfo } from '../sync';
 import { Button, Spinner } from '../ui';
 
 /** Device storage (brief §4.6) and the "upload photos on Wi-Fi only" switch (brief §4.4). */

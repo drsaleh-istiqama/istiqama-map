@@ -1,11 +1,12 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import preact from '@preact/preset-vite';
 import { defineConfig, loadEnv, normalizePath, type Plugin } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
-import { buildCsp, type CspInput } from './src/ui/pwa/csp';
+// Explicit extension: Vite's native config loader (future default) needs it.
+import { buildCsp, type CspInput } from './src/ui/pwa/csp.ts';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const webRoot = fileURLToPath(new URL('.', import.meta.url));
@@ -49,8 +50,12 @@ function cspPlugin(input: CspInput): Plugin {
 
 /** Preload the two Arabic font files needed for first paint (hashed names exist only after bundling). */
 function fontPreloadPlugin(): Plugin {
+  let base = '/';
   return {
     name: 'istiqama:font-preload',
+    configResolved(config) {
+      base = config.base.endsWith('/') ? config.base : `${config.base}/`;
+    },
     transformIndexHtml: {
       order: 'post',
       handler(_html, ctx) {
@@ -64,7 +69,7 @@ function fontPreloadPlugin(): Plugin {
             rel: 'preload',
             as: 'font',
             type: 'font/woff2',
-            href: `/${file}`,
+            href: `${base}${file}`,
             crossorigin: '',
           },
           injectTo: 'head' as const,
@@ -105,44 +110,6 @@ function localesPlugin(): Plugin {
   };
 }
 
-/**
- * TEMPORARY, behind a flag: while neighbouring modules (`src/lib`, `src/auth`, `src/sync`,
- * `src/db`, …) are still being written, a relative import that has no real file falls back to
- * the file with the same path under `src/ui/__stubs__/`. A real module always wins.
- * Enabled with ISTIQAMA_STUBS=1 (build / dev) and under Vitest. Delete together with the
- * stub folder once every module in docs/contracts/web.md exists.
- */
-function stubFallbackPlugin(enabled: boolean): Plugin {
-  const src = normalizePath(path.join(webRoot, 'src'));
-  const stubs = `${src}/ui/__stubs__`;
-  const suffixes = ['', '.ts', '.tsx', '/index.ts', '/index.tsx'];
-  const isFile = (file: string): boolean => existsSync(file) && statSync(file).isFile();
-  const find = (base: string): string | undefined => suffixes.map((s) => base + s).find(isFile);
-  const used = new Set<string>();
-  return {
-    name: 'istiqama:stub-fallback',
-    enforce: 'pre',
-    resolveId(source, importer) {
-      if (!enabled || !importer || !source.startsWith('.')) return null;
-      const from = normalizePath(importer.split('?')[0] ?? '');
-      if (!from.startsWith(`${src}/`) || from.startsWith(`${stubs}/`)) return null;
-      const target = normalizePath(path.resolve(path.dirname(from), source.split('?')[0] ?? ''));
-      if (!target.startsWith(`${src}/`) || target.startsWith(`${stubs}/`) || find(target))
-        return null;
-      const stub = find(`${stubs}/${target.slice(src.length + 1)}`);
-      if (!stub) return null;
-      used.add(target.slice(src.length + 1));
-      return stub;
-    },
-    buildEnd() {
-      if (used.size)
-        this.warn(
-          `TEMPORARY STUBS used instead of missing modules: ${[...used].sort().join(', ')}`,
-        );
-    },
-  };
-}
-
 export default defineConfig(({ mode }) => {
   // VITE_* variables live in the repository root (.env.local / .env.example).
   const env = loadEnv(mode, root, 'VITE_');
@@ -151,7 +118,6 @@ export default defineConfig(({ mode }) => {
     tilesUrl: env.VITE_TILES_URL,
     sentryDsn: env.VITE_SENTRY_DSN,
   };
-  const useStubs = process.env.ISTIQAMA_STUBS === '1' || Boolean(process.env.VITEST);
 
   return {
     envDir: root,
@@ -159,7 +125,6 @@ export default defineConfig(({ mode }) => {
       __APP_VERSION__: JSON.stringify(version),
     },
     plugins: [
-      stubFallbackPlugin(useStubs),
       preact(),
       localesPlugin(),
       cspPlugin(csp),
@@ -186,7 +151,9 @@ export default defineConfig(({ mode }) => {
       chunkSizeWarningLimit: 900,
     },
     server: { port: 5173, strictPort: true },
-    preview: { port: 4173, strictPort: true },
+    // 127.0.0.1, not "localhost": on Windows "localhost" may bind to ::1 only (the e2e suite
+    // and the CSP use the IPv4 loopback).
+    preview: { host: '127.0.0.1', port: 4173, strictPort: true },
     test: {
       name: 'web',
       environment: 'happy-dom',

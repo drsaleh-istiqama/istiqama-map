@@ -5,13 +5,15 @@
  * out of the entry chunk. Its own fingerprint store (localStorage) is switched off — the
  * photo queue persists the upload URL in IndexedDB instead.
  */
+// Type-only: erased at build time, so tus-js-client stays out of the entry chunk.
+import type * as TusModule from 'tus-js-client';
 import { SyncError, type SyncErrorKind } from './errors';
 import type { ResumableUploader, UploadRequest } from './ports';
 
 /** Real Supabase Storage requires exactly 6 MB chunks (the last one may be smaller). */
 export const TUS_CHUNK_SIZE = 6 * 1024 * 1024;
 
-type Tus = typeof import('tus-js-client');
+type Tus = typeof TusModule;
 type TusOptions = NonNullable<ConstructorParameters<Tus['Upload']>[1]>;
 type TusError = Parameters<NonNullable<TusOptions['onError']>>[0];
 
@@ -47,7 +49,10 @@ export function mapTusError(error: TusError): SyncError {
   const status = response.getStatus();
   const body = (response.getBody() ?? '').slice(0, 200);
   // An expired/invalid token is reported by Storage as 400/403 with a JWT message.
-  const kind = /jwt|token.*expired|invalid.*token/i.test(body) && status < 500 ? 'unauthenticated' : kindForStatus(status);
+  const kind =
+    /jwt|token.*expired|invalid.*token/i.test(body) && status < 500
+      ? 'unauthenticated'
+      : kindForStatus(status);
   const retryAfter = Number(response.getHeader('Retry-After'));
   return new SyncError(kind, `upload: HTTP ${status} ${body}`.trim(), {
     status,
@@ -69,7 +74,9 @@ export function createTusUploader(deps: TusUploaderDeps): ResumableUploader {
       // The Node build of tus-js-client (unit/integration tests) reads Buffers, the browser build Blobs.
       const nodeBuild = tus.defaultOptions.httpStack.getName() === 'NodeHttpStack';
       const NodeBuffer = (globalThis as { Buffer?: { from(data: ArrayBuffer): unknown } }).Buffer;
-      const input = (nodeBuild && NodeBuffer ? NodeBuffer.from(await req.blob.arrayBuffer()) : req.blob) as Blob;
+      const input = (
+        nodeBuild && NodeBuffer ? NodeBuffer.from(await req.blob.arrayBuffer()) : req.blob
+      ) as Blob;
 
       await new Promise<void>((resolve, reject) => {
         let settled = false;

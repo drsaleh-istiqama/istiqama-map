@@ -24,7 +24,7 @@ import type {
   ResumableUploader,
   SessionProblem,
 } from './ports';
-import { type PullOptions, pullChanges, resetSyncedData } from './pull';
+import { type PullOptions, type PullTuning, pullChanges, resetSyncedData } from './pull';
 import { type PushOptions, pushOutbox } from './push';
 import { createStatusSignal, patchStatus } from './status';
 import type { SyncStatus, Transport } from './types';
@@ -71,7 +71,7 @@ export interface EngineOptions {
   /** Continuation cycles do not send the heartbeat more often than this. */
   heartbeatGapMs?: number;
   push?: Omit<PushOptions, 'signal'>;
-  pull?: Omit<PullOptions, 'signal'>;
+  pull?: Omit<PullOptions, 'signal' | 'tuning'>;
   photos?: Omit<PhotoRunOptions, 'signal'>;
 }
 
@@ -133,6 +133,8 @@ export function createSyncEngine(deps: EngineDeps, options: EngineOptions = {}):
   let lastSeenPendingOps = 0;
   let unsubscribers: Array<() => void> = [];
   let countsQueued = false;
+  /** Page size this device managed to store, learned by pull and kept for the page load. */
+  const pullTuning: PullTuning = { ceiling: null };
 
   // -- status -------------------------------------------------------------------------------
 
@@ -233,6 +235,9 @@ export function createSyncEngine(deps: EngineDeps, options: EngineOptions = {}):
     patchStatus(status, { online });
     if (!online) {
       if (status.peek().state !== 'error') patchStatus(status, { state: 'idle' });
+      // "Sync now" while offline: at least show exactly what is waiting on the device (the
+      // change notifications are debounced and may not have arrived yet).
+      await refreshCounts();
       return;
     }
     lastAttemptAt = clock.now();
@@ -262,12 +267,16 @@ export function createSyncEngine(deps: EngineDeps, options: EngineOptions = {}):
     await pushOutbox({ db, transport, auth, clock }, { ...options.push, signal });
 
     patchStatus(status, { state: 'pulling' });
-    const pulled = await pullChanges({ db, transport, clock }, { ...options.pull, signal });
+    const pulled = await pullChanges(
+      { db, transport, clock },
+      { ...options.pull, signal, tuning: pullTuning },
+    );
 
     patchStatus(status, { state: 'pushing' });
     const uploaded = await photos.run({ ...options.photos, signal });
     // The rows that just became `uploaded` go out in the same cycle.
-    if (uploaded.uploaded > 0) await pushOutbox({ db, transport, auth, clock }, { ...options.push, signal });
+    if (uploaded.uploaded > 0)
+      await pushOutbox({ db, transport, auth, clock }, { ...options.push, signal });
 
     const more = !pulled.done || uploaded.more;
     await heartbeat(more, signal);
@@ -346,7 +355,12 @@ export function createSyncEngine(deps: EngineDeps, options: EngineOptions = {}):
       }
     }
     failures++;
-    nextDelay = backoffDelay(CYCLE_BACKOFF, failures - 1, () => clock.random(), err.retryAfterMs ?? 0);
+    nextDelay = backoffDelay(
+      CYCLE_BACKOFF,
+      failures - 1,
+      () => clock.random(),
+      err.retryAfterMs ?? 0,
+    );
     patchStatus(status, { state: 'error', lastError: errorKey(err) });
     // Not a network/server condition: a defect worth a trace (Sentry picks console.error up).
     if (err.kind === 'unknown') console.error('sync: cycle failed', err.cause ?? err);
@@ -408,7 +422,11 @@ export function createSyncEngine(deps: EngineDeps, options: EngineOptions = {}):
     authProblemNotified = false;
     registered = false;
     patchStatus(status, { online: net.isOnline(), state: 'idle', lastError: null });
-    unsubscribers = [net.onChange(onConnectivity), net.onVisible(onVisible), db.watch(queueCountsRefresh)];
+    unsubscribers = [
+      net.onChange(onConnectivity),
+      net.onVisible(onVisible),
+      db.watch(queueCountsRefresh),
+    ];
     void refreshCounts();
     void launch(false);
   }
@@ -440,7 +458,8 @@ export function createSyncEngine(deps: EngineDeps, options: EngineOptions = {}):
 
     start() {
       wanted = true;
-      if (!started && deps.requestPersistence) void deps.requestPersistence().catch(() => undefined);
+      if (!started && deps.requestPersistence)
+        void deps.requestPersistence().catch(() => undefined);
       begin();
     },
 

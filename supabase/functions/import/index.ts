@@ -66,12 +66,14 @@ function readOptions(raw: unknown): Options {
       throw errors.validation('invalid_options', 'options is not valid JSON.');
     }
   }
-  if (!isRecord(value)) throw errors.validation('invalid_options', 'options must be a JSON object.');
+  if (!isRecord(value))
+    throw errors.validation('invalid_options', 'options must be a JSON object.');
   const out: Options = {};
   out.file_name = text(value.file_name, 255);
   const lang = text(value.lang, 5);
   if (lang !== undefined) {
-    if (!LANGS.has(lang)) throw errors.validation('invalid_lang', 'lang must be "ar", "sw" or "en".');
+    if (!LANGS.has(lang))
+      throw errors.validation('invalid_lang', 'lang must be "ar", "sw" or "en".');
     out.lang = lang;
   }
   for (const key of ['country_id', 'branch_id'] as const) {
@@ -81,23 +83,33 @@ function readOptions(raw: unknown): Options {
     out[key] = id;
   }
   if (value.column_map !== undefined && value.column_map !== null) {
-    if (!isRecord(value.column_map)) throw errors.validation('invalid_options', 'column_map must be an object.');
+    if (!isRecord(value.column_map))
+      throw errors.validation('invalid_options', 'column_map must be an object.');
     const entries = Object.entries(value.column_map);
-    if (entries.length > 300 || entries.some(([k, v]) => typeof v !== 'string' || k.length > 200 || v.length > 100))
-      throw errors.validation('invalid_options', 'column_map must map file headers to template keys.');
+    if (
+      entries.length > 300 ||
+      entries.some(([k, v]) => typeof v !== 'string' || k.length > 200 || v.length > 100)
+    )
+      throw errors.validation(
+        'invalid_options',
+        'column_map must map file headers to template keys.',
+      );
     out.column_map = value.column_map as Record<string, string>;
   }
-  if (typeof value.sheet === 'number' && Number.isInteger(value.sheet) && value.sheet >= 0) out.sheet = value.sheet;
+  if (typeof value.sheet === 'number' && Number.isInteger(value.sheet) && value.sheet >= 0)
+    out.sheet = value.sheet;
   else if (text(value.sheet, 64) !== undefined) out.sheet = text(value.sheet, 64);
   const delimiter = typeof value.delimiter === 'string' ? value.delimiter : undefined;
   if (delimiter !== undefined) {
     const d = delimiter === 'tab' ? '\t' : delimiter;
-    if (![',', ';', '\t'].includes(d)) throw errors.validation('invalid_options', 'delimiter must be "," ";" or "tab".');
+    if (![',', ';', '\t'].includes(d))
+      throw errors.validation('invalid_options', 'delimiter must be "," ";" or "tab".');
     out.delimiter = d;
   }
   const kind = text(value.source_kind, 20);
   if (kind !== undefined) {
-    if (!SOURCE_KINDS.has(kind)) throw errors.validation('invalid_options', 'unsupported source_kind.');
+    if (!SOURCE_KINDS.has(kind))
+      throw errors.validation('invalid_options', 'unsupported source_kind.');
     out.source_kind = kind;
   }
   out.storage_path = text(value.storage_path, 500);
@@ -136,7 +148,9 @@ export const handler = createHandler('import', ['POST'], async (req, { timing })
     const raw = await readBytes(req, MAX_FILE_BYTES + 256 * 1024);
     let form: FormData;
     try {
-      form = await new Response(raw as BodyInit, { headers: { 'content-type': contentType } }).formData();
+      form = await new Response(raw as BodyInit, {
+        headers: { 'content-type': contentType },
+      }).formData();
     } catch {
       throw errors.badRequest('invalid_multipart', 'The multipart body cannot be parsed.');
     }
@@ -158,7 +172,8 @@ export const handler = createHandler('import', ['POST'], async (req, { timing })
     } catch {
       throw errors.badRequest('invalid_json', 'The request body is not valid JSON.');
     }
-    if (!isRecord(body)) throw errors.validation('invalid_body', 'The request body must be a JSON object.');
+    if (!isRecord(body))
+      throw errors.validation('invalid_body', 'The request body must be a JSON object.');
     options = readOptions({
       ...(isRecord(body.options) ? body.options : {}),
       ...(isRecord(body.meta) ? body.meta : {}),
@@ -175,7 +190,8 @@ export const handler = createHandler('import', ['POST'], async (req, { timing })
       const { data, error } = await timing.measure('download', () =>
         user.storage.from('imports').download(options.storage_path!),
       );
-      if (error || !data) throw fromStorageError((error ?? {}) as { message?: string; statusCode?: string });
+      if (error || !data)
+        throw fromStorageError((error ?? {}) as { message?: string; statusCode?: string });
       if (data.size > MAX_FILE_BYTES)
         throw errors.tooLarge('file_too_large', `The file exceeds ${MAX_FILE_BYTES} bytes.`);
       fileBytes = new Uint8Array(await data.arrayBuffer());
@@ -195,18 +211,29 @@ export const handler = createHandler('import', ['POST'], async (req, { timing })
   if (fileBytes) {
     const bytes = fileBytes;
     const parsed = await timing.measure('parse', () =>
-      parseImportFile(bytes, { maxRows: MAX_ROWS, sheet: options.sheet, delimiter: options.delimiter }),
+      parseImportFile(bytes, {
+        maxRows: MAX_ROWS,
+        sheet: options.sheet,
+        delimiter: options.delimiter,
+      }),
     );
     rows = parsed.rows;
     file = parsed.info;
     sourceKind = parsed.info.kind;
   }
 
-  if (!rows || rows.length === 0) throw errors.validation('empty_file', 'There are no rows to import.');
+  if (!rows || rows.length === 0)
+    throw errors.validation('empty_file', 'There are no rows to import.');
   if (rows.length > MAX_ROWS)
-    throw errors.validation('too_many_rows', `${rows.length} rows (maximum ${MAX_ROWS} per batch).`);
+    throw errors.validation(
+      'too_many_rows',
+      `${rows.length} rows (maximum ${MAX_ROWS} per batch).`,
+    );
   if (rows.some((r) => !isRecord(r)))
-    throw errors.validation('invalid_rows', 'Every row must be a JSON object keyed by the column titles.');
+    throw errors.validation(
+      'invalid_rows',
+      'Every row must be a JSON object keyed by the column titles.',
+    );
 
   // Not retried: import_stage creates a batch on every call.
   const summary = unwrap<Record<string, unknown>>(

@@ -24,11 +24,19 @@ function base64Encode(bytes: Uint8Array): string {
 
 /** Key bytes of a hook secret ("v1,whsec_…", "whsec_…" or the bare base64 key). */
 export function webhookKey(secret: string): Uint8Array {
-  const bare = secret.trim().replace(/^v1,/, '').replace(/^whsec_/, '');
+  const bare = secret
+    .trim()
+    .replace(/^v1,/, '')
+    .replace(/^whsec_/, '');
   return base64Decode(bare);
 }
 
-export async function signWebhook(secret: string, id: string, timestamp: string, body: string): Promise<string> {
+export async function signWebhook(
+  secret: string,
+  id: string,
+  timestamp: string,
+  body: string,
+): Promise<string> {
   const key = await crypto.subtle.importKey(
     'raw',
     webhookKey(secret) as BufferSource,
@@ -47,7 +55,8 @@ function constantTimeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-export type WebhookVerdict = 'ok' | 'missing_headers' | 'stale_timestamp' | 'bad_signature' | 'bad_secret';
+export type WebhookVerdict =
+  'ok' | 'missing_headers' | 'stale_timestamp' | 'bad_signature' | 'bad_secret';
 
 /**
  * Verify a hook request. `secrets` may hold several secrets (rotation); `toleranceSeconds`
@@ -65,7 +74,8 @@ export async function verifyWebhook(
   const signatures = headers.get('webhook-signature');
   if (!id || !timestamp || !signatures) return 'missing_headers';
   const ts = Number(timestamp);
-  if (!Number.isFinite(ts) || Math.abs(nowSeconds - ts) > toleranceSeconds) return 'stale_timestamp';
+  if (!Number.isFinite(ts) || Math.abs(nowSeconds - ts) > toleranceSeconds)
+    return 'stale_timestamp';
   const presented = signatures.split(/\s+/).filter((s) => s.startsWith('v1,'));
   let usable = false;
   for (const secret of secrets) {

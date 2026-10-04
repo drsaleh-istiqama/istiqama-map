@@ -91,8 +91,12 @@ export async function queueCounts(): Promise<QueueCounts> {
  * content. Operations that vanished meanwhile (coalesced, cancelled) or are already inflight
  * are skipped. From now on `mutate()` never changes them.
  */
-export async function markInflight(ops: ReadonlyArray<number | Pick<OutboxOp, 'seq'>>): Promise<OutboxOp[]> {
-  const seqs = ops.map((o) => (typeof o === 'number' ? o : o.seq)).filter((s): s is number => typeof s === 'number');
+export async function markInflight(
+  ops: ReadonlyArray<number | Pick<OutboxOp, 'seq'>>,
+): Promise<OutboxOp[]> {
+  const seqs = ops
+    .map((o) => (typeof o === 'number' ? o : o.seq))
+    .filter((s): s is number => typeof s === 'number');
   return db.transaction('rw', db.outbox, async () => {
     const claimed: OutboxOp[] = [];
     for (const op of await db.outbox.bulkGet(seqs)) {
@@ -125,7 +129,11 @@ export async function requeueInflight(seqs?: readonly number[]): Promise<number>
  * only when the row is known to contain nothing but this device's own changes up to that
  * version (see the file header).
  */
-export async function rebaseQueuedOps(table: TableName, rowId: string, version: number): Promise<number> {
+export async function rebaseQueuedOps(
+  table: TableName,
+  rowId: string,
+  version: number,
+): Promise<number> {
   const ops = await opsForRow(table, rowId);
   let n = 0;
   for (const op of ops) {
@@ -148,7 +156,11 @@ export interface AckOutcome {
   status?: Exclude<PushResult['status'], 'duplicate'>;
 }
 
-function applyConflictValues(row: AnyRecord, result: PushResult, pendingFields: ReadonlySet<string>): string[] {
+function applyConflictValues(
+  row: AnyRecord,
+  result: PushResult,
+  pendingFields: ReadonlySet<string>,
+): string[] {
   const touched: string[] = [];
   const values = result.server_values ?? {};
   for (const field of result.conflict_fields ?? []) {
@@ -202,7 +214,9 @@ async function requeueOrphans(parentTable: TableName, parentId: string): Promise
   const mine = candidates.filter(
     (f) =>
       (parentTable === 'projects' && f.project_id === parentId) ||
-      Object.entries(tableDef(f.table).refs).some(([col, t]) => t === parentTable && f.fields[col] === parentId),
+      Object.entries(tableDef(f.table).refs).some(
+        ([col, t]) => t === parentTable && f.fields[col] === parentId,
+      ),
   );
   if (mine.length > 0) await requeueFailed(mine);
 }
@@ -213,8 +227,14 @@ async function requeueOrphans(parentTable: TableName, parentId: string): Promise
  * longer in the outbox is ignored.
  */
 export async function ackOp(result: PushResult): Promise<AckOutcome>;
-export async function ackOp(op: { op_id: string } | null | undefined, result: PushResult): Promise<AckOutcome>;
-export async function ackOp(a: PushResult | { op_id: string } | null | undefined, b?: PushResult): Promise<AckOutcome> {
+export async function ackOp(
+  op: { op_id: string } | null | undefined,
+  result: PushResult,
+): Promise<AckOutcome>;
+export async function ackOp(
+  a: PushResult | { op_id: string } | null | undefined,
+  b?: PushResult,
+): Promise<AckOutcome> {
   const result = (b ?? a) as PushResult;
   return db.transaction('rw', db.tables, async () => {
     const op = await db.outbox.where('op_id').equals(result.op_id).first();
@@ -225,7 +245,8 @@ export async function ackOp(a: PushResult | { op_id: string } | null | undefined
       await parkAsFailed(op, result.error);
       return { handled: true, status: 'rejected' };
     }
-    const status = result.status === 'duplicate' ? (result.original_status ?? 'applied') : result.status;
+    const status =
+      result.status === 'duplicate' ? (result.original_status ?? 'applied') : result.status;
     const table = op.table;
     const version = typeof result.version === 'number' ? result.version : undefined;
 
@@ -249,7 +270,8 @@ export async function ackOp(a: PushResult | { op_id: string } | null | undefined
           fields: Object.fromEntries(Object.entries(q.fields).filter(([k]) => k !== 'created_at')),
         });
       }
-      for (const f of await failedOpsForRow(table, rowId)) await db.failed_ops.update(f.id!, { row_id: canonical });
+      for (const f of await failedOpsForRow(table, rowId))
+        await db.failed_ops.update(f.id!, { row_id: canonical });
       if (hit) {
         if (hit.where === 'restricted_local') await db.restricted_local.delete(rowId);
         else await db.table(table).delete(rowId);
@@ -260,6 +282,14 @@ export async function ackOp(a: PushResult | { op_id: string } | null | undefined
           if (version !== undefined) moved.version = version;
           await refreshDirtyFlags(moved, table, canonical);
           await putLocal(table, moved, hit.where, op.project_id);
+        } else if (canonicalHere && canonicalHere.where === 'store' && remaining.length > 0) {
+          // The canonical row is already here: the edits still queued for it show on top.
+          const merged: AnyRecord = { ...canonicalHere.row };
+          for (const q of remaining) {
+            for (const [k, v] of Object.entries(q.fields)) if (k !== 'created_at') merged[k] = v;
+          }
+          await refreshDirtyFlags(merged, table, canonical);
+          await putLocal(table, merged, 'store', op.project_id);
         }
       }
       await afterChildChange(table, op.project_id);
@@ -337,13 +367,19 @@ async function requeueFailed(failed: FailedOp[]): Promise<void> {
  */
 export async function retryFailedOps(ids?: readonly number[]): Promise<number> {
   return db.transaction('rw', db.tables, async () => {
-    const all = ids ? (await db.failed_ops.bulkGet([...ids])).filter((f): f is FailedOp => !!f) : await listFailedOps();
+    const all = ids
+      ? (await db.failed_ops.bulkGet([...ids])).filter((f): f is FailedOp => !!f)
+      : await listFailedOps();
     await requeueFailed(all);
     return all.length;
   });
 }
 
-async function restoreSnapshot(table: TableName, snapshot: DeleteSnapshot, projectId: string | null): Promise<void> {
+async function restoreSnapshot(
+  table: TableName,
+  snapshot: DeleteSnapshot,
+  projectId: string | null,
+): Promise<void> {
   const rowId = String(snapshot.row.id);
   if (!(await findLocal(table, rowId)) && Object.keys(snapshot.row).length > 1) {
     await putLocal(table, { ...snapshot.row }, 'store', projectId);
@@ -404,7 +440,9 @@ export async function discardFailedOp(id: number): Promise<void> {
     if (f.table === 'projects') {
       const p = hit.row as unknown as StoredProject;
       p._cmp =
-        hit.row._dirty === 1 ? completenessScore(p, await completenessChildren(f.row_id)) : (p.completeness ?? 0);
+        hit.row._dirty === 1
+          ? completenessScore(p, await completenessChildren(f.row_id))
+          : (p.completeness ?? 0);
     }
     await putLocal(f.table, hit.row, hit.where, projectId);
     await afterChildChange(f.table, projectId);

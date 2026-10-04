@@ -182,9 +182,7 @@ export const managerTzAal1: MyContext = {
   assigned_roles: [{ role: 'country_manager', scope_id: TZ, scope_type: 'country' }],
 };
 
-/** Constructed from the contract (not captured) — see the header. */
 export const managerTzAal2: MyContext = {
-  ...managerTzAal1,
   aal: 'aal2',
   roles: [{ role: 'country_manager', scope_id: TZ, scope_type: 'country' }],
   scopes: {
@@ -194,7 +192,18 @@ export const managerTzAal2: MyContext = {
     review: { all: false, branches: [], countries: [TZ] },
     restricted: { all: false, countries: [TZ] },
   },
-  scope_epoch: 'constructed-manager-tz-aal2',
+  profile: {
+    id: '030b2f24-f80a-3ef1-95e7-b57e6ff98683',
+    phone: null,
+    active: true,
+    full_name: 'مدير تنزانيا (تجريبي)',
+    preferred_language: 'en',
+  },
+  user_id: '030b2f24-f80a-3ef1-95e7-b57e6ff98683',
+  device_id: 'dev-auth-fixture',
+  session_ok: true,
+  scope_epoch: 'e82ba47f3bec3e0f8513bbb0f1922d5d',
+  server_time: '2026-10-04T01:17:25.139213+00:00',
   capabilities: {
     is_hq: false,
     can_write: true,
@@ -203,6 +212,7 @@ export const managerTzAal2: MyContext = {
     can_see_restricted: true,
   },
   mfa_required: false,
+  assigned_roles: [{ role: 'country_manager', scope_id: TZ, scope_type: 'country' }],
 };
 
 export const hqAdminAal1: MyContext = {

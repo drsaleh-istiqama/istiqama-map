@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "locales": "tsx ../../scripts/merge-locales.ts",
     "test": "vitest run",
+    "size": "node scripts/chunk-report.mjs --budget 200",
     "e2e": "playwright test"
   },
   "dependencies": {

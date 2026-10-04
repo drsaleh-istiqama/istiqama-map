@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import * as XLSXNS from 'xlsx';
 import { readXlsx } from './xlsx-read.ts';
-import { XLSX_MAX_CELL_CHARS, XlsxWriter, buildXlsx, columnName, safeSheetName, xmlEscape } from './xlsx.ts';
+import {
+  XLSX_MAX_CELL_CHARS,
+  XlsxWriter,
+  buildXlsx,
+  columnName,
+  safeSheetName,
+  xmlEscape,
+} from './xlsx.ts';
 import { readZipDirectory, readZipEntry } from './zip.ts';
 
 const XLSX: typeof XLSXNS = (XLSXNS as unknown as { default?: typeof XLSXNS }).default ?? XLSXNS;
@@ -11,12 +18,25 @@ async function sheetXml(bytes: Uint8Array): Promise<string> {
   return new TextDecoder().decode(await readZipEntry(bytes, entry, 50_000_000));
 }
 
-const COLUMNS = [{ header: 'رمز المشروع' }, { header: 'النوع' }, { header: 'السعة' }, { header: 'ملاحظة' }];
+const COLUMNS = [
+  { header: 'رمز المشروع' },
+  { header: 'النوع' },
+  { header: 'السعة' },
+  { header: 'ملاحظة' },
+];
 
 describe('helpers', () => {
   it('columnName', () => {
     expect([0, 25, 26, 27, 51, 52, 701, 702, 16383].map(columnName)).toEqual([
-      'A', 'Z', 'AA', 'AB', 'AZ', 'BA', 'ZZ', 'AAA', 'XFD',
+      'A',
+      'Z',
+      'AA',
+      'AB',
+      'AZ',
+      'BA',
+      'ZZ',
+      'AAA',
+      'XFD',
     ]);
   });
 
@@ -30,9 +50,15 @@ describe('helpers', () => {
 
   it('xmlEscape escapes markup and drops characters XML cannot carry', () => {
     expect(xmlEscape('a & b < c > d "e"')).toBe('a &amp; b &lt; c &gt; d &quot;e&quot;');
-    expect(xmlEscape(`a${String.fromCharCode(0)}b${String.fromCharCode(8)}c${String.fromCharCode(0x1f)}d`)).toBe('abcd');
+    expect(
+      xmlEscape(
+        `a${String.fromCharCode(0)}b${String.fromCharCode(8)}c${String.fromCharCode(0x1f)}d`,
+      ),
+    ).toBe('abcd');
     expect(xmlEscape(`line1\r\nline2\rline3`)).toBe('line1\nline2\nline3');
-    expect(xmlEscape(`ok ${String.fromCodePoint(0x1f54c)}`)).toBe(`ok ${String.fromCodePoint(0x1f54c)}`);
+    expect(xmlEscape(`ok ${String.fromCodePoint(0x1f54c)}`)).toBe(
+      `ok ${String.fromCodePoint(0x1f54c)}`,
+    );
     expect(xmlEscape(`lone ${String.fromCharCode(0xd83d)} surrogate`)).toBe(
       `lone ${String.fromCharCode(0xfffd)} surrogate`,
     );
@@ -60,10 +86,16 @@ describe('XlsxWriter', () => {
   });
 
   it('freezes the header row and marks the sheet right-to-left only for RTL languages', async () => {
-    const rtl = await sheetXml(await buildXlsx({ sheetName: 'x', rtl: true, columns: COLUMNS }, []));
+    const rtl = await sheetXml(
+      await buildXlsx({ sheetName: 'x', rtl: true, columns: COLUMNS }, []),
+    );
     expect(rtl).toContain('rightToLeft="1"');
-    expect(rtl).toContain('<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>');
-    const ltr = await sheetXml(await buildXlsx({ sheetName: 'x', rtl: false, columns: COLUMNS }, []));
+    expect(rtl).toContain(
+      '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>',
+    );
+    const ltr = await sheetXml(
+      await buildXlsx({ sheetName: 'x', rtl: false, columns: COLUMNS }, []),
+    );
     expect(ltr).not.toContain('rightToLeft');
     expect(ltr).toContain('state="frozen"');
     // header cells use the bold style
@@ -77,15 +109,22 @@ describe('XlsxWriter', () => {
     ]);
     const xml = await sheetXml(bytes);
     expect(xml).not.toContain('<f>');
-    const rows = XLSX.utils.sheet_to_json(XLSX.read(bytes, { type: 'array' }).Sheets.x!, { header: 1 });
+    const rows = XLSX.utils.sheet_to_json(XLSX.read(bytes, { type: 'array' }).Sheets.x!, {
+      header: 1,
+    });
     expect(rows[1]).toEqual([`'=1+1`, `'+255700000001`, -7, `'@SUM(A1:A9)`]);
     expect(rows[2]).toEqual([`'-خطر`, `'\t=cmd`, 3, `'=HYPERLINK("http://evil","x")`]);
   });
 
   it('keeps markup, quotes and line breaks of cell text intact', async () => {
     const tricky = 'سطر أول\nسطر ثانٍ & <b>bold</b> "quoted" \'single\'';
-    const bytes = await buildXlsx({ sheetName: 'x', rtl: true, columns: COLUMNS }, [[tricky, ' padded ', 1, '']]);
-    const rows = XLSX.utils.sheet_to_json(XLSX.read(bytes, { type: 'array' }).Sheets.x!, { header: 1, raw: true });
+    const bytes = await buildXlsx({ sheetName: 'x', rtl: true, columns: COLUMNS }, [
+      [tricky, ' padded ', 1, ''],
+    ]);
+    const rows = XLSX.utils.sheet_to_json(XLSX.read(bytes, { type: 'array' }).Sheets.x!, {
+      header: 1,
+      raw: true,
+    });
     expect(rows[1]).toEqual([tricky, ' padded ', 1]);
     const mine = await readXlsx(bytes, { maxRows: 10 });
     expect(mine.rows[1]).toEqual([tricky, ' padded ', 1]);
@@ -121,7 +160,11 @@ describe('XlsxWriter', () => {
   });
 
   it('ignores cells beyond the declared columns and counts data rows', async () => {
-    const writer = new XlsxWriter({ sheetName: 'x', rtl: false, columns: [{ header: 'a' }, { header: 'b' }] });
+    const writer = new XlsxWriter({
+      sheetName: 'x',
+      rtl: false,
+      columns: [{ header: 'a' }, { header: 'b' }],
+    });
     await writer.addRows([[1, 2, 3, 4]]);
     await writer.addRows([[5, 6]]);
     expect(writer.rows).toBe(2);
@@ -132,7 +175,11 @@ describe('XlsxWriter', () => {
       bytes.set(c, o);
       o += c.byteLength;
     }
-    expect((await readXlsx(bytes, { maxRows: 10 })).rows).toEqual([['a', 'b'], [1, 2], [5, 6]]);
+    expect((await readXlsx(bytes, { maxRows: 10 })).rows).toEqual([
+      ['a', 'b'],
+      [1, 2],
+      [5, 6],
+    ]);
     await expect(writer.addRows([[1, 2]])).rejects.toThrow(/finished/);
   });
 
@@ -140,7 +187,8 @@ describe('XlsxWriter', () => {
     const columns = Array.from({ length: 30 }, (_v, i) => ({ header: `عمود ${i + 1}` }));
     const writer = new XlsxWriter({ sheetName: 'كبير', rtl: true, columns });
     const row = columns.map((_c, i) => (i % 2 === 0 ? `قيمة ${i}` : i));
-    for (let page = 0; page < 5; page++) await writer.addRows(Array.from({ length: 1000 }, () => row));
+    for (let page = 0; page < 5; page++)
+      await writer.addRows(Array.from({ length: 1000 }, () => row));
     const { chunks, size, rows } = await writer.finish();
     expect(rows).toBe(5000);
     const bytes = new Uint8Array(size);

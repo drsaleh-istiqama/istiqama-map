@@ -83,13 +83,17 @@ export function Shell() {
     return () => setScrollContainer(null);
   }, [bare, desktop]);
 
-  // On navigation: close the sheet, retitle the document, move focus to the new content.
+  // The document title follows the page and the language.
+  useEffect(() => {
+    document.title = `${title} — ${t('common.appName')}`;
+  }, [title]);
+
+  // On navigation only (not on a language switch): close the sheet, move focus to the new content.
   useEffect(() => {
     setMoreOpen(false);
-    document.title = `${title} — ${t('common.appName')}`;
     if (firstRender.current) firstRender.current = false;
     else mainRef.current?.focus({ preventScroll: true });
-  }, [match.path, title]);
+  }, [match.path]);
 
   if (bare) {
     return (

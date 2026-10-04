@@ -7,7 +7,7 @@
  */
 export { Badge, type BadgeProps, type BadgeTone } from './Badge';
 export { Button, type ButtonProps, type ButtonVariant } from './Button';
-export { Chips, type ChipOption, type ChipsProps } from './Chips';
+export { Chips, type ChipOption, type ChipsOther, type ChipsProps } from './Chips';
 export { confirm, ConfirmDialog, type ConfirmOptions } from './ConfirmDialog';
 export { EmptyState, type EmptyStateProps } from './EmptyState';
 export { Field, fieldIds, type FieldProps } from './Field';

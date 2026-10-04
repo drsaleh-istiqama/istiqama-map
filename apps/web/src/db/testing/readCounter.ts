@@ -20,7 +20,9 @@ export interface ReadCounter extends ReadCount {
   byTable: Record<string, ReadCount>;
   reset(): void;
   /** Runs `fn` and returns what it read (the counter is reset before). */
-  measure<T>(fn: () => Promise<T>): Promise<{ result: T; rows: number; keys: number; byTable: Record<string, ReadCount> }>;
+  measure<T>(
+    fn: () => Promise<T>,
+  ): Promise<{ result: T; rows: number; keys: number; byTable: Record<string, ReadCount> }>;
   uninstall(): void;
 }
 

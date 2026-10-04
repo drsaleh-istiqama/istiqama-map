@@ -62,7 +62,14 @@ export { syncPort, watchQueues } from './syncPort';
 export type { SyncOp, SyncPort } from './syncPort';
 
 // --- photos ----------------------------------------------------------------------------
-export { dropPhotoBlob, dropPhotoBlobs, photoBlob, photoBlobBytes, pruneOrphanPhotoBlobs, putPhotoBlob } from './blobs';
+export {
+  dropPhotoBlob,
+  dropPhotoBlobs,
+  photoBlob,
+  photoBlobBytes,
+  pruneOrphanPhotoBlobs,
+  putPhotoBlob,
+} from './blobs';
 
 // --- queries ---------------------------------------------------------------------------
 export { loadProjectBundle, saveProjectBundle, publicRow } from './bundle';
@@ -88,7 +95,12 @@ export type {
 } from './list';
 export { searchLocal } from './search';
 export type { SearchHit, SearchKind, SearchProjectRef } from './search';
-export { findLocalDuplicates, findLocalPersonCandidates, normalizePhone, SAME_VILLAGE_RADIUS_M } from './match';
+export {
+  findLocalDuplicates,
+  findLocalPersonCandidates,
+  normalizePhone,
+  SAME_VILLAGE_RADIUS_M,
+} from './match';
 export type { DuplicateHit, PersonCandidate } from './match';
 
 // --- key/value -------------------------------------------------------------------------

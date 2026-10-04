@@ -8,7 +8,14 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { SyncError, type SyncErrorKind } from './errors';
-import type { PullPage, PushOp, PushResult, PushStatus, Transport, TransportCallOptions } from './types';
+import type {
+  PullPage,
+  PushOp,
+  PushResult,
+  PushStatus,
+  Transport,
+  TransportCallOptions,
+} from './types';
 
 /** What a PostgREST call resolves to in supabase-js (`status` 0 = the request never completed). */
 export interface RpcResponse {
@@ -19,7 +26,11 @@ export interface RpcResponse {
 
 /** Minimal RPC surface the transport needs; trivially faked in tests. */
 export interface RpcClient {
-  rpc(fn: string, args: Record<string, unknown>, opts: { signal: AbortSignal }): PromiseLike<RpcResponse>;
+  rpc(
+    fn: string,
+    args: Record<string, unknown>,
+    opts: { signal: AbortSignal },
+  ): PromiseLike<RpcResponse>;
 }
 
 export interface TransportOptions {
@@ -97,19 +108,28 @@ export function mapRpcError(fn: string, res: RpcResponse, timedOut: boolean): Sy
   // Application errors raised with `errcode = 'PTxxx'` (PostgREST turns xxx into the HTTP status).
   if (code === 'PT401') return new SyncError('unauthenticated', text, init);
   if (code === 'PT403') {
-    return new SyncError(message === 'session_revoked' ? 'session_revoked' : 'forbidden', text, init);
+    return new SyncError(
+      message === 'session_revoked' ? 'session_revoked' : 'forbidden',
+      text,
+      init,
+    );
   }
   if (code === 'PT404') return new SyncError('not_found', text, init);
   if (code === 'PT409') return new SyncError('conflict', text, init);
   if (code === 'PT422') return new SyncError('invalid', text, init);
   if (code === 'PT429' || res.status === 429) {
-    return new SyncError('rate_limited', text, { ...init, retryAfterMs: retryAfterFromHint(err.hint) });
+    return new SyncError('rate_limited', text, {
+      ...init,
+      retryAfterMs: retryAfterFromHint(err.hint),
+    });
   }
   if (RETRYABLE_SQLSTATES.has(code)) return new SyncError('server', text, init);
   // PostgREST's own JWT errors (expired / invalid token).
-  if (/^PGRST30[0-3]$/.test(code) || res.status === 401) return new SyncError('unauthenticated', text, init);
+  if (/^PGRST30[0-3]$/.test(code) || res.status === 401)
+    return new SyncError('unauthenticated', text, init);
   // A revoked session can also surface as a plain 403 with this message.
-  if (res.status === 403 && message === 'session_revoked') return new SyncError('session_revoked', text, init);
+  if (res.status === 403 && message === 'session_revoked')
+    return new SyncError('session_revoked', text, init);
   return new SyncError(kindForStatus(res.status), text, init);
 }
 
@@ -125,15 +145,28 @@ export function parsePushResults(data: unknown, ops: readonly PushOp[]): PushRes
   }
   return results.map((r, i) => {
     const op = ops[i] as PushOp;
-    if (!isRecord(r) || r.op_id !== op.op_id || typeof r.status !== 'string' || !PUSH_STATUSES.has(r.status)) {
-      throw new SyncError('bad_response', `sync_push: result ${i} does not match the operation sent`);
+    if (
+      !isRecord(r) ||
+      r.op_id !== op.op_id ||
+      typeof r.status !== 'string' ||
+      !PUSH_STATUSES.has(r.status)
+    ) {
+      throw new SyncError(
+        'bad_response',
+        `sync_push: result ${i} does not match the operation sent`,
+      );
     }
     return r as unknown as PushResult;
   });
 }
 
 export function parsePullPage(data: unknown): PullPage {
-  if (!isRecord(data) || !Array.isArray(data.changes) || typeof data.done !== 'boolean' || !('cursor' in data)) {
+  if (
+    !isRecord(data) ||
+    !Array.isArray(data.changes) ||
+    typeof data.done !== 'boolean' ||
+    !('cursor' in data)
+  ) {
     throw new SyncError('bad_response', 'sync_pull: unexpected response shape');
   }
   for (const c of data.changes) {
@@ -178,8 +211,11 @@ export function createTransport(client: RpcClient, options: TransportOptions = {
       // supabase-js resolves with `error`; a rejection means the fetch layer itself threw.
       if (timedOut) throw new SyncError('timeout', `${fn}: timed out`, { cause: e });
       const name = (e as { name?: string } | null)?.name;
-      if (name === 'AbortError' || external?.aborted) throw new SyncError('aborted', `${fn}: aborted`, { cause: e });
-      throw new SyncError('network', `${fn}: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
+      if (name === 'AbortError' || external?.aborted)
+        throw new SyncError('aborted', `${fn}: aborted`, { cause: e });
+      throw new SyncError('network', `${fn}: ${e instanceof Error ? e.message : String(e)}`, {
+        cause: e,
+      });
     } finally {
       clearTimeout(timer);
       external?.removeEventListener('abort', forward);
@@ -187,7 +223,8 @@ export function createTransport(client: RpcClient, options: TransportOptions = {
     if (res.error || res.status === 0 || res.status >= 400) {
       // Cancelled by the caller while on the wire: for a push the outcome is unknown, the
       // same op ids are sent again later.
-      if (res.status === 0 && external?.aborted && !timedOut) throw new SyncError('aborted', `${fn}: aborted`);
+      if (res.status === 0 && external?.aborted && !timedOut)
+        throw new SyncError('aborted', `${fn}: aborted`);
       throw mapRpcError(fn, res, timedOut);
     }
     return res.data;
@@ -205,7 +242,11 @@ export function createTransport(client: RpcClient, options: TransportOptions = {
       const data = await call('sync_pull', args, opt.pullTimeoutMs, options?.signal);
       return parsePullPage(data);
     },
-    async rpc<T>(fn: string, args: Record<string, unknown> = {}, options?: TransportCallOptions): Promise<T> {
+    async rpc<T>(
+      fn: string,
+      args: Record<string, unknown> = {},
+      options?: TransportCallOptions,
+    ): Promise<T> {
       return (await call(fn, args, opt.rpcTimeoutMs, options?.signal)) as T;
     },
   };

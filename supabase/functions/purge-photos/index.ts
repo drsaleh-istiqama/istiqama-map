@@ -17,7 +17,14 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { requireServiceRole } from '../_shared/auth.ts';
 import { serviceClient, withRetry } from '../_shared/clients.ts';
 import { intEnv, serveIfEntryPoint } from '../_shared/env.ts';
-import { createHandler, fromStorageError, isRecord, json, readJson, unwrap } from '../_shared/http.ts';
+import {
+  createHandler,
+  fromStorageError,
+  isRecord,
+  json,
+  readJson,
+  unwrap,
+} from '../_shared/http.ts';
 
 const TIME_BUDGET_MS = intEnv('PURGE_TIME_BUDGET_SECONDS', 100, 5, 380) * 1000;
 const REMOVE_CHUNK = 200; // object names per storage request
@@ -37,7 +44,11 @@ function clamp(value: unknown, fallback: number, min: number, max: number): numb
 }
 
 /** Remove objects; names that do not exist (any more) are not an error. */
-async function removeObjects(svc: SupabaseClient, bucket: string, names: string[]): Promise<number> {
+async function removeObjects(
+  svc: SupabaseClient,
+  bucket: string,
+  names: string[],
+): Promise<number> {
   let removed = 0;
   for (let i = 0; i < names.length; i += REMOVE_CHUNK) {
     const { data, error } = await svc.storage.from(bucket).remove(names.slice(i, i + REMOVE_CHUNK));
@@ -59,7 +70,9 @@ async function purgePhotos(
   let more = false;
   let previous = '';
   for (;;) {
-    const rows = unwrap<PurgeRow[]>(await withRetry<PurgeRow[]>(() => svc.rpc('photos_to_purge', { p_limit: limit })));
+    const rows = unwrap<PurgeRow[]>(
+      await withRetry<PurgeRow[]>(() => svc.rpc('photos_to_purge', { p_limit: limit })),
+    );
     if (!rows || rows.length === 0) break;
     // The same batch twice = marking does not make progress: stop instead of looping forever.
     const signature = `${rows.length}:${rows[0]!.id}:${rows[rows.length - 1]!.id}`;
@@ -77,10 +90,13 @@ async function purgePhotos(
       if (row.storage_path_thumb) names.push(row.storage_path_thumb);
       byBucket.set(row.bucket ?? 'photos', names);
     }
-    for (const [bucket, names] of byBucket) objects += await removeObjects(svc, bucket, [...new Set(names)]);
+    for (const [bucket, names] of byBucket)
+      objects += await removeObjects(svc, bucket, [...new Set(names)]);
 
     marked += unwrap<number>(
-      await withRetry<number>(() => svc.rpc('mark_photos_purged', { p_ids: rows.map((r) => r.id) })),
+      await withRetry<number>(() =>
+        svc.rpc('mark_photos_purged', { p_ids: rows.map((r) => r.id) }),
+      ),
     );
   }
   return { marked, objects_removed: objects, batches, more };
@@ -102,12 +118,19 @@ async function purgeExpiredExports(
     ),
   );
   if (!jobs || jobs.length === 0) return { files_removed: 0, jobs_cleared: 0 };
-  const removed = await removeObjects(svc, 'exports', jobs.map((j) => j.storage_path));
+  const removed = await removeObjects(
+    svc,
+    'exports',
+    jobs.map((j) => j.storage_path),
+  );
   const cleared = unwrap<Array<{ id: string }>>(
     await svc
       .from('export_jobs')
       .update({ storage_path: null })
-      .in('id', jobs.map((j) => j.id))
+      .in(
+        'id',
+        jobs.map((j) => j.id),
+      )
       .eq('state', 'expired')
       .select('id'),
   );

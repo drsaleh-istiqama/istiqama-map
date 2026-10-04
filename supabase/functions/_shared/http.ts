@@ -152,7 +152,11 @@ export function fromDbError(error: DbErrorLike, httpStatus?: number): HttpError 
 }
 
 /** Unwrap a supabase-js `{ data, error, status }` result or throw the mapped error. */
-export function unwrap<T>(result: { data: T | null; error: DbErrorLike | null; status?: number }): T {
+export function unwrap<T>(result: {
+  data: T | null;
+  error: DbErrorLike | null;
+  status?: number;
+}): T {
   if (result.error) throw fromDbError(result.error, result.status);
   return result.data as T;
 }

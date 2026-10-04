@@ -5,6 +5,8 @@
   "cancel": "Cancel",
   "confirm": "Confirm",
   "dismiss": "Dismiss notification",
+  "other": "Other",
+  "otherPlaceholder": "Type a short addition",
   "syncOnline": "Online",
   "syncOffline": "Offline",
   "syncPushing": "Uploading data…",

@@ -42,7 +42,10 @@ describe('requestPersistentStorage', () => {
   });
 
   it('does not ask when storage is already persistent', async () => {
-    const storage: StorageManagerLike = { persisted: vi.fn().mockResolvedValue(true), persist: vi.fn() };
+    const storage: StorageManagerLike = {
+      persisted: vi.fn().mockResolvedValue(true),
+      persist: vi.fn(),
+    };
     expect(await requestPersistentStorage(metaStore(), { storage })).toBe('persisted');
     expect(storage.persist).not.toHaveBeenCalled();
   });
@@ -66,7 +69,9 @@ describe('requestPersistentStorage', () => {
   it('copes with browsers that have no StorageManager or throw', async () => {
     expect(await requestPersistentStorage(metaStore(), { storage: null })).toBe('unsupported');
     resetPersistenceRequest();
-    const storage: StorageManagerLike = { persist: vi.fn().mockRejectedValue(new Error('SecurityError')) };
+    const storage: StorageManagerLike = {
+      persist: vi.fn().mockRejectedValue(new Error('SecurityError')),
+    };
     expect(await requestPersistentStorage(metaStore(), { storage })).toBe('denied');
   });
 });
@@ -95,16 +100,27 @@ describe('storageEstimate', () => {
 
 describe('quota handling', () => {
   it('refuses a large write that would eat into the reserve, with a typed error', async () => {
-    const storage: StorageManagerLike = { estimate: async () => ({ usage: 995_000_000, quota: 1_000_000_000 }) };
-    await expect(ensureStorageSpace(600_000, storage)).rejects.toMatchObject({ kind: 'storage_full' });
-    const roomy: StorageManagerLike = { estimate: async () => ({ usage: 0, quota: STORAGE_RESERVE_BYTES * 10 }) };
+    const storage: StorageManagerLike = {
+      estimate: async () => ({ usage: 995_000_000, quota: 1_000_000_000 }),
+    };
+    await expect(ensureStorageSpace(600_000, storage)).rejects.toMatchObject({
+      kind: 'storage_full',
+    });
+    const roomy: StorageManagerLike = {
+      estimate: async () => ({ usage: 0, quota: STORAGE_RESERVE_BYTES * 10 }),
+    };
     await expect(ensureStorageSpace(600_000, roomy)).resolves.toBeUndefined();
     await expect(ensureStorageSpace(600_000, null)).resolves.toBeUndefined();
   });
 
   it('turns QuotaExceededError into storage_full, also when Dexie wraps it', async () => {
-    await expect(withQuotaGuard(() => Promise.reject(quotaError()))).rejects.toMatchObject({ kind: 'storage_full' });
-    const wrapped = Object.assign(new Error('Transaction aborted'), { name: 'AbortError', inner: quotaError() });
+    await expect(withQuotaGuard(() => Promise.reject(quotaError()))).rejects.toMatchObject({
+      kind: 'storage_full',
+    });
+    const wrapped = Object.assign(new Error('Transaction aborted'), {
+      name: 'AbortError',
+      inner: quotaError(),
+    });
     expect(isQuotaError(wrapped)).toBe(true);
     await expect(withQuotaGuard(() => Promise.reject(wrapped))).rejects.toBeInstanceOf(SyncError);
     expect(errorKey(wrapped)).toBe('sync.error_storage_full');
@@ -121,7 +137,9 @@ describe('error classification', () => {
   it('maps thrown values to kinds and locale keys', () => {
     expect(toSyncError(new TypeError('Failed to fetch')).kind).toBe('network');
     expect(toSyncError(Object.assign(new Error('x'), { name: 'AbortError' })).kind).toBe('aborted');
-    expect(toSyncError(Object.assign(new Error('x'), { name: 'TimeoutError' })).kind).toBe('timeout');
+    expect(toSyncError(Object.assign(new Error('x'), { name: 'TimeoutError' })).kind).toBe(
+      'timeout',
+    );
     expect(toSyncError('weird').kind).toBe('unknown');
     const same = new SyncError('server', 'x');
     expect(toSyncError(same)).toBe(same);
@@ -143,9 +161,9 @@ describe('error classification', () => {
   });
 
   it('knows which failures may be retried and which end the session', () => {
-    const retryable = (['network', 'timeout', 'rate_limited', 'server', 'bad_response'] as const).map(
-      (k) => new SyncError(k, 'x').retryable,
-    );
+    const retryable = (
+      ['network', 'timeout', 'rate_limited', 'server', 'bad_response'] as const
+    ).map((k) => new SyncError(k, 'x').retryable);
     expect(retryable).toEqual([true, true, true, true, true]);
     expect(new SyncError('invalid', 'x').retryable).toBe(false);
     expect(new SyncError('session_revoked', 'x').fatalForSession).toBe(true);

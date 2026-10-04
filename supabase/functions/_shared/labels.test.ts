@@ -1,9 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { exportCell, exportRow, headerRow, translateCode, type EnumDictionary, type ExportColumn } from './labels.ts';
+import {
+  exportCell,
+  exportRow,
+  headerRow,
+  translateCode,
+  type EnumDictionary,
+  type ExportColumn,
+} from './labels.ts';
 
 const ENUMS_AR: EnumDictionary = {
   project_type: { mosque: 'مسجد', school: 'مدرسة قرآن', combined: 'مسجد ومدرسة' },
-  project_status: { active: 'يعمل', maintenance: 'يحتاج صيانة', building: 'قيد الإنشاء', inactive: 'متوقف' },
+  project_status: {
+    active: 'يعمل',
+    maintenance: 'يحتاج صيانة',
+    building: 'قيد الإنشاء',
+    inactive: 'متوقف',
+  },
   boolean: { true: 'نعم', false: 'لا' },
 };
 const ENUMS_SW: EnumDictionary = {
@@ -64,16 +76,37 @@ describe('exportCell / exportRow', () => {
       extra_key_not_in_columns: 'ignored',
     };
     expect(exportRow(COLUMNS, row, ENUMS_AR)).toEqual([
-      'TZ-PN-000001', 'مسجد', 'يعمل', 'نعم', 150, -5.05, 'الزراعة | الصيد', '2015-06-20',
+      'TZ-PN-000001',
+      'مسجد',
+      'يعمل',
+      'نعم',
+      150,
+      -5.05,
+      'الزراعة | الصيد',
+      '2015-06-20',
     ]);
     expect(headerRow(COLUMNS)).toEqual([
-      'رمز المشروع', 'النوع', 'الحالة', 'قابلية التوسع', 'السعة', 'خط العرض', 'سبل المعيشة', 'تاريخ البناء',
+      'رمز المشروع',
+      'النوع',
+      'الحالة',
+      'قابلية التوسع',
+      'السعة',
+      'خط العرض',
+      'سبل المعيشة',
+      'تاريخ البناء',
     ]);
   });
 
   it('null, undefined and missing keys are empty cells', () => {
     expect(exportRow(COLUMNS, { code: null, type: undefined }, ENUMS_AR)).toEqual([
-      null, null, null, null, null, null, null, null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
     ]);
   });
 

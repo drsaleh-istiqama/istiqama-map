@@ -12,12 +12,23 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const LANGS = ['ar', 'sw', 'en'] as const;
-const dir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'apps', 'web', 'locales');
+const dir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '..',
+  'apps',
+  'web',
+  'locales',
+);
 const parts = path.join(dir, '_parts');
 const check = process.argv.includes('--check');
 
 const merged: Record<string, Record<string, string>> = { ar: {}, sw: {}, en: {} };
-const files = fs.existsSync(parts) ? fs.readdirSync(parts).filter((f) => f.endsWith('.json')).sort() : [];
+const files = fs.existsSync(parts)
+  ? fs
+      .readdirSync(parts)
+      .filter((f) => f.endsWith('.json'))
+      .sort()
+  : [];
 for (const f of files) {
   const m = /^([a-z0-9-]+)\.(ar|sw|en)\.json$/.exec(f);
   if (!m) {
@@ -46,7 +57,9 @@ for (const k of [...keys].sort()) {
 }
 
 for (const l of LANGS) {
-  const sorted = Object.fromEntries(Object.entries(merged[l]!).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+  const sorted = Object.fromEntries(
+    Object.entries(merged[l]!).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+  );
   const out = JSON.stringify(sorted, null, 2) + '\n';
   const target = path.join(dir, `${l}.json`);
   if (check) {
@@ -58,4 +71,6 @@ for (const l of LANGS) {
 }
 
 if (problems) process.exit(1);
-console.log(`locales: ${keys.size} keys × ${LANGS.length} languages from ${files.length} fragments`);
+console.log(
+  `locales: ${keys.size} keys × ${LANGS.length} languages from ${files.length} fragments`,
+);

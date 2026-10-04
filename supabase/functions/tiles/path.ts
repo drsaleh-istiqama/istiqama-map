@@ -62,7 +62,8 @@ export function parseTileFilters(params: URLSearchParams): TileFilters {
   } catch {
     throw errors.validation('invalid_filter', 'The filter is not valid JSON.');
   }
-  if (!isRecord(parsed)) throw errors.validation('invalid_filter', 'The filter must be a JSON object.');
+  if (!isRecord(parsed))
+    throw errors.validation('invalid_filter', 'The filter must be a JSON object.');
   const out: TileFilters = {};
   for (const key of STRING_FILTERS) {
     const value = parsed[key];
@@ -71,8 +72,15 @@ export function parseTileFilters(params: URLSearchParams): TileFilters {
   }
   const layers = parsed.layers;
   if (layers !== undefined && layers !== null) {
-    if (!Array.isArray(layers) || layers.length === 0 || layers.some((l) => typeof l !== 'string' || !LAYERS.has(l)))
-      throw errors.validation('invalid_filter', 'Filter "layers" must be a subset of clusters, points, needs.');
+    if (
+      !Array.isArray(layers) ||
+      layers.length === 0 ||
+      layers.some((l) => typeof l !== 'string' || !LAYERS.has(l))
+    )
+      throw errors.validation(
+        'invalid_filter',
+        'Filter "layers" must be a subset of clusters, points, needs.',
+      );
     out.layers = [...new Set(layers as string[])];
   }
   return out;

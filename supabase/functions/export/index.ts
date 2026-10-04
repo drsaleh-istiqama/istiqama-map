@@ -100,7 +100,12 @@ const inFlight = new Set<string>();
 async function loadJob(user: SupabaseClient, id: string): Promise<Job> {
   const job = unwrap(
     await withRetry<Job>(() =>
-      user.from('export_jobs').select(JOB_COLUMNS).eq('id', id).is('deleted_at', null).maybeSingle(),
+      user
+        .from('export_jobs')
+        .select(JOB_COLUMNS)
+        .eq('id', id)
+        .is('deleted_at', null)
+        .maybeSingle(),
     ),
   );
   // RLS: users only see their own jobs — an unknown id and somebody else's job look the same.
@@ -181,7 +186,9 @@ async function processExport(job: Job, creds: CallerHeaders): Promise<void> {
   let uploaded: string | null = null;
   try {
     const running = unwrap(
-      await withRetry<Job>(() => svc.rpc('export_finish', { p_job_id: job.id, p_state: 'running' })),
+      await withRetry<Job>(() =>
+        svc.rpc('export_finish', { p_job_id: job.id, p_state: 'running' }),
+      ),
     );
     if (running.attempts > MAX_ATTEMPTS)
       throw new HttpError(500, 'PT500', 'too_many_attempts', {
@@ -192,7 +199,9 @@ async function processExport(job: Job, creds: CallerHeaders): Promise<void> {
       await withRetry<ExportColumns>(() => user.rpc('export_columns', { p_lang: job.lang })),
     );
     if (!Array.isArray(columns.columns) || columns.columns.length === 0)
-      throw new HttpError(500, 'PT500', 'no_columns', { details: 'export_columns returned no columns.' });
+      throw new HttpError(500, 'PT500', 'no_columns', {
+        details: 'export_columns returned no columns.',
+      });
 
     const fetchPage = async (after: unknown): Promise<ExportPage> =>
       unwrap(
@@ -206,7 +215,12 @@ async function processExport(job: Job, creds: CallerHeaders): Promise<void> {
     let truncatedCells = 0;
 
     if (format === 'xlsx') {
-      const outcome = await buildXlsxExport(columns, cellPages(columns, fetchPage), progress, XLSX_MAX_ROWS);
+      const outcome = await buildXlsxExport(
+        columns,
+        cellPages(columns, fetchPage),
+        progress,
+        XLSX_MAX_ROWS,
+      );
       if (outcome.overflow) {
         fallback = { from: 'xlsx', to: 'csv', reason: 'row_limit', limit: XLSX_MAX_ROWS };
         format = 'csv';
@@ -214,7 +228,12 @@ async function processExport(job: Job, creds: CallerHeaders): Promise<void> {
       } else {
         const path = `${job.user_id}/${job.id}.xlsx`;
         uploaded = path;
-        await uploadFile(svc, path, new Blob(outcome.chunks as BlobPart[], { type: XLSX_MIME }), XLSX_MIME);
+        await uploadFile(
+          svc,
+          path,
+          new Blob(outcome.chunks as BlobPart[], { type: XLSX_MIME }),
+          XLSX_MIME,
+        );
         truncatedCells = outcome.truncatedCells;
       }
     }
@@ -250,10 +269,14 @@ async function processExport(job: Job, creds: CallerHeaders): Promise<void> {
     if (fallback) stats.fallback = fallback;
     if (truncatedCells > 0) stats.truncated_cells = truncatedCells;
     // Bookkeeping only; a failure here must not fail the export.
-    await svc.from('export_jobs').update({ stats }).eq('id', job.id).then(
-      () => undefined,
-      () => undefined,
-    );
+    await svc
+      .from('export_jobs')
+      .update({ stats })
+      .eq('id', job.id)
+      .then(
+        () => undefined,
+        () => undefined,
+      );
 
     unwrap(
       await withRetry<Job>(() =>
@@ -271,7 +294,11 @@ async function processExport(job: Job, creds: CallerHeaders): Promise<void> {
   } catch (e) {
     const message = describeError(e);
     console.error(`[export] job ${job.id} failed: ${message}`);
-    if (uploaded) await svc.storage.from(BUCKET).remove([uploaded]).catch(() => undefined);
+    if (uploaded)
+      await svc.storage
+        .from(BUCKET)
+        .remove([uploaded])
+        .catch(() => undefined);
     // A cancelled (or already finished) job answers PT409 here: nothing more to do.
     await withRetry(() =>
       svc.rpc('export_finish', {
@@ -311,7 +338,8 @@ export const handler = createHandler('export', ['GET', 'POST'], async (req) => {
 
   enforceRateLimit('export', caller.userId, 30);
   const body = await readJson(req, 64 * 1024);
-  if (!isRecord(body)) throw errors.validation('invalid_body', 'The request body must be a JSON object.');
+  if (!isRecord(body))
+    throw errors.validation('invalid_body', 'The request body must be a JSON object.');
 
   let job: Job;
   if (body.job_id !== undefined && body.job_id !== null) {
@@ -325,7 +353,8 @@ export const handler = createHandler('export', ['GET', 'POST'], async (req) => {
     if (lang !== 'ar' && lang !== 'sw' && lang !== 'en')
       throw errors.validation('invalid_lang', 'lang must be "ar", "sw" or "en".');
     const filters = body.filters ?? {};
-    if (!isRecord(filters)) throw errors.validation('invalid_filters', 'filters must be a JSON object.');
+    if (!isRecord(filters))
+      throw errors.validation('invalid_filters', 'filters must be a JSON object.');
     // Not retried: export_request is not idempotent (it would create a second job).
     job = unwrap<Job>(
       await user.rpc('export_request', { p_format: format, p_lang: lang, p_filters: filters }),
@@ -334,7 +363,10 @@ export const handler = createHandler('export', ['GET', 'POST'], async (req) => {
 
   if (job.state === 'done') return json(await describe(user, job), 200);
   if (job.state === 'failed' || job.state === 'cancelled' || job.state === 'expired')
-    throw errors.conflict('export_not_active', `The export job is ${job.state}; request a new one.`);
+    throw errors.conflict(
+      'export_not_active',
+      `The export job is ${job.state}; request a new one.`,
+    );
 
   const alreadyRunning = inFlight.has(job.id) || (job.state === 'running' && !isStale(job));
   if (!alreadyRunning) {

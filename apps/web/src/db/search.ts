@@ -124,7 +124,11 @@ async function candidates<R extends Tokenised>(
     }
     ids = [...(set ?? [])];
   } else {
-    const sample = (await table.where('_tokens').startsWith(rarest.w).limit(cap).primaryKeys()) as string[];
+    const sample = (await table
+      .where('_tokens')
+      .startsWith(rarest.w)
+      .limit(cap)
+      .primaryKeys()) as string[];
     ids = [...new Set(sample)];
   }
   if (ids.length === 0) return [];
@@ -132,7 +136,12 @@ async function candidates<R extends Tokenised>(
   return rows.filter((r): r is R => !!r && matchesAllWords(r._tokens, qWords));
 }
 
-function scoreOf(qNorm: string, qWords: string[], tokens: string[] | undefined, ...names: Array<string | null>): number {
+function scoreOf(
+  qNorm: string,
+  qWords: string[],
+  tokens: string[] | undefined,
+  ...names: Array<string | null>
+): number {
   let bestSim = 0;
   for (const n of names) {
     if (!n) continue;
@@ -161,7 +170,11 @@ const projectRef = (p: Row<'projects'>): SearchProjectRef => ({
  * `[]`. Every word of the query must start a word of the hit. Best hits first; on equal
  * score: projects, localities, staff, donors. At most `limit` (default 20, max 50) hits.
  */
-export async function searchLocal(q: string, limit = 20, kinds?: readonly SearchKind[]): Promise<SearchHit[]> {
+export async function searchLocal(
+  q: string,
+  limit = 20,
+  kinds?: readonly SearchKind[],
+): Promise<SearchHit[]> {
   const size = Math.max(1, Math.min(50, Math.floor(limit) || 20));
   const qNorm = norm(q ?? '');
   const qWords = queryWords(qNorm);
@@ -266,7 +279,10 @@ export async function searchLocal(q: string, limit = 20, kinds?: readonly Search
         }
       }
 
-      hits.sort((a, b) => b.score - a.score || KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || (a.id < b.id ? -1 : 1));
+      hits.sort(
+        (a, b) =>
+          b.score - a.score || KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || (a.id < b.id ? -1 : 1),
+      );
       return hits.slice(0, size);
     },
   );

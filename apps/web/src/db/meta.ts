@@ -131,7 +131,9 @@ async function loadSettings(): Promise<Record<string, unknown>> {
 }
 
 /** Stores the `app_settings` rows fetched through PostgREST (`key`, `value`). */
-export async function saveAppSettings(rows: ReadonlyArray<{ key: string; value: unknown }>): Promise<void> {
+export async function saveAppSettings(
+  rows: ReadonlyArray<{ key: string; value: unknown }>,
+): Promise<void> {
   const next: Record<string, unknown> = {};
   for (const r of rows) next[r.key] = r.value;
   settings = next;
@@ -147,7 +149,12 @@ export async function getAppSetting<T>(key: string, fallback: T): Promise<T> {
 }
 
 /** A numeric setting clamped to `[min, max]` (non-numeric values give the default). */
-export async function getNumberSetting(key: string, fallback: number, min: number, max: number): Promise<number> {
+export async function getNumberSetting(
+  key: string,
+  fallback: number,
+  min: number,
+  max: number,
+): Promise<number> {
   const raw = await getAppSetting<unknown>(key, fallback);
   const n = typeof raw === 'number' && Number.isFinite(raw) ? raw : fallback;
   return Math.min(max, Math.max(min, n));

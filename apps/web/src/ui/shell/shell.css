@@ -304,6 +304,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* dir="auto" on the element: keep the alignment of the interface, not of the name's script */
+  text-align: match-parent;
 }
 .account__role {
   font-size: var(--fs-xs);

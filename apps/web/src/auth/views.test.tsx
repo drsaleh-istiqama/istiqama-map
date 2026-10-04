@@ -123,10 +123,20 @@ describe('LoginView', () => {
     ]) {
       expect(screen.getByTestId(id)).toBeTruthy();
     }
-    expect(screen.getByTestId('app-version').textContent).toContain(APP_VERSION);
+    const version = screen.getByTestId('app-version');
+    expect(version.textContent).toContain('auth.version');
+    // Only the Latin version string is isolated left-to-right, not the translated words.
+    expect(version.getAttribute('dir')).toBeNull();
+    const isolated = version.querySelector('bdi[dir="ltr"]');
+    expect(isolated?.textContent).toBe(APP_VERSION);
     expect(container.querySelector('input[type="password"]')).toBeNull();
     expect(container.textContent).not.toMatch(/password/i);
     expect(screen.getByTestId('login-tab-email').getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('names the screen in the document title', async () => {
+    render(<LoginView />);
+    await waitFor(() => expect(document.title).toContain('auth.login_title'));
   });
 
   it('e-mail flow: request a code, then verify it', async () => {

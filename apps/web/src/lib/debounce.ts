@@ -13,7 +13,10 @@ export interface Debounced<A extends unknown[]> {
  * Trailing-edge debounce: `fn` runs once, `waitMs` after the last call, with the arguments
  * of the last call (search box: 250 ms; draft autosave: on every field change).
  */
-export function debounce<A extends unknown[]>(fn: (...args: A) => void, waitMs: number): Debounced<A> {
+export function debounce<A extends unknown[]>(
+  fn: (...args: A) => void,
+  waitMs: number,
+): Debounced<A> {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let lastArgs: A | null = null;
 

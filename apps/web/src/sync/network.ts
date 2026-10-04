@@ -5,14 +5,22 @@
 import type { ConnectionType, NetworkPort, PrefsPort } from './ports';
 
 /** Key of the "upload photos over Wi-Fi only" preference in src/lib/prefs. */
-export const WIFI_ONLY_PREF_KEY = 'wifiOnly';
+export const WIFI_ONLY_PREF_KEY = 'sync.wifiOnly';
 
 interface NetworkInformationLike {
   type?: string;
   saveData?: boolean;
 }
 
-const KNOWN_TYPES: ReadonlySet<string> = new Set(['wifi', 'ethernet', 'cellular', 'bluetooth', 'wimax', 'other', 'none']);
+const KNOWN_TYPES: ReadonlySet<string> = new Set([
+  'wifi',
+  'ethernet',
+  'cellular',
+  'bluetooth',
+  'wimax',
+  'other',
+  'none',
+]);
 
 function connection(): NetworkInformationLike | undefined {
   if (typeof navigator === 'undefined') return undefined;
@@ -33,7 +41,9 @@ export function createBrowserNetwork(): NetworkPort {
     },
     connectionType(): ConnectionType {
       const type = connection()?.type;
-      return typeof type === 'string' && KNOWN_TYPES.has(type) ? (type as ConnectionType) : 'unknown';
+      return typeof type === 'string' && KNOWN_TYPES.has(type)
+        ? (type as ConnectionType)
+        : 'unknown';
     },
     saveData() {
       return connection()?.saveData === true;

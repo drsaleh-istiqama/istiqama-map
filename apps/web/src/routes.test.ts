@@ -1,3 +1,5 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/preact';
+import { h } from 'preact';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // In-memory stand-in for lib/prefs: the router only needs getPref / setPref.
@@ -121,10 +123,18 @@ describe('route table (docs/contracts/web.md §3.9)', () => {
     expect(matchRoute('/')?.route.load).toBe(matchRoute('/map')?.route.load);
   });
 
-  it('loads a view module with a default-exported component', async () => {
-    const module = await matchRoute('/maintenance')!.route.load();
-    expect(typeof module.default).toBe('function');
-  });
+  it('loads every feature view module, each with a default-exported component', async () => {
+    // Login (auth team) and Settings pull in the real auth / sync modules and have their own tests.
+    const loaders = new Set(
+      routes.filter((r) => r.path !== '/login' && r.path !== '/settings').map((r) => r.load),
+    );
+    expect(loaders.size).toBe(13);
+    for (const load of loaders) {
+      const module = await load();
+      expect(typeof module.default).toBe('function');
+    }
+    // A slow first import in a busy worker is not a failure.
+  }, 30_000);
 });
 
 describe('navigate / useRoute', () => {
@@ -266,5 +276,35 @@ describe('useViewFilters (brief §12: switching views must not wipe filters)', (
     clearViewFilters();
     expect(prefStore.has('filters.projects')).toBe(false);
     expect(useViewFilters('projects', defaults)[0]).toEqual(defaults);
+  });
+
+  it('works with the view key alone (defaults are optional)', () => {
+    const [initial, set] = useViewFilters<{ status?: string }>('incomplete');
+    expect(initial).toEqual({});
+    set({ status: 'maintenance' });
+    expect(useViewFilters<{ status?: string }>('incomplete')[0]).toEqual({ status: 'maintenance' });
+  });
+
+  it('in components: a view re-renders on change and finds its filter again after a view switch', async () => {
+    function View({ name }: { name: string }) {
+      const [filters, set] = useViewFilters(name, defaults);
+      return h(
+        'button',
+        { 'data-testid': `filter-${name}`, onClick: () => set({ status: 'maintenance' }) },
+        filters.status || 'all',
+      );
+    }
+    const view = render(h(View, { name: 'projects' }));
+    fireEvent.click(screen.getByTestId('filter-projects'));
+    await waitFor(() =>
+      expect(screen.getByTestId('filter-projects').textContent).toBe('maintenance'),
+    );
+
+    // Switch to another view (the projects page unmounts) and back again.
+    view.rerender(h(View, { key: 'map', name: 'map' }));
+    expect(screen.getByTestId('filter-map').textContent).toBe('all');
+    view.rerender(h(View, { key: 'projects', name: 'projects' }));
+    expect(screen.getByTestId('filter-projects').textContent).toBe('maintenance');
+    view.unmount();
   });
 });

@@ -91,7 +91,9 @@ describe('similarity — compatible with pg_trgm', () => {
   });
 
   it('the thresholds of the brief: 0.6 separates "same name with a typo" from "another name"', () => {
-    expect(similarity(norm('محمد بن سالم الحارثي'), norm('محمد بن سليم الحارثي'))).toBeGreaterThanOrEqual(0.6);
+    expect(
+      similarity(norm('محمد بن سالم الحارثي'), norm('محمد بن سليم الحارثي')),
+    ).toBeGreaterThanOrEqual(0.6);
     expect(similarity(norm('مسجد النور'), norm('مسجد النور الكبير'))).toBeGreaterThanOrEqual(0.6);
     expect(similarity(norm('مسجد النور'), norm('مدرسة النور'))).toBeLessThan(0.6);
     expect(similarity(norm('Mohamed'), norm('Mohammed'))).toBeGreaterThanOrEqual(0.6);

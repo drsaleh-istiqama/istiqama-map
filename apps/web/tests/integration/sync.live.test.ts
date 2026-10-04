@@ -65,14 +65,19 @@ const ENGINE_OPTIONS: EngineOptions = {
   pull: { minIntervalMs: 0, maxPages: 10_000 },
 };
 
-async function makeDevice(name: string, email: string, options: { collector: boolean }): Promise<Device> {
+async function makeDevice(
+  name: string,
+  email: string,
+  options: { collector: boolean },
+): Promise<Device> {
   const deviceId = `${RUN}-${name}`;
   const client = createClient(API, ANON, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
     global: { headers: { 'x-device-id': deviceId } },
   });
   const signedIn = await client.auth.signInWithPassword({ email, password: PASSWORD });
-  if (signedIn.error || !signedIn.data.user) throw new Error(`sign-in of ${email} failed: ${signedIn.error?.message}`);
+  if (signedIn.error || !signedIn.data.user)
+    throw new Error(`sign-in of ${email} failed: ${signedIn.error?.message}`);
   const userId = signedIn.data.user.id;
   const accessToken = async (): Promise<string | null> =>
     (await client.auth.getSession()).data.session?.access_token ?? null;
@@ -123,9 +128,19 @@ async function makeDevice(name: string, email: string, options: { collector: boo
         },
         net,
         prefs: new FakePrefs(),
-        app: { supabaseUrl: API, anonKey: ANON, appVersion: '3.0.0-live-test', deviceLabel: () => `live test ${name}` },
+        app: {
+          supabaseUrl: API,
+          anonKey: ANON,
+          appVersion: '3.0.0-live-test',
+          deviceLabel: () => `live test ${name}`,
+        },
         lock: new FakeLock(),
-        uploader: createTusUploader({ supabaseUrl: API, anonKey: ANON, accessToken, deviceId: () => deviceId }),
+        uploader: createTusUploader({
+          supabaseUrl: API,
+          anonKey: ANON,
+          accessToken,
+          deviceId: () => deviceId,
+        }),
         clock: systemClock,
       },
       ENGINE_OPTIONS,
@@ -164,7 +179,12 @@ function newProject(label: string): { id: string; fields: Record<string, unknown
  * exactly as the engine's own backoff would do.
  */
 async function sync(device: Device): Promise<void> {
-  const transient = ['sync.error_network', 'sync.error_server', 'sync.error_timeout', 'sync.error_rate_limited'];
+  const transient = [
+    'sync.error_network',
+    'sync.error_server',
+    'sync.error_timeout',
+    'sync.error_rate_limited',
+  ];
   for (let attempt = 0; attempt < 4; attempt++) {
     await device.engine.syncNow();
     const { state, lastError } = device.engine.status.value;
@@ -184,7 +204,10 @@ async function expectClean(device: Device): Promise<void> {
   expect(device.problems).toEqual([]);
 }
 
-async function serverProjects(client: SupabaseClient, prefix: string): Promise<Array<Record<string, unknown>>> {
+async function serverProjects(
+  client: SupabaseClient,
+  prefix: string,
+): Promise<Array<Record<string, unknown>>> {
   const { data, error } = await client
     .from('projects')
     .select('id, name_latin, builder, capacity, version, deleted_at, record_state')
@@ -203,7 +226,8 @@ beforeAll(async () => {
   expect(API, 'VITE_SUPABASE_URL (.env.local)').not.toBe('');
   expect(ANON, 'VITE_SUPABASE_ANON_KEY (.env.local)').not.toBe('');
   const health = await fetch(`${API}/dev/health`).catch(() => null);
-  if (!health?.ok) throw new Error(`the local stack is not reachable at ${API} (npm run stack:start)`);
+  if (!health?.ok)
+    throw new Error(`the local stack is not reachable at ${API} (npm run stack:start)`);
   a = await makeDevice('a', COLLECTOR, { collector: true });
   b = await makeDevice('b', COLLECTOR, { collector: true });
   supervisor = await makeDevice('sup', SUPERVISOR, { collector: true });
@@ -238,7 +262,10 @@ describe('two devices of one collector (acceptance criterion 4)', () => {
     expect(a.engine.status.value.lastSyncAt).not.toBeNull();
     expect((await a.store.allRows('countries')).length).toBeGreaterThan(0);
     expect((await a.store.allRows('projects')).length).toBeGreaterThan(0);
-    const { data } = await a.client.from('devices').select('device_id, revoked_at').eq('device_id', a.deviceId);
+    const { data } = await a.client
+      .from('devices')
+      .select('device_id, revoked_at')
+      .eq('device_id', a.deviceId);
     expect(data).toEqual([{ device_id: a.deviceId, revoked_at: null }]);
   }, 180_000);
 
@@ -254,7 +281,9 @@ describe('two devices of one collector (acceptance criterion 4)', () => {
 
     await sync(b);
     await expectClean(b);
-    expect(await b.store.getRow('projects', project.id)).toMatchObject({ name_latin: project.fields.name_latin });
+    expect(await b.store.getRow('projects', project.id)).toMatchObject({
+      name_latin: project.fields.name_latin,
+    });
   }, 180_000);
 
   it('different fields edited offline on both devices are merged without a conflict', async () => {
@@ -283,7 +312,9 @@ describe('two devices of one collector (acceptance criterion 4)', () => {
       });
     }
     await sync(supervisor);
-    const conflicts = (await supervisor.store.allRows('sync_conflicts')).filter((c) => c.row_id === project.id);
+    const conflicts = (await supervisor.store.allRows('sync_conflicts')).filter(
+      (c) => c.row_id === project.id,
+    );
     expect(conflicts).toEqual([]);
   }, 180_000);
 
@@ -291,7 +322,10 @@ describe('two devices of one collector (acceptance criterion 4)', () => {
     a.net.online = false;
     b.net.online = false;
     await a.store.mutate('projects', project.id, { builder: 'A wins the race' });
-    await b.store.mutate('projects', project.id, { builder: 'B was offline longer', name_latin: `${RUN}-conflict-renamed` });
+    await b.store.mutate('projects', project.id, {
+      builder: 'B was offline longer',
+      name_latin: `${RUN}-conflict-renamed`,
+    });
     a.net.online = true;
     b.net.online = true;
 
@@ -301,7 +335,10 @@ describe('two devices of one collector (acceptance criterion 4)', () => {
 
     // The conflicting field was not written; the other field of the same op was.
     const [server] = await serverProjects(a.client, `${RUN}-conflict`);
-    expect(server).toMatchObject({ builder: 'A wins the race', name_latin: `${RUN}-conflict-renamed` });
+    expect(server).toMatchObject({
+      builder: 'A wins the race',
+      name_latin: `${RUN}-conflict-renamed`,
+    });
     // Device B shows the server's value for the conflicting field.
     expect(await b.store.getRow('projects', project.id)).toMatchObject({
       builder: 'A wins the race',
@@ -310,7 +347,9 @@ describe('two devices of one collector (acceptance criterion 4)', () => {
 
     await sync(supervisor);
     await expectClean(supervisor);
-    const conflicts = (await supervisor.store.allRows('sync_conflicts')).filter((c) => c.row_id === project.id);
+    const conflicts = (await supervisor.store.allRows('sync_conflicts')).filter(
+      (c) => c.row_id === project.id,
+    );
     expect(conflicts).toHaveLength(1);
     expect(conflicts[0]).toMatchObject({
       table_name: 'projects',
@@ -322,19 +361,22 @@ describe('two devices of one collector (acceptance criterion 4)', () => {
     });
 
     // The supervisor decides; the decision reaches the collector's devices through pull.
-    const decision = await createTransport(supabaseRpcClient(supervisor.client)).rpc<{ state: string }>(
-      'resolve_conflict',
-      { p_conflict_id: conflicts[0]!.id, p_choice: 'client' },
-    );
+    const decision = await createTransport(supabaseRpcClient(supervisor.client)).rpc<{
+      state: string;
+    }>('resolve_conflict', { p_conflict_id: conflicts[0]!.id, p_choice: 'client' });
     expect(decision.state).toBe('resolved_client');
     await sync(a);
-    expect(await a.store.getRow('projects', project.id)).toMatchObject({ builder: 'B was offline longer' });
+    expect(await a.store.getRow('projects', project.id)).toMatchObject({
+      builder: 'B was offline longer',
+    });
   }, 180_000);
 });
 
 describe('20 projects with photos created offline, restart, then online (acceptance criterion 3)', () => {
   const COUNT = 20;
-  const projects = Array.from({ length: COUNT }, (_, i) => newProject(`bulk-${String(i + 1).padStart(2, '0')}`));
+  const projects = Array.from({ length: COUNT }, (_, i) =>
+    newProject(`bulk-${String(i + 1).padStart(2, '0')}`),
+  );
   const photos: Array<{ id: string; projectId: string; full: string; thumb: string }> = [];
 
   it('queues everything while offline', async () => {
@@ -364,13 +406,24 @@ describe('20 projects with photos created offline, restart, then online (accepta
           upload_state: 'pending',
           created_at: new Date().toISOString(),
         });
-        await a.store.putPhotoBlob(id, 'full', new Blob([new Uint8Array(4096).fill(i + 1)], { type: 'image/webp' }));
-        await a.store.putPhotoBlob(id, 'thumb', new Blob([new Uint8Array(512).fill(i + 1)], { type: 'image/webp' }));
+        await a.store.putPhotoBlob(
+          id,
+          'full',
+          new Blob([new Uint8Array(4096).fill(i + 1)], { type: 'image/webp' }),
+        );
+        await a.store.putPhotoBlob(
+          id,
+          'thumb',
+          new Blob([new Uint8Array(512).fill(i + 1)], { type: 'image/webp' }),
+        );
         await a.engine.enqueuePhotoUpload(id);
       }
     }
     await a.engine.syncNow(); // offline: a no-op
-    expect(a.engine.status.value).toMatchObject({ pendingOps: COUNT + photos.length, pendingPhotos: photos.length });
+    expect(a.engine.status.value).toMatchObject({
+      pendingOps: COUNT + photos.length,
+      pendingPhotos: photos.length,
+    });
     expect(await serverProjects(a.client, `${RUN}-bulk-`)).toHaveLength(0);
   }, 120_000);
 
@@ -382,7 +435,10 @@ describe('20 projects with photos created offline, restart, then online (accepta
       throw new SyncError('network', 'TypeError: fetch failed (response lost)');
     };
     await a.engine.syncNow();
-    expect(a.engine.status.value).toMatchObject({ state: 'error', lastError: 'sync.error_network' });
+    expect(a.engine.status.value).toMatchObject({
+      state: 'error',
+      lastError: 'sync.error_network',
+    });
     expect((await a.store.counts()).pendingOps).toBe(COUNT + photos.length); // nothing acknowledged
     expect((await serverProjects(a.client, `${RUN}-bulk-`)).length).toBeGreaterThan(0); // …but the server applied the batch
 
@@ -397,17 +453,24 @@ describe('20 projects with photos created offline, restart, then online (accepta
 
     // Exactly 20 projects, no duplicates.
     const onServer = await serverProjects(a.client, `${RUN}-bulk-`);
-    expect(onServer.map((p) => p.name_latin).sort()).toEqual(projects.map((p) => p.fields.name_latin).sort());
+    expect(onServer.map((p) => p.name_latin).sort()).toEqual(
+      projects.map((p) => p.fields.name_latin).sort(),
+    );
     expect(new Set(onServer.map((p) => p.id)).size).toBe(COUNT);
 
     // Their photo rows, each exactly once, all marked uploaded.
     const { data: photoRows, error } = await a.client
       .from('project_photos')
       .select('id, project_id, upload_state, storage_path_full, storage_path_thumb, deleted_at')
-      .in('project_id', projects.map((p) => p.id));
+      .in(
+        'project_id',
+        projects.map((p) => p.id),
+      );
     expect(error).toBeNull();
     expect((photoRows ?? []).map((r) => r.id).sort()).toEqual(photos.map((p) => p.id).sort());
-    expect((photoRows ?? []).every((r) => r.upload_state === 'uploaded' && r.deleted_at === null)).toBe(true);
+    expect(
+      (photoRows ?? []).every((r) => r.upload_state === 'uploaded' && r.deleted_at === null),
+    ).toBe(true);
 
     // The objects exist in storage with the right content.
     for (const photo of photos) {
@@ -423,7 +486,9 @@ describe('20 projects with photos created offline, restart, then online (accepta
     for (const photo of photos) {
       expect(await a.store.photoBlob(photo.id, 'full')).toBeUndefined();
       expect(await a.store.photoBlob(photo.id, 'thumb')).toBeDefined();
-      expect(await a.store.getRow('project_photos', photo.id)).toMatchObject({ upload_state: 'uploaded' });
+      expect(await a.store.getRow('project_photos', photo.id)).toMatchObject({
+        upload_state: 'uploaded',
+      });
     }
   }, 300_000);
 
@@ -436,7 +501,9 @@ describe('20 projects with photos created offline, restart, then online (accepta
 
 describe('restricted tables on a collector device', () => {
   it('never receives staff_compensation or community_sensitive rows', async () => {
-    expect([...a.pulledTables].filter((t) => t === 'staff_compensation' || t === 'community_sensitive')).toEqual([]);
+    expect(
+      [...a.pulledTables].filter((t) => t === 'staff_compensation' || t === 'community_sensitive'),
+    ).toEqual([]);
     expect(await a.store.allRows('staff_compensation')).toEqual([]);
     expect(await a.store.allRows('community_sensitive')).toEqual([]);
     // …and cannot read them directly either.
@@ -464,7 +531,9 @@ describe('restricted tables on a collector device', () => {
     expect(await a.store.allRows('community_sensitive')).toEqual([]);
 
     await sync(a);
-    expect([...a.pulledTables].filter((t) => t === 'staff_compensation' || t === 'community_sensitive')).toEqual([]);
+    expect(
+      [...a.pulledTables].filter((t) => t === 'staff_compensation' || t === 'community_sensitive'),
+    ).toEqual([]);
     expect(await a.store.allRows('community_sensitive')).toEqual([]);
   }, 120_000);
 });
@@ -488,7 +557,12 @@ describe('the real local database (src/db) end to end', () => {
     location_source: 'map',
     capacity: 45,
   });
-  const photo = realDb.newRow('project_photos', { project_id: project.id, width: 800, height: 600, bytes: 3000 });
+  const photo = realDb.newRow('project_photos', {
+    project_id: project.id,
+    width: 800,
+    height: 600,
+    bytes: 3000,
+  });
 
   beforeAll(async () => {
     client = createClient(API, ANON, {
@@ -496,7 +570,8 @@ describe('the real local database (src/db) end to end', () => {
       global: { headers: { 'x-device-id': deviceId } },
     });
     const signedIn = await client.auth.signInWithPassword({ email: COLLECTOR, password: PASSWORD });
-    if (signedIn.error || !signedIn.data.user) throw new Error(`sign-in failed: ${signedIn.error?.message}`);
+    if (signedIn.error || !signedIn.data.user)
+      throw new Error(`sign-in failed: ${signedIn.error?.message}`);
     userId = signedIn.data.user.id;
     const accessToken = async (): Promise<string | null> =>
       (await client.auth.getSession()).data.session?.access_token ?? null;
@@ -506,12 +581,27 @@ describe('the real local database (src/db) end to end', () => {
       {
         db: createDbAdapter({ userId: () => userId }),
         transport: createTransport(supabaseRpcClient(client)),
-        auth: { deviceId: () => deviceId, userId: () => userId, accessToken, onSessionProblem: () => undefined },
+        auth: {
+          deviceId: () => deviceId,
+          userId: () => userId,
+          accessToken,
+          onSessionProblem: () => undefined,
+        },
         net,
         prefs: new FakePrefs(),
-        app: { supabaseUrl: API, anonKey: ANON, appVersion: '3.0.0-live-test', deviceLabel: () => 'live test real db' },
+        app: {
+          supabaseUrl: API,
+          anonKey: ANON,
+          appVersion: '3.0.0-live-test',
+          deviceLabel: () => 'live test real db',
+        },
         lock: new FakeLock(),
-        uploader: createTusUploader({ supabaseUrl: API, anonKey: ANON, accessToken, deviceId: () => deviceId }),
+        uploader: createTusUploader({
+          supabaseUrl: API,
+          anonKey: ANON,
+          accessToken,
+          deviceId: () => deviceId,
+        }),
         clock: systemClock,
       },
       ENGINE_OPTIONS,
@@ -557,10 +647,21 @@ describe('the real local database (src/db) end to end', () => {
       storage_path_thumb: `projects/TZ/${project.id}/${photo.id}_thumb.webp`,
     };
     await realDb.mutate('project_photos', photo.id, { ...photo, ...paths }, { insert: true });
-    await realDb.putPhotoBlob(photo.id, 'full', new Blob([new Uint8Array(3000).fill(9)], { type: 'image/webp' }));
-    await realDb.putPhotoBlob(photo.id, 'thumb', new Blob([new Uint8Array(400).fill(9)], { type: 'image/webp' }));
+    await realDb.putPhotoBlob(
+      photo.id,
+      'full',
+      new Blob([new Uint8Array(3000).fill(9)], { type: 'image/webp' }),
+    );
+    await realDb.putPhotoBlob(
+      photo.id,
+      'thumb',
+      new Blob([new Uint8Array(400).fill(9)], { type: 'image/webp' }),
+    );
     await engine.enqueuePhotoUpload(photo.id);
-    const sensitive = realDb.newRow('community_sensitive', { project_id: project.id, ibadi_families: 3 });
+    const sensitive = realDb.newRow('community_sensitive', {
+      project_id: project.id,
+      ibadi_families: 3,
+    });
     await realDb.mutate('community_sensitive', sensitive.id, sensitive, { insert: true });
     expect(await realDb.db.restricted_local.count()).toBe(1);
     await engine.syncNow();
@@ -569,7 +670,12 @@ describe('the real local database (src/db) end to end', () => {
     net.online = true;
     await syncReal();
     expect(await realDb.listFailedOps()).toEqual([]);
-    expect(engine.status.value).toMatchObject({ state: 'idle', lastError: null, pendingOps: 0, pendingPhotos: 0 });
+    expect(engine.status.value).toMatchObject({
+      state: 'idle',
+      lastError: null,
+      pendingOps: 0,
+      pendingPhotos: 0,
+    });
 
     const [server] = await serverProjects(client, `${RUN}-realdb`);
     expect(server).toMatchObject({ id: project.id, capacity: 45, record_state: 'draft' });
@@ -578,7 +684,10 @@ describe('the real local database (src/db) end to end', () => {
     expect(typeof local?.code).toBe('string');
     expect(local?._dirty).toBeUndefined();
 
-    const { data: rows } = await client.from('project_photos').select('id, upload_state').eq('project_id', project.id);
+    const { data: rows } = await client
+      .from('project_photos')
+      .select('id, upload_state')
+      .eq('project_id', project.id);
     expect(rows).toEqual([{ id: photo.id, upload_state: 'uploaded' }]);
     const stored = await client.storage.from('photos').download(paths.storage_path_full);
     expect(stored.error).toBeNull();

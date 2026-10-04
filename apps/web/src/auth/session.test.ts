@@ -368,6 +368,25 @@ describe('PIN lock', () => {
     expect(h.s.can.write.value).toBe(true);
   });
 
+  it('an unlock without a connection makes no my_context() request; back online refreshes it', async () => {
+    h.s.pin.lock();
+    vi.stubGlobal('navigator', { onLine: false });
+    const before = h.control.calls.rpc.length;
+    expect(await h.s.pin.unlock(PIN)).toBe(true);
+    await h.s.refreshContext();
+    expect(h.control.calls.rpc.length).toBe(before);
+    expect(h.s.contextError.value).toBe('offline');
+    expect(h.s.me.value).toEqual(collectorPemba);
+    expect(h.s.authState.value).toBe('ready');
+
+    vi.stubGlobal('navigator', { onLine: true });
+    h.control.rpc = () => ({ data: collectorPemba, error: null, status: 200 });
+    window.dispatchEvent(new Event('online'));
+    await vi.waitFor(() => expect(h.s.contextError.value).toBeNull());
+    expect(h.control.calls.rpc).toContain('my_context');
+    expect(h.control.calls.rpc.length).toBeGreaterThan(before);
+  });
+
   it('a wrong PIN keeps the app locked', async () => {
     h.s.pin.lock();
     expect(await h.s.pin.unlock('9999')).toBe(false);
@@ -599,6 +618,36 @@ describe('server-side revocation', () => {
     expect(h.resets).toEqual([]);
   });
 
+  it('a gateway error (502) on my_context() is retried before an error is shown', async () => {
+    let calls = 0;
+    h.control.rpc = () => {
+      calls += 1;
+      return calls < 3
+        ? { data: null, error: { message: 'Bad Gateway' }, status: 502 }
+        : { data: collectorPemba, error: null, status: 200 };
+    };
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    const pending = h.s.refreshContext();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(await pending).toEqual(collectorPemba);
+    expect(calls).toBe(3);
+    expect(h.s.contextError.value).toBeNull();
+  });
+
+  it('a gateway error that persists ends on the error screen state, not in a loop', async () => {
+    let calls = 0;
+    h.control.rpc = () => {
+      calls += 1;
+      return { data: null, error: { message: 'Service Unavailable' }, status: 503 };
+    };
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    const pending = h.s.refreshContext();
+    await vi.advanceTimersByTimeAsync(5000);
+    await pending;
+    expect(calls).toBe(3);
+    expect(h.s.contextError.value).toBe('failed');
+  });
+
   it('a 401 on my_context() triggers one refresh and one retry', async () => {
     let calls = 0;
     h.control.rpc = () => {
@@ -642,14 +691,32 @@ describe('several users on one device', () => {
     expect(h.s.me.value).toEqual(collectorMombasa);
   });
 
-  it('does not reset for the first user of a device, nor after an explicit sign-out', async () => {
+  it('does not reset for the first user of a device, nor when the same user signs in again', async () => {
     const h = await load();
     await signInWithPin(h, collectorPemba);
     expect(h.resets).toEqual([]);
-    await h.s.signOut();
+    await h.s.signOut({ force: true }); // unsent work stays for its owner (sync module rule)
     expect(h.resets).toEqual(['sign_out']);
+    await signIn(h, collectorPemba);
+    expect(h.resets).toEqual(['sign_out']);
+    expect(h.s.me.value).toEqual(collectorPemba);
+  });
+
+  it('after a sign-out, another user gets the device only once the leftovers are handed over', async () => {
+    const h = await load();
+    await signInWithPin(h, collectorPemba);
+    await h.s.signOut({ force: true });
+    const seenDuringReset: Array<MyContext | null> = [];
+    h.s.setAuthPorts({
+      resetLocalData: async (reason) => {
+        seenDuringReset.push(h.s.me.value);
+        h.resets.push(reason);
+      },
+    });
     await signIn(h, collectorMombasa);
-    expect(h.resets).toEqual(['sign_out']);
+    expect(h.resets).toEqual(['sign_out', 'user_changed']);
+    expect(seenDuringReset).toEqual([null]);
+    expect(h.s.me.value).toEqual(collectorMombasa);
   });
 });
 

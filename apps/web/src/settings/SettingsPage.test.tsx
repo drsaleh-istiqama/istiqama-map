@@ -67,10 +67,11 @@ vi.mock('../sync', async () => {
       lastError: null,
     }),
     syncNow: vi.fn(),
+    // Public API only: the settings screen must not reach into the sync module's files.
+    WIFI_ONLY_PREF_KEY: 'test.wifiOnly',
+    storageEstimate: mocks.storageEstimate,
   };
 });
-vi.mock('../sync/network', () => ({ WIFI_ONLY_PREF_KEY: 'test.wifiOnly' }));
-vi.mock('../sync/storage', () => ({ storageEstimate: mocks.storageEstimate }));
 vi.mock('../db', () => ({
   listProjects: async () => ({ rows: [], next: null, total: 0 }),
   getAppSetting: async (_key: string, fallback: unknown) => fallback,
@@ -272,6 +273,45 @@ describe('PIN', () => {
       'The new PIN was saved',
     );
     await waitFor(() => expect((screen.getByTestId('pin-new') as HTMLInputElement).value).toBe(''));
+  });
+
+  it('with the auth extension: counts the guesses left, and tells a throttled vault apart', async () => {
+    const extended = auth.pin as unknown as Record<string, unknown>;
+    const tryUnlock = vi.fn(async (_code: string) => 'wrong');
+    Object.assign(extended, { tryUnlock, attempts: { value: { failures: 7 } }, maxFailures: 10 });
+    try {
+      render(<SettingsPage />);
+      typePin('pin-current', '1111');
+      typePin('pin-new', '2468');
+      typePin('pin-repeat', '2468');
+      fireEvent.click(screen.getByTestId('pin-save'));
+      await waitFor(() =>
+        expect(document.getElementById('pin-current-error')?.textContent).toBe(
+          'The current PIN is not correct. Attempts left: 3.',
+        ),
+      );
+      expect(tryUnlock).toHaveBeenCalledWith('1111');
+      expect(mocks.pinUnlock).not.toHaveBeenCalled();
+
+      tryUnlock.mockImplementationOnce(async () => 'throttled');
+      fireEvent.click(screen.getByTestId('pin-save'));
+      await waitFor(() =>
+        expect(document.getElementById('pin-current-error')?.textContent).toBe(
+          'Too many wrong attempts. Wait a moment and try again.',
+        ),
+      );
+
+      // Wiped: the auth gate replaces the screen; nothing is saved, nothing is shown here.
+      tryUnlock.mockImplementationOnce(async () => 'wiped');
+      fireEvent.click(screen.getByTestId('pin-save'));
+      await waitFor(() => expect(tryUnlock).toHaveBeenCalledTimes(3));
+      await waitFor(() => expect(document.getElementById('pin-current-error')).toBeNull());
+      expect(mocks.pinSet).not.toHaveBeenCalled();
+    } finally {
+      delete extended.tryUnlock;
+      delete extended.attempts;
+      delete extended.maxFailures;
+    }
   });
 
   it('reports a refusal of the vault', async () => {

@@ -79,7 +79,9 @@ async function ask(
 }
 
 /** Usage figures for the settings screen; null when the browser cannot tell. */
-export async function storageEstimate(storage?: StorageManagerLike | null): Promise<StorageInfo | null> {
+export async function storageEstimate(
+  storage?: StorageManagerLike | null,
+): Promise<StorageInfo | null> {
   const m = manager(storage);
   if (!m?.estimate) return null;
   try {
@@ -102,11 +104,17 @@ export async function storageEstimate(storage?: StorageManagerLike | null): Prom
  * Call it before saving something large (a photo) so the user gets a clear message while
  * the form is still open. Does nothing when the browser gives no estimate.
  */
-export async function ensureStorageSpace(bytes: number, storage?: StorageManagerLike | null): Promise<void> {
+export async function ensureStorageSpace(
+  bytes: number,
+  storage?: StorageManagerLike | null,
+): Promise<void> {
   const info = await storageEstimate(storage);
   if (!info || info.quota === 0) return;
   if (info.free < bytes + STORAGE_RESERVE_BYTES) {
-    throw new SyncError('storage_full', `not enough device storage: ${info.free} bytes free, ${bytes} needed`);
+    throw new SyncError(
+      'storage_full',
+      `not enough device storage: ${info.free} bytes free, ${bytes} needed`,
+    );
   }
 }
 
@@ -120,7 +128,8 @@ export async function withQuotaGuard<T>(write: () => Promise<T>): Promise<T> {
   try {
     return await write();
   } catch (e) {
-    if (isQuotaError(e)) throw new SyncError('storage_full', 'local storage quota exceeded', { cause: e });
+    if (isQuotaError(e))
+      throw new SyncError('storage_full', 'local storage quota exceeded', { cause: e });
     throw e;
   }
 }

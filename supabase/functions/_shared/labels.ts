@@ -8,14 +8,7 @@
  */
 
 export type ColumnKind =
-  | 'text'
-  | 'integer'
-  | 'number'
-  | 'date'
-  | 'datetime'
-  | 'boolean'
-  | 'enum'
-  | 'list';
+  'text' | 'integer' | 'number' | 'date' | 'datetime' | 'boolean' | 'enum' | 'list';
 
 export interface ExportColumn {
   key: string;
@@ -39,7 +32,11 @@ export interface ExportColumns {
 export type Cell = string | number | null;
 
 /** Label of an enum / boolean code; the code itself when the dictionary has no entry. */
-export function translateCode(enums: EnumDictionary, enumKey: string | undefined, value: unknown): string {
+export function translateCode(
+  enums: EnumDictionary,
+  enumKey: string | undefined,
+  value: unknown,
+): string {
   const code = String(value);
   if (!enumKey) return code;
   const labels = enums[enumKey];

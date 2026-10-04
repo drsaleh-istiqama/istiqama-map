@@ -22,9 +22,30 @@ export function isStagingServer(): boolean {
   return serverEnvironment.value === 'staging';
 }
 
+/** An offline start armed a one-shot refresh for the next 'online' event. */
+let retryArmed = false;
+
 async function readCached(): Promise<void> {
   const value = await getAppSetting<unknown>(ENVIRONMENT_SETTING, null);
   serverEnvironment.value = typeof value === 'string' ? value : null;
+}
+
+function isOffline(): boolean {
+  return typeof navigator !== 'undefined' && navigator.onLine === false;
+}
+
+/** Without a connection no request is made; the refresh runs once the network is back. */
+function refreshWhenOnline(): void {
+  if (retryArmed || typeof window === 'undefined') return;
+  retryArmed = true;
+  window.addEventListener(
+    'online',
+    () => {
+      retryArmed = false;
+      void loadAppSettings();
+    },
+    { once: true },
+  );
 }
 
 /**
@@ -34,6 +55,10 @@ async function readCached(): Promise<void> {
 export async function loadAppSettings(): Promise<void> {
   try {
     await readCached();
+    if (isOffline()) {
+      refreshWhenOnline();
+      return;
+    }
     const { data, error } = await supabase
       .from('app_settings')
       .select('key,value')

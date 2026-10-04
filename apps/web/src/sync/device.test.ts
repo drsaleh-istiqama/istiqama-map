@@ -11,14 +11,28 @@ import { TestClock } from './testing/testClock';
 describe('device registration and heartbeat', () => {
   it('sends the device id, a label and the app version', async () => {
     const server = new FakeServer();
-    const deps = { transport: server.transportFor('dev-1'), auth: { deviceId: () => 'dev-1' }, app: fakeApp };
+    const deps = {
+      transport: server.transportFor('dev-1'),
+      auth: { deviceId: () => 'dev-1' },
+      app: fakeApp,
+    };
     expect(await registerDevice(deps)).toMatchObject({ device_id: 'dev-1', revoked: false });
-    expect(await reportDeviceStatus(deps, { pendingOps: 3.9, pendingPhotos: -2 })).toMatchObject({ session_ok: true });
+    expect(await reportDeviceStatus(deps, { pendingOps: 3.9, pendingPhotos: -2 })).toMatchObject({
+      session_ok: true,
+    });
     expect(server.calls.rpc).toEqual([
-      { fn: 'register_device', args: { p_device_id: 'dev-1', p_label: 'test device', p_app_version: '3.0.0-test' } },
+      {
+        fn: 'register_device',
+        args: { p_device_id: 'dev-1', p_label: 'test device', p_app_version: '3.0.0-test' },
+      },
       {
         fn: 'report_device_status',
-        args: { p_device_id: 'dev-1', p_pending_ops: 3, p_pending_photos: 0, p_app_version: '3.0.0-test' },
+        args: {
+          p_device_id: 'dev-1',
+          p_pending_ops: 3,
+          p_pending_photos: 0,
+          p_app_version: '3.0.0-test',
+        },
       },
     ]);
   });
@@ -74,9 +88,16 @@ describe('photo upload gate', () => {
   it('reads connectivity from the browser without throwing', () => {
     const net = createBrowserNetwork();
     expect(typeof net.isOnline()).toBe('boolean');
-    expect(['wifi', 'ethernet', 'cellular', 'bluetooth', 'wimax', 'other', 'none', 'unknown']).toContain(
-      net.connectionType(),
-    );
+    expect([
+      'wifi',
+      'ethernet',
+      'cellular',
+      'bluetooth',
+      'wimax',
+      'other',
+      'none',
+      'unknown',
+    ]).toContain(net.connectionType());
     expect(net.saveData()).toBe(false);
     let events = 0;
     const off = net.onChange(() => events++);
@@ -149,9 +170,12 @@ describe('cross-tab lock', () => {
   it('lease: is released when the work throws', async () => {
     const tab = leaseLock(store, clock, { ownerId: 'A' });
     await expect(
-      tab.run(async () => {
-        throw new Error('boom');
-      }, { wait: false }),
+      tab.run(
+        async () => {
+          throw new Error('boom');
+        },
+        { wait: false },
+      ),
     ).rejects.toThrow('boom');
     expect(await store.getMeta(META_LEASE)).toBeUndefined();
   });

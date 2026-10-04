@@ -82,7 +82,9 @@ export function isSyncError(e: unknown): e is SyncError {
 }
 
 function errorName(e: unknown): string {
-  return typeof e === 'object' && e !== null && 'name' in e ? String((e as { name: unknown }).name) : '';
+  return typeof e === 'object' && e !== null && 'name' in e
+    ? String((e as { name: unknown }).name)
+    : '';
 }
 
 /** DOMException names browsers use when the origin's storage quota is exhausted. */
@@ -92,7 +94,8 @@ export function isQuotaError(e: unknown): boolean {
     const name = errorName(cur);
     if (name === 'QuotaExceededError' || name === 'NS_ERROR_DOM_QUOTA_REACHED') return true;
     // Dexie wraps the DOMException: { name: 'AbortError' | 'QuotaExceededError', inner: DOMException }
-    const inner = (cur as { inner?: unknown; cause?: unknown }).inner ?? (cur as { cause?: unknown }).cause;
+    const inner =
+      (cur as { inner?: unknown; cause?: unknown }).inner ?? (cur as { cause?: unknown }).cause;
     if (inner === cur) break;
     cur = inner;
   }
@@ -102,7 +105,8 @@ export function isQuotaError(e: unknown): boolean {
 /** Normalise anything thrown inside the sync layer. */
 export function toSyncError(e: unknown): SyncError {
   if (e instanceof SyncError) return e;
-  if (isQuotaError(e)) return new SyncError('storage_full', 'local storage quota exceeded', { cause: e });
+  if (isQuotaError(e))
+    return new SyncError('storage_full', 'local storage quota exceeded', { cause: e });
   const name = errorName(e);
   const message = e instanceof Error ? e.message : String(e);
   if (name === 'AbortError') return new SyncError('aborted', message || 'aborted', { cause: e });

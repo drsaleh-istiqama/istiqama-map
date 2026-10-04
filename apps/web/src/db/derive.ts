@@ -8,7 +8,12 @@ import { gridCell, isValidLonLat } from '../lib/geo';
 import { db } from './dexie';
 import { tokenize } from './tokens';
 import { COMPLETENESS_CHILD_TABLES } from './tables';
-import { OPEN_MAINTENANCE_STATES, type MaintenancePriority, type Row, type TableName } from './types';
+import {
+  OPEN_MAINTENANCE_STATES,
+  type MaintenancePriority,
+  type Row,
+  type TableName,
+} from './types';
 
 // ---------------------------------------------------------------------------------------
 // Shapes
@@ -63,7 +68,12 @@ export const facetOf = {
 };
 
 export function projectFacets(p: StoredProject): string[] {
-  const f = [FACET_ALL, facetOf.type(p.type), facetOf.status(p.status), facetOf.recordState(p.record_state)];
+  const f = [
+    FACET_ALL,
+    facetOf.type(p.type),
+    facetOf.status(p.status),
+    facetOf.recordState(p.record_state),
+  ];
   if (p.country_id) f.push(facetOf.country(p.country_id));
   if (p.branch_id) f.push(facetOf.branch(p.branch_id));
   for (const a of p._areas ?? []) f.push(facetOf.area(a));
@@ -81,8 +91,10 @@ export function projectFacets(p: StoredProject): string[] {
 // Lookups (small reference rows, cached in memory)
 // ---------------------------------------------------------------------------------------
 
+type LocalityNames = { name_ar: string | null; name_latin: string | null };
+
 const areaChains = new Map<string, string[]>();
-const localityNames = new Map<string, { name_ar: string | null; name_latin: string | null }>();
+const localityNames = new Map<string, LocalityNames>();
 
 /** Call after `admin_areas` / `localities` rows changed, after a reset and in tests. */
 export function invalidateDeriveCaches(table?: 'admin_areas' | 'localities'): void {
@@ -90,45 +102,101 @@ export function invalidateDeriveCaches(table?: 'admin_areas' | 'localities'): vo
   if (!table || table === 'localities') localityNames.clear();
 }
 
+/**
+ * Lookups needed to derive projects: locality names and admin-area chains. Loaded in bulk
+ * (a handful of IndexedDB requests for any number of rows) so that the derivation itself is
+ * synchronous. This matters inside transactions: Dexie keeps a transaction alive across
+ * native `await`s only for a limited number of microtask "echoes" per IndexedDB request, so
+ * a loop of `await`s that never touches the database (hundreds of pulled rows) would let the
+ * transaction commit too early.
+ */
+export interface DeriveContext {
+  localities: Map<string, LocalityNames>;
+  chains: Map<string, string[]>;
+}
+
+/** Loads (and caches) what deriving these projects needs. */
+export async function loadDeriveContext(
+  rows: ReadonlyArray<{ locality_id?: string | null; admin_area_id?: string | null }>,
+): Promise<DeriveContext> {
+  const ctx: DeriveContext = { localities: new Map(), chains: new Map() };
+  const missingLoc = new Set<string>();
+  const missingArea = new Set<string>();
+  for (const r of rows) {
+    if (r.locality_id) {
+      const hit = localityNames.get(r.locality_id);
+      if (hit) ctx.localities.set(r.locality_id, hit);
+      else missingLoc.add(r.locality_id);
+    }
+    if (r.admin_area_id) {
+      const hit = areaChains.get(r.admin_area_id);
+      if (hit) ctx.chains.set(r.admin_area_id, hit);
+      else missingArea.add(r.admin_area_id);
+    }
+  }
+  if (missingLoc.size > 0) {
+    const found = await db.localities.bulkGet([...missingLoc]);
+    for (const row of found) {
+      if (!row) continue;
+      const names = { name_ar: row.name_ar, name_latin: row.name_latin };
+      localityNames.set(row.id, names);
+      ctx.localities.set(row.id, names);
+    }
+  }
+  if (missingArea.size > 0) {
+    // Walk up level by level: one bulk read per level (admin areas have at most 3 levels).
+    const parent = new Map<string, string | null>();
+    let frontier = [...missingArea];
+    for (let depth = 0; depth < 4 && frontier.length > 0; depth++) {
+      const found = await db.admin_areas.bulkGet(frontier);
+      const next = new Set<string>();
+      found.forEach((row, i) => {
+        const id = frontier[i]!;
+        if (!row) return; // not pulled (yet): the chain stays partial
+        parent.set(id, row.parent_id);
+        if (row.parent_id && !parent.has(row.parent_id)) next.add(row.parent_id);
+      });
+      frontier = [...next];
+    }
+    for (const areaId of missingArea) {
+      const chain: string[] = [areaId];
+      let complete = true;
+      let current: string | null = areaId;
+      for (let depth = 0; depth < 4 && current; depth++) {
+        if (!parent.has(current)) {
+          complete = false;
+          break;
+        }
+        current = parent.get(current) ?? null;
+        if (current && !chain.includes(current)) chain.push(current);
+      }
+      // A partial chain (area not pulled yet) is used but not cached.
+      if (complete) areaChains.set(areaId, chain);
+      ctx.chains.set(areaId, chain);
+    }
+  }
+  return ctx;
+}
+
 /** `[area, parent, grandparent]` from the local `admin_areas` rows. */
 export async function areaChain(areaId: string | null | undefined): Promise<string[]> {
   if (!areaId) return [];
   const cached = areaChains.get(areaId);
   if (cached) return cached;
-  const chain: string[] = [areaId];
-  let complete = true;
-  let current: string | null = areaId;
-  for (let depth = 0; depth < 4 && current; depth++) {
-    const row: Row<'admin_areas'> | undefined = await db.admin_areas.get(current);
-    if (!row) {
-      complete = false; // not pulled yet: do not cache a partial chain
-      break;
-    }
-    current = row.parent_id;
-    if (current && !chain.includes(current)) chain.push(current);
-  }
-  if (complete) areaChains.set(areaId, chain);
-  return chain;
-}
-
-async function localityOf(
-  id: string | null | undefined,
-): Promise<{ name_ar: string | null; name_latin: string | null } | undefined> {
-  if (!id) return undefined;
-  const cached = localityNames.get(id);
-  if (cached) return cached;
-  const row = await db.localities.get(id);
-  if (!row) return undefined;
-  const names = { name_ar: row.name_ar, name_latin: row.name_latin };
-  localityNames.set(id, names);
-  return names;
+  const ctx = await loadDeriveContext([{ admin_area_id: areaId }]);
+  return ctx.chains.get(areaId) ?? [areaId];
 }
 
 // ---------------------------------------------------------------------------------------
 // Per-table derivation
 // ---------------------------------------------------------------------------------------
 
-const PRIORITY_RANK: Record<MaintenancePriority, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
+const PRIORITY_RANK: Record<MaintenancePriority, number> = {
+  urgent: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+};
 
 function parseMs(value: string | null | undefined): number {
   if (!value) return 0;
@@ -142,13 +210,14 @@ function setCell(row: { lon?: number | null; lat?: number | null; _cell?: number
 }
 
 /**
- * Fills the derived fields of a project in place. `_cmp`, `_om`, `_cover*` are inputs here
- * (the caller owns them); a dirty row keeps the `_u` given by the caller.
+ * Fills the derived fields of a project in place, synchronously, from a context loaded with
+ * `loadDeriveContext`. `_cmp`, `_om`, `_cover*` are inputs here (the caller owns them); a
+ * dirty row keeps the `_u` given by the caller.
  */
-export async function deriveProject(p: StoredProject): Promise<StoredProject> {
-  const loc = await localityOf(p.locality_id);
+export function deriveProjectWith(p: StoredProject, ctx: DeriveContext): StoredProject {
+  const loc = p.locality_id ? ctx.localities.get(p.locality_id) : undefined;
   p._tokens = tokenize(p.name_ar, p.name_latin, p.code, loc?.name_ar, loc?.name_latin);
-  p._areas = await areaChain(p.admin_area_id);
+  p._areas = p.admin_area_id ? (ctx.chains.get(p.admin_area_id) ?? [p.admin_area_id]) : [];
   setCell(p);
   if (!(p._dirty === 1 && typeof p._u === 'number')) p._u = parseMs(p.updated_at);
   if (typeof p._cmp !== 'number') p._cmp = p.completeness ?? 0;
@@ -160,11 +229,25 @@ export async function deriveProject(p: StoredProject): Promise<StoredProject> {
   return p;
 }
 
-/** Adds / refreshes the derived fields of any row in place and returns it. */
-export async function decorate<T extends TableName>(table: T, row: Row<T>): Promise<Row<T>> {
+/** `deriveProjectWith` for one project (loads its lookups first). */
+export async function deriveProject(p: StoredProject): Promise<StoredProject> {
+  return deriveProjectWith(p, await loadDeriveContext([p]));
+}
+
+const EMPTY_CONTEXT: DeriveContext = { localities: new Map(), chains: new Map() };
+
+/**
+ * Adds / refreshes the derived fields of any row in place, synchronously. Projects need a
+ * context from `loadDeriveContext` that covers them.
+ */
+export function decorateWith<T extends TableName>(
+  table: T,
+  row: Row<T>,
+  ctx: DeriveContext = EMPTY_CONTEXT,
+): Row<T> {
   switch (table) {
     case 'projects':
-      await deriveProject(row as StoredProject);
+      deriveProjectWith(row as StoredProject, ctx);
       break;
     case 'localities': {
       const r = row as StoredLocality;
@@ -205,6 +288,25 @@ export async function decorate<T extends TableName>(table: T, row: Row<T>): Prom
   return row;
 }
 
+/** Adds / refreshes the derived fields of one row (loads the lookups a project needs). */
+export async function decorate<T extends TableName>(table: T, row: Row<T>): Promise<Row<T>> {
+  const ctx =
+    table === 'projects' ? await loadDeriveContext([row as StoredProject]) : EMPTY_CONTEXT;
+  return decorateWith(table, row, ctx);
+}
+
+/** Decorates many rows with a constant number of IndexedDB requests (pull pages). */
+export async function decorateMany<T extends TableName>(
+  table: T,
+  rows: ReadonlyArray<Row<T>>,
+): Promise<void> {
+  const ctx =
+    table === 'projects'
+      ? await loadDeriveContext(rows as ReadonlyArray<StoredProject>)
+      : EMPTY_CONTEXT;
+  for (const row of rows) decorateWith(table, row, ctx);
+}
+
 /** A copy without local-only keys (`_…`): the row as it would travel on the wire. */
 export function stripLocal<R extends object>(row: R): R {
   const out: Record<string, unknown> = {};
@@ -241,8 +343,29 @@ async function coverOf(projectId: string): Promise<{ id: string; thumb: string }
   if (photos.length === 0) return null;
   const cover =
     photos.find((ph) => ph.is_cover) ??
-    photos.slice().sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0))[0]!;
+    photos
+      .slice()
+      .sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0))[0]!;
   return { id: cover.id, thumb: cover.storage_path_thumb };
+}
+
+/**
+ * Re-derives the projects of these localities: their search tokens contain the locality
+ * names (the twin of the server trigger that refreshes `projects.search_norm` when a locality
+ * is renamed). One index query for all ids; must run inside a transaction that includes the
+ * project, locality and admin-area stores (all write transactions do). Returns the number of
+ * projects rewritten.
+ */
+export async function refreshLocalityProjects(localityIds: Iterable<string>): Promise<number> {
+  const ids = [...new Set(localityIds)];
+  if (ids.length === 0) return 0;
+  invalidateDeriveCaches('localities');
+  const rows = (await db.projects.where('locality_id').anyOf(ids).toArray()) as StoredProject[];
+  if (rows.length === 0) return 0;
+  const ctx = await loadDeriveContext(rows);
+  for (const p of rows) deriveProjectWith(p, ctx);
+  await db.projects.bulkPut(rows);
+  return rows.length;
 }
 
 export interface RefreshOptions {
@@ -257,7 +380,10 @@ export interface RefreshOptions {
  * completeness estimate) and rewrites the rows whose state changed. Must run inside a
  * transaction that includes the project stores (all write transactions do).
  */
-export async function refreshProjects(projectIds: Iterable<string>, what: RefreshOptions): Promise<void> {
+export async function refreshProjects(
+  projectIds: Iterable<string>,
+  what: RefreshOptions,
+): Promise<void> {
   for (const id of new Set(projectIds)) {
     const p = (await db.projects.get(id)) as StoredProject | undefined;
     if (!p) continue;
@@ -272,7 +398,10 @@ export async function refreshProjects(projectIds: Iterable<string>, what: Refres
     }
     if (what.cover) {
       const cover = await coverOf(id);
-      if ((p._cover ?? null) !== (cover?.id ?? null) || (p._cover_thumb ?? null) !== (cover?.thumb ?? null)) {
+      if (
+        (p._cover ?? null) !== (cover?.id ?? null) ||
+        (p._cover_thumb ?? null) !== (cover?.thumb ?? null)
+      ) {
         p._cover = cover?.id ?? null;
         p._cover_thumb = cover?.thumb ?? null;
         changed = true;

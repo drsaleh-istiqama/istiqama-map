@@ -10,7 +10,13 @@
  *    fresh server row only replaces the copy kept for a possible undo;
  *  - applying the same rows twice is harmless.
  */
-import { decorate, invalidateDeriveCaches, refreshProjects, type StoredProject } from './derive';
+import {
+  decorateMany,
+  invalidateDeriveCaches,
+  refreshLocalityProjects,
+  refreshProjects,
+  type StoredProject,
+} from './derive';
 import { db, type FailedOp, type OutboxOp } from './dexie';
 import { resetMetaCaches } from './meta';
 import { COMPLETENESS_CHILD_TABLES, SYNC_TABLES, isTableName, tableDef } from './tables';
@@ -31,9 +37,15 @@ export interface ApplyStats {
 /** Rows per transaction when a caller hands over more than one page at once. */
 const CHUNK = 500;
 
-type QueuedLike = Pick<OutboxOp, 'kind' | 'fields' | 'snapshot'> & { seq?: number; failedId?: number };
+type QueuedLike = Pick<OutboxOp, 'kind' | 'fields' | 'snapshot'> & {
+  seq?: number;
+  failedId?: number;
+};
 
-async function operationsByRow(table: TableName, ids: string[]): Promise<Map<string, QueuedLike[]>> {
+async function operationsByRow(
+  table: TableName,
+  ids: string[],
+): Promise<Map<string, QueuedLike[]>> {
   const map = new Map<string, QueuedLike[]>();
   if (ids.length === 0) return map;
   const [queued, failed] = await Promise.all([db.outbox.count(), db.failed_ops.count()]);
@@ -50,7 +62,14 @@ async function operationsByRow(table: TableName, ids: string[]): Promise<Map<str
   }
   if (failed > 0) {
     const ops: FailedOp[] = await db.failed_ops.where('[table+row_id]').anyOf(keys).toArray();
-    for (const op of ops) add(op.row_id, { kind: op.kind, fields: op.fields, snapshot: op.snapshot, seq: op.seq, failedId: op.id });
+    for (const op of ops)
+      add(op.row_id, {
+        kind: op.kind,
+        fields: op.fields,
+        snapshot: op.snapshot,
+        seq: op.seq,
+        failedId: op.id,
+      });
   }
   for (const list of map.values()) list.sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
   return map;
@@ -82,14 +101,16 @@ async function applyChunk(
 
   const opsByRow = await operationsByRow(table, liveIds);
   const isProjects = table === 'projects';
+  const isLocalities = table === 'localities';
   const isChild = def.scopeCol === 'project_id';
   const busy = isProjects || isChild ? await busyProjectIds() : new Set<string>();
 
-  // Existing copies are needed for projects (child-derived state) and for conflict flags.
+  // Existing copies are needed for projects (child-derived state), localities (a rename
+  // changes the search tokens of their projects) and for conflict flags.
   const existing = new Map<string, AnyRecord>();
   if (liveIds.length > 0) {
     let wanted: string[] = [];
-    if (isProjects) wanted = liveIds;
+    if (isProjects || isLocalities) wanted = liveIds;
     else {
       const flagged = new Set((await store.where('_conflict').equals(1).primaryKeys()) as string[]);
       if (flagged.size > 0) wanted = liveIds.filter((id) => flagged.has(id));
@@ -105,6 +126,7 @@ async function applyChunk(
   const estimate = new Set<string>(); // projects whose completeness must be estimated locally
   const newProjects: string[] = [];
   const touchedProjects = new Set<string>();
+  const renamedLocalities: string[] = [];
 
   for (const incoming of rows) {
     const id = String(incoming.id);
@@ -160,11 +182,16 @@ async function applyChunk(
       if (p._dirty === 1 || busy.has(id)) estimate.add(id);
     } else if (isChild && typeof row.project_id === 'string') {
       touchedProjects.add(row.project_id);
+    } else if (
+      isLocalities &&
+      (!prev || prev.name_ar !== row.name_ar || prev.name_latin !== row.name_latin)
+    ) {
+      renamedLocalities.push(id);
     }
     toPut.push(row);
   }
 
-  for (const row of toPut) await decorate(table, row as unknown as Row<TableName>);
+  await decorateMany(table, toPut as unknown as Array<Row<TableName>>);
   if (toPut.length > 0) await store.bulkPut(toPut);
   stats.upserted += toPut.length;
 
@@ -177,13 +204,19 @@ async function applyChunk(
   }
 
   if (table === 'admin_areas' || table === 'localities') invalidateDeriveCaches(table);
+  // Projects already on the device show the new locality names in their search tokens. (A
+  // first sync pulls localities before any project: the lookup finds nothing.)
+  if (renamedLocalities.length > 0) await refreshLocalityProjects(renamedLocalities);
 
   // --- project state that depends on children ------------------------------------------
   if (isProjects) {
     if (newProjects.length > 0) {
       // Children normally arrive after their project; look for earlier ones only when there
       // can be any (never during a first sync, where the child stores are still empty).
-      const [photos, maintenance] = await Promise.all([db.project_photos.count(), db.project_maintenance.count()]);
+      const [photos, maintenance] = await Promise.all([
+        db.project_photos.count(),
+        db.project_maintenance.count(),
+      ]);
       if (photos > 0 || maintenance > 0) {
         await refreshProjects(newProjects, { maintenance: maintenance > 0, cover: photos > 0 });
       }
@@ -192,7 +225,8 @@ async function applyChunk(
   } else if (touchedProjects.size > 0) {
     const counts = (COMPLETENESS_CHILD_TABLES as readonly TableName[]).includes(table);
     const dirtyParents = counts ? [...touchedProjects].filter((id) => busy.has(id)) : [];
-    if (table === 'project_maintenance') await refreshProjects(touchedProjects, { maintenance: true });
+    if (table === 'project_maintenance')
+      await refreshProjects(touchedProjects, { maintenance: true });
     else if (table === 'project_photos') await refreshProjects(touchedProjects, { cover: true });
     if (dirtyParents.length > 0) await refreshProjects(dirtyParents, { completeness: true });
   }
@@ -200,7 +234,8 @@ async function applyChunk(
   // A reviewer's decision arrived: the flag on the row it was about can go.
   if (table === 'sync_conflicts') {
     for (const c of toPut) {
-      if (c.state === 'open' || !isTableName(c.table_name) || typeof c.row_id !== 'string') continue;
+      if (c.state === 'open' || !isTableName(c.table_name) || typeof c.row_id !== 'string')
+        continue;
       const stillOpen = await db.sync_conflicts
         .where('[table_name+row_id]')
         .equals([c.table_name, c.row_id])
@@ -234,13 +269,19 @@ export async function applyServerRows<T extends TableName>(
   for (let i = 0; i === 0 || i < all.length; i += CHUNK) {
     const chunk = all.slice(i, i + CHUNK);
     const goneNow = i === 0 ? gone : [];
-    await db.transaction('rw', db.tables, () => applyChunk(table, chunk, goneNow, stats));
+    // The scope must be an `async` function: Dexie only keeps the transaction alive across
+    // native awaits it can see (a plain arrow returning the promise commits too early).
+    await db.transaction('rw', db.tables, async () => {
+      await applyChunk(table, chunk, goneNow, stats);
+    });
   }
   return stats;
 }
 
 export interface PullPageInput {
-  changes: ReadonlyArray<PullChange | { table: string; rows?: Array<Record<string, unknown>>; gone?: string[] }>;
+  changes: ReadonlyArray<
+    PullChange | { table: string; rows?: Array<Record<string, unknown>>; gone?: string[] }
+  >;
   /** Meta entries (the pull cursor, the scope epoch) stored in the SAME transaction as the rows. */
   meta?: ReadonlyArray<{ key: string; value: unknown }>;
 }
@@ -255,7 +296,12 @@ export async function applyPage(page: PullPageInput): Promise<ApplyStats> {
   await db.transaction('rw', db.tables, async () => {
     for (const change of page.changes) {
       if (!isTableName(change.table)) continue;
-      await applyChunk(change.table, (change.rows ?? []) as ReadonlyArray<AnyRecord>, change.gone ?? [], stats);
+      await applyChunk(
+        change.table,
+        (change.rows ?? []) as ReadonlyArray<AnyRecord>,
+        change.gone ?? [],
+        stats,
+      );
     }
     for (const entry of page.meta ?? []) await db.meta.put({ key: entry.key, value: entry.value });
   });
@@ -299,7 +345,12 @@ export interface ResetSummary {
  * to the sync engine, which clears them together with this call.
  */
 export async function resetScopedData(): Promise<ResetSummary> {
-  const summary: ResetSummary = { keptDirtyRows: 0, movedRestricted: 0, keptOps: 0, keptFailedOps: 0 };
+  const summary: ResetSummary = {
+    keptDirtyRows: 0,
+    movedRestricted: 0,
+    keptOps: 0,
+    keptFailedOps: 0,
+  };
   await db.transaction('rw', db.tables, async () => {
     for (const def of SYNC_TABLES) {
       const store = db.table(def.name);
@@ -310,7 +361,10 @@ export async function resetScopedData(): Promise<ResetSummary> {
         for (const row of dirty) {
           let projectId: string | null = typeof row.project_id === 'string' ? row.project_id : null;
           if (!projectId && typeof row.project_staff_id === 'string') {
-            const queued = await db.outbox.where('[table+row_id]').equals([def.name, String(row.id)]).first();
+            const queued = await db.outbox
+              .where('[table+row_id]')
+              .equals([def.name, String(row.id)])
+              .first();
             projectId = queued?.project_id ?? null;
           }
           await db.restricted_local.put({

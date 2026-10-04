@@ -1,5 +1,5 @@
 /**
- * The application mark, inline (same drawing as public/icons/icon-source.svg): a navy
+ * The application mark, inline (same drawing as public/icons/icon.svg): a navy
  * rounded square with a gold map pin whose head holds a crescent. Decorative — the name of
  * the application is always written next to it.
  */

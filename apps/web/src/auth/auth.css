@@ -110,7 +110,7 @@
 
 .auth-field__label {
   margin: 0;
-  font-weight: 600;
+  font-weight: 700;
   text-align: start;
 }
 
@@ -196,7 +196,7 @@
   background: transparent;
   color: var(--auth-navy);
   font: inherit;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
 }
 
@@ -235,7 +235,7 @@
   padding-inline: 0.25rem;
   background: transparent;
   color: var(--auth-navy);
-  font-weight: 600;
+  font-weight: 700;
   text-decoration: underline;
 }
 
@@ -258,7 +258,7 @@
   margin: 0;
   min-block-size: 1.4em;
   font-size: 0.9rem;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--auth-error);
   text-align: start;
 }

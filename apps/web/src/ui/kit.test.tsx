@@ -138,6 +138,72 @@ describe('<Chips>', () => {
     fireEvent.click(screen.getByTestId('one-fishing'));
     expect(onChange).toHaveBeenLastCalledWith(null);
   });
+
+  it('"Other" reveals a short free-text box, and closing it clears the text (v2 parity)', async () => {
+    const onText = vi.fn();
+    function Host({ text }: { text: string }) {
+      return (
+        <Chips
+          multiple
+          options={options}
+          value={[]}
+          onChange={() => undefined}
+          testId="livelihood"
+          label="Livelihoods"
+          other={{ value: text, onChange: onText }}
+        />
+      );
+    }
+    const view = render(<Host text="" />);
+    const chip = screen.getByTestId('livelihood-other');
+    expect(chip.textContent).toBe('Other');
+    expect(chip.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByTestId('livelihood-other-text')).toBeNull();
+
+    fireEvent.click(chip);
+    const box = (await screen.findByTestId('livelihood-other-text')) as HTMLInputElement;
+    expect(chip.getAttribute('aria-pressed')).toBe('true');
+    expect(chip.getAttribute('aria-expanded')).toBe('true');
+    expect(box.maxLength).toBe(240);
+    expect(box.getAttribute('aria-label')).toBe('Type a short addition');
+    await waitFor(() => expect(document.activeElement).toBe(box));
+    fireEvent.input(box, { target: { value: 'Beekeeping' } });
+    expect(onText).toHaveBeenLastCalledWith('Beekeeping');
+
+    view.rerender(<Host text="Beekeeping" />);
+    fireEvent.click(screen.getByTestId('livelihood-other'));
+    expect(onText).toHaveBeenLastCalledWith('');
+    view.rerender(<Host text="" />);
+    await waitFor(() => expect(screen.queryByTestId('livelihood-other-text')).toBeNull());
+  });
+
+  it('opens "Other" by itself when a restored draft already has text in it', () => {
+    render(
+      <Chips
+        options={options}
+        value={null}
+        onChange={() => undefined}
+        testId="one"
+        other={{ value: 'Mining', onChange: () => undefined }}
+      />,
+    );
+    expect((screen.getByTestId('one-other-text') as HTMLInputElement).value).toBe('Mining');
+    expect(screen.getByTestId('one-other').getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('inside a <Field> the group is named by the label and described by the error', () => {
+    render(
+      <Field label="Livelihoods" htmlFor="livelihoods" error="Choose at least one">
+        <Chips multiple options={options} value={[]} onChange={() => undefined} />
+      </Field>,
+    );
+    const group = screen.getByRole('group');
+    expect(group.id).toBe('livelihoods');
+    expect(group.getAttribute('aria-labelledby')).toBe(fieldIds('livelihoods').label);
+    expect(group.getAttribute('aria-describedby')).toBe(fieldIds('livelihoods').error);
+    expect(group.getAttribute('aria-invalid')).toBe('true');
+    expect(document.getElementById(fieldIds('livelihoods').label)?.textContent).toBe('Livelihoods');
+  });
 });
 
 describe('<Button>', () => {

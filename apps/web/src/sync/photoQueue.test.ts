@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SyncError } from './errors';
-import { PHOTO_META_PREFIX, type PhotoQueue, type PhotoUploadEntry, createPhotoQueue } from './photoQueue';
+import {
+  PHOTO_META_PREFIX,
+  type PhotoQueue,
+  type PhotoUploadEntry,
+  createPhotoQueue,
+} from './photoQueue';
 import { FakeNetwork, FakePrefs, FakeUploader } from './testing/fakes';
 import { LocalStore } from './testing/localStore';
 import { TestClock } from './testing/testClock';
@@ -29,7 +34,10 @@ async function ackedProject(): Promise<string> {
   await store.applyPage({
     changes: [
       { table: 'countries', rows: [{ id: COUNTRY, iso2: 'TZ', version: 1, deleted_at: null }] },
-      { table: 'projects', rows: [{ id, name_ar: 'x', country_id: COUNTRY, version: 1, deleted_at: null }] },
+      {
+        table: 'projects',
+        rows: [{ id, name_ar: 'x', country_id: COUNTRY, version: 1, deleted_at: null }],
+      },
     ],
     meta: [],
   });
@@ -54,7 +62,11 @@ async function addPhoto(projectId: string, options: PhotoOptions = {}): Promise<
     storage_path_thumb: paths ? `projects/TZ/${projectId}/${id}_thumb.webp` : null,
     deleted_at: null,
   };
-  if (acked) await store.applyPage({ changes: [{ table: 'project_photos', rows: [{ ...row, version: 1 }] }], meta: [] });
+  if (acked)
+    await store.applyPage({
+      changes: [{ table: 'project_photos', rows: [{ ...row, version: 1 }] }],
+      meta: [],
+    });
   else await store.mutate('project_photos', id, row);
   await store.putPhotoBlob(id, 'full', new Blob([new Uint8Array(fullBytes)], { type: mime }));
   await store.putPhotoBlob(id, 'thumb', new Blob([new Uint8Array(300)], { type: mime }));
@@ -90,11 +102,22 @@ describe('photo queue', () => {
     expect(await queue.pendingCount()).toBe(3);
 
     const outcome = await queue.run();
-    expect(outcome).toMatchObject({ uploaded: 3, waiting: 0, failed: 0, blocked: null, more: false });
+    expect(outcome).toMatchObject({
+      uploaded: 3,
+      waiting: 0,
+      failed: 0,
+      blocked: null,
+      more: false,
+    });
     expect(uploader.calls.map((c) => c.objectName)).toEqual(
-      ids.flatMap((id) => [`projects/TZ/${project}/${id}_thumb.webp`, `projects/TZ/${project}/${id}_full.webp`]),
+      ids.flatMap((id) => [
+        `projects/TZ/${project}/${id}_thumb.webp`,
+        `projects/TZ/${project}/${id}_full.webp`,
+      ]),
     );
-    expect(uploader.calls.every((c) => c.bucket === 'photos' && c.contentType === 'image/webp')).toBe(true);
+    expect(
+      uploader.calls.every((c) => c.bucket === 'photos' && c.contentType === 'image/webp'),
+    ).toBe(true);
     expect(await queue.pendingCount()).toBe(0);
   });
 
@@ -103,7 +126,10 @@ describe('photo queue', () => {
     const photo = await addPhoto(project);
     await queue.run();
 
-    expect(await store.getRow('project_photos', photo)).toMatchObject({ upload_state: 'uploaded', _dirty: 1 });
+    expect(await store.getRow('project_photos', photo)).toMatchObject({
+      upload_state: 'uploaded',
+      _dirty: 1,
+    });
     const ops = await store.pendingOps();
     expect(ops).toHaveLength(1);
     expect(ops[0]).toMatchObject({
@@ -151,7 +177,11 @@ describe('photo queue', () => {
     expect(first).toMatchObject({ uploaded: 0, failed: 1 });
     const saved = (await entry(photo)) as PhotoUploadEntry;
     expect(saved.parts.thumb).toMatchObject({ done: true });
-    expect(saved.parts.full).toMatchObject({ done: false, uploadUrl: 'http://tus.test/upload/2', offset: 6_291_456 });
+    expect(saved.parts.full).toMatchObject({
+      done: false,
+      uploadUrl: 'http://tus.test/upload/2',
+      offset: 6_291_456,
+    });
     expect(saved).toMatchObject({ attempts: 1, lastError: 'network' });
     expect(await store.photoBlob(photo, 'full')).toBeDefined();
 
@@ -184,7 +214,9 @@ describe('photo queue', () => {
   });
 
   describe('Wi-Fi only', () => {
-    const cases: Array<[boolean, 'wifi' | 'ethernet' | 'cellular' | 'unknown' | 'bluetooth', boolean, boolean]> = [
+    const cases: Array<
+      [boolean, 'wifi' | 'ethernet' | 'cellular' | 'unknown' | 'bluetooth', boolean, boolean]
+    > = [
       // wifiOnly, connection, saveData, expected to upload
       [true, 'wifi', false, true],
       [true, 'ethernet', false, true],
@@ -195,17 +227,20 @@ describe('photo queue', () => {
       [false, 'cellular', false, true],
       [false, 'cellular', true, true],
     ];
-    it.each(cases)('wifiOnly=%s on %s (saveData=%s) → uploads: %s', async (wifiOnly, type, saveData, expected) => {
-      prefs.wifi = wifiOnly;
-      net.type = type;
-      net.dataSaver = saveData;
-      const project = await ackedProject();
-      await addPhoto(project);
-      const outcome = await queue.run();
-      expect(outcome.uploaded).toBe(expected ? 1 : 0);
-      expect(outcome.blocked).toBe(expected ? null : 'wifi_only');
-      expect(await queue.pendingCount()).toBe(expected ? 0 : 1);
-    });
+    it.each(cases)(
+      'wifiOnly=%s on %s (saveData=%s) → uploads: %s',
+      async (wifiOnly, type, saveData, expected) => {
+        prefs.wifi = wifiOnly;
+        net.type = type;
+        net.dataSaver = saveData;
+        const project = await ackedProject();
+        await addPhoto(project);
+        const outcome = await queue.run();
+        expect(outcome.uploaded).toBe(expected ? 1 : 0);
+        expect(outcome.blocked).toBe(expected ? null : 'wifi_only');
+        expect(await queue.pendingCount()).toBe(expected ? 0 : 1);
+      },
+    );
 
     it('starts uploading once the phone is on Wi-Fi', async () => {
       prefs.wifi = true;
@@ -277,7 +312,12 @@ describe('photo queue', () => {
     const project = await ackedProject();
     const photo = await addPhoto(project);
     await store.applyPage({
-      changes: [{ table: 'project_photos', rows: [{ id: photo, version: 2, deleted_at: '2026-10-03T00:00:00Z' }] }],
+      changes: [
+        {
+          table: 'project_photos',
+          rows: [{ id: photo, version: 2, deleted_at: '2026-10-03T00:00:00Z' }],
+        },
+      ],
       meta: [],
     });
     expect(await queue.run()).toMatchObject({ dropped: 1, uploaded: 0 });
@@ -291,11 +331,16 @@ describe('photo queue', () => {
     const refused = await addPhoto(project);
     clock.time += 1;
     const fine = await addPhoto(project);
-    uploader.plan({ kind: 'fail', error: new SyncError('forbidden', 'upload: HTTP 403', { status: 403 }) });
+    uploader.plan({
+      kind: 'fail',
+      error: new SyncError('forbidden', 'upload: HTTP 403', { status: 403 }),
+    });
     const outcome = await queue.run();
     expect(outcome).toMatchObject({ uploaded: 1, failed: 1 });
     expect(await entry(refused)).toMatchObject({ lastError: 'forbidden', attempts: 1 });
-    expect(((await entry(refused)) as PhotoUploadEntry).nextAttemptAt - clock.now()).toBeGreaterThanOrEqual(9 * 60_000);
+    expect(
+      ((await entry(refused)) as PhotoUploadEntry).nextAttemptAt - clock.now(),
+    ).toBeGreaterThanOrEqual(9 * 60_000);
     expect(await entry(fine)).toBeUndefined();
     expect(await queue.pendingCount()).toBe(1);
   });
@@ -325,7 +370,10 @@ describe('photo queue', () => {
   it('enqueue is idempotent and never resets the progress of an entry', async () => {
     const project = await ackedProject();
     const photo = await addPhoto(project, { fullBytes: 9_000_000 });
-    uploader.plan({ kind: 'ok' }, { kind: 'partial', offset: 100, error: new SyncError('network', 'lost') });
+    uploader.plan(
+      { kind: 'ok' },
+      { kind: 'partial', offset: 100, error: new SyncError('network', 'lost') },
+    );
     await queue.run();
     await queue.enqueue(photo);
     expect((await entry(photo))!.parts.thumb.done).toBe(true);
@@ -339,8 +387,18 @@ describe('photo queue', () => {
     await store.updateMeta<PhotoUploadEntry>(key, (cur) => ({
       ...(cur as PhotoUploadEntry),
       parts: {
-        thumb: { done: true, uploadUrl: null, offset: 300, objectName: `projects/TZ/${project}/${photo}_thumb.webp` },
-        full: { done: true, uploadUrl: null, offset: 2000, objectName: `projects/TZ/${project}/${photo}_full.webp` },
+        thumb: {
+          done: true,
+          uploadUrl: null,
+          offset: 300,
+          objectName: `projects/TZ/${project}/${photo}_thumb.webp`,
+        },
+        full: {
+          done: true,
+          uploadUrl: null,
+          offset: 2000,
+          objectName: `projects/TZ/${project}/${photo}_full.webp`,
+        },
       },
     }));
     expect(await queue.run()).toMatchObject({ uploaded: 1 });

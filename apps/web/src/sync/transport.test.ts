@@ -1,9 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
 import { SyncError } from './errors';
-import { type RpcClient, type RpcResponse, createTransport, mapRpcError, supabaseRpcClient } from './transport';
+import {
+  type RpcClient,
+  type RpcResponse,
+  createTransport,
+  mapRpcError,
+  supabaseRpcClient,
+} from './transport';
 import type { PushOp } from './types';
 
-function clientReturning(...responses: Array<RpcResponse | Error>): RpcClient & { calls: Array<[string, unknown]> } {
+function clientReturning(
+  ...responses: Array<RpcResponse | Error>
+): RpcClient & { calls: Array<[string, unknown]> } {
   const calls: Array<[string, unknown]> = [];
   return {
     calls,
@@ -26,7 +34,12 @@ const op = (n: number): PushOp => ({
   client_ts: '2026-10-03T10:00:00Z',
 });
 
-const pgError = (status: number, code: string, message: string, hint: string | null = null): RpcResponse => ({
+const pgError = (
+  status: number,
+  code: string,
+  message: string,
+  hint: string | null = null,
+): RpcResponse => ({
   data: null,
   status,
   error: { code, message, details: null, hint },
@@ -56,7 +69,9 @@ describe('transport.push', () => {
       },
     });
     const results = await createTransport(client).push([op(1), op(2)], 'device-a');
-    expect(client.calls).toEqual([['sync_push', { p_ops: [op(1), op(2)], p_device_id: 'device-a' }]]);
+    expect(client.calls).toEqual([
+      ['sync_push', { p_ops: [op(1), op(2)], p_device_id: 'device-a' }],
+    ]);
     expect(results.map((r) => r.status)).toEqual(['applied', 'rejected']);
   });
 
@@ -68,11 +83,32 @@ describe('transport.push', () => {
 
   it.each([
     ['a result is missing', { results: [{ op_id: 'op-1', status: 'applied' }] }],
-    ['the order differs', { results: [{ op_id: 'op-2', status: 'applied' }, { op_id: 'op-1', status: 'applied' }] }],
-    ['a status is unknown', { results: [{ op_id: 'op-1', status: 'weird' }, { op_id: 'op-2', status: 'applied' }] }],
+    [
+      'the order differs',
+      {
+        results: [
+          { op_id: 'op-2', status: 'applied' },
+          { op_id: 'op-1', status: 'applied' },
+        ],
+      },
+    ],
+    [
+      'a status is unknown',
+      {
+        results: [
+          { op_id: 'op-1', status: 'weird' },
+          { op_id: 'op-2', status: 'applied' },
+        ],
+      },
+    ],
     ['the body is not an object', 'ok'],
   ])('treats a malformed answer as retryable (%s)', async (_name, data) => {
-    const err = await kindOf(createTransport(clientReturning({ status: 200, error: null, data })).push([op(1), op(2)], 'd'));
+    const err = await kindOf(
+      createTransport(clientReturning({ status: 200, error: null, data })).push(
+        [op(1), op(2)],
+        'd',
+      ),
+    );
     expect(err.kind).toBe('bad_response');
     expect(err.retryable).toBe(true);
   });
@@ -93,7 +129,12 @@ describe('transport error mapping', () => {
     ['lock timeout', pgError(500, '55P03', 'lock not available'), 'server', true],
     ['statement timeout', pgError(500, '57014', 'canceling statement'), 'server', true],
     ['gateway 502', pgError(502, 'GATEWAY_UPSTREAM', 'upstream'), 'server', true],
-    ['network failure', { data: null, status: 0, error: { message: 'TypeError: fetch failed' } }, 'network', true],
+    [
+      'network failure',
+      { data: null, status: 0, error: { message: 'TypeError: fetch failed' } },
+      'network',
+      true,
+    ],
     ['plain 400', pgError(400, 'P0001', 'boom'), 'invalid', false],
   ];
 
@@ -105,12 +146,18 @@ describe('transport error mapping', () => {
   });
 
   it('reads the wait from the rate limiter hint', () => {
-    const err = mapRpcError('sync_push', pgError(429, 'PT429', 'rate_limited', 'Retry in 17 seconds.'), false);
+    const err = mapRpcError(
+      'sync_push',
+      pgError(429, 'PT429', 'rate_limited', 'Retry in 17 seconds.'),
+      false,
+    );
     expect(err.retryAfterMs).toBe(17_000);
   });
 
   it('maps a rejected fetch to a network error', async () => {
-    const err = await kindOf(createTransport(clientReturning(new TypeError('fetch failed'))).pull(null, 500));
+    const err = await kindOf(
+      createTransport(clientReturning(new TypeError('fetch failed'))).pull(null, 500),
+    );
     expect(err.kind).toBe('network');
   });
 
@@ -122,7 +169,10 @@ describe('transport error mapping', () => {
             resolve({
               data: null,
               status: 0,
-              error: { message: 'AbortError: This operation was aborted', hint: 'Request was aborted' },
+              error: {
+                message: 'AbortError: This operation was aborted',
+                hint: 'Request was aborted',
+              },
             }),
           );
         }),
@@ -136,8 +186,16 @@ describe('transport error mapping', () => {
 describe('transport.pull', () => {
   it('passes the cursor back unchanged and validates the page', async () => {
     const cursor = { lo: 1, hi: 9, e: 'x' };
-    const page = { changes: [{ table: 'projects', rows: [{ id: 'a' }] }], cursor, done: true, reset: false };
-    const client = clientReturning({ status: 200, error: null, data: page }, { status: 200, error: null, data: {} });
+    const page = {
+      changes: [{ table: 'projects', rows: [{ id: 'a' }] }],
+      cursor,
+      done: true,
+      reset: false,
+    };
+    const client = clientReturning(
+      { status: 200, error: null, data: page },
+      { status: 200, error: null, data: {} },
+    );
     const transport = createTransport(client);
     expect(await transport.pull(cursor, 250)).toEqual(page);
     expect(client.calls[0]).toEqual(['sync_pull', { p_cursor: cursor, p_limit: 250 }]);

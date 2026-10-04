@@ -144,7 +144,8 @@ export interface AuthPort {
 // Environment
 // ---------------------------------------------------------------------------------------
 
-export type ConnectionType = 'wifi' | 'ethernet' | 'cellular' | 'bluetooth' | 'wimax' | 'other' | 'none' | 'unknown';
+export type ConnectionType =
+  'wifi' | 'ethernet' | 'cellular' | 'bluetooth' | 'wimax' | 'other' | 'none' | 'unknown';
 
 /** Connectivity as the browser reports it. */
 export interface NetworkPort {
@@ -178,7 +179,10 @@ export interface LockPort {
    * Runs `fn` while holding the lock. `wait: false` → resolves `{ acquired: false }`
    * immediately when another tab holds it.
    */
-  run<T>(fn: () => Promise<T>, opts: { wait: boolean }): Promise<{ acquired: true; value: T } | { acquired: false }>;
+  run<T>(
+    fn: () => Promise<T>,
+    opts: { wait: boolean },
+  ): Promise<{ acquired: true; value: T } | { acquired: false }>;
 }
 
 // ---------------------------------------------------------------------------------------

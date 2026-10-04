@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SyncError } from './errors';
 import type { DbPort, PageToApply } from './ports';
-import { META_PULL_STATE, type PullState, pullChanges } from './pull';
+import { META_PULL_STATE, type PullState, pullChanges, resetSyncedData } from './pull';
 import { FakeServer } from './testing/fakeServer';
 import { LocalStore } from './testing/localStore';
 import { TestClock } from './testing/testClock';
@@ -115,7 +115,8 @@ describe('pullChanges', () => {
         await store.applyPage(page);
       },
     });
-    await expect(pullChanges(deps(flaky))).rejects.toThrow();
+    // The process "dies": no retry inside this run (a smaller page would otherwise be asked for).
+    await expect(pullChanges(deps(flaky), { minApplyPageSize: 1000 })).rejects.toThrow();
     expect(await store.allRows('projects')).toHaveLength(500);
     expect(await store.getMeta(META_PULL_STATE)).toBeUndefined();
 
@@ -163,7 +164,10 @@ describe('pullChanges', () => {
     expect((await store.counts()).pendingOps).toBe(3);
     expect(await store.restrictedLocal()).toHaveLength(1);
     expect(await store.photoBlob('photo-1', 'thumb')).toBeDefined();
-    expect(await store.getMeta<PullState>(META_PULL_STATE)).toMatchObject({ epoch: 'epoch-2', complete: true });
+    expect(await store.getMeta<PullState>(META_PULL_STATE)).toMatchObject({
+      epoch: 'epoch-2',
+      complete: true,
+    });
   });
 
   it('detects a changed scope_epoch even when the server does not say reset', async () => {
@@ -173,7 +177,10 @@ describe('pullChanges', () => {
     const state = (await store.getMeta<PullState>(META_PULL_STATE)) as PullState;
     await store.setMeta(META_PULL_STATE, { ...state, epoch: 'epoch-0' });
     const ghost = uid();
-    await store.applyPage({ changes: [{ table: 'projects', rows: [{ id: ghost, version: 1, deleted_at: null }] }], meta: [] });
+    await store.applyPage({
+      changes: [{ table: 'projects', rows: [{ id: ghost, version: 1, deleted_at: null }] }],
+      meta: [],
+    });
 
     const outcome = await pullChanges(deps());
     expect(outcome).toMatchObject({ reset: true, done: true });
@@ -232,7 +239,10 @@ describe('pullChanges', () => {
   it('retries a page on 5xx and 429 inside the cycle, with backoff', async () => {
     seedProjects(10);
     server.failNext('pull', new SyncError('server', 'HTTP 502', { status: 502 }));
-    server.failNext('pull', new SyncError('rate_limited', 'slow', { status: 429, retryAfterMs: 2000 }));
+    server.failNext(
+      'pull',
+      new SyncError('rate_limited', 'slow', { status: 429, retryAfterMs: 2000 }),
+    );
     const started = clock.now();
     const outcome = await pullChanges(deps());
     expect(outcome.done).toBe(true);
@@ -250,7 +260,11 @@ describe('pullChanges', () => {
   });
 
   it('does not retry when the session is revoked', async () => {
-    server.failNext('pull', new SyncError('session_revoked', 'sync_pull: session_revoked', { status: 403 }), 3);
+    server.failNext(
+      'pull',
+      new SyncError('session_revoked', 'sync_pull: session_revoked', { status: 403 }),
+      3,
+    );
     await expect(pullChanges(deps())).rejects.toMatchObject({ kind: 'session_revoked' });
     expect(clock.delays.filter((d) => d >= 500)).toEqual([]);
   });
@@ -258,10 +272,111 @@ describe('pullChanges', () => {
   it('recovers from a cursor the server cannot read by starting over', async () => {
     const ids = seedProjects(3);
     await store.setMeta(META_PULL_STATE, { cursor: 'garbage', epoch: 'epoch-1', complete: true });
-    await store.applyPage({ changes: [{ table: 'projects', rows: [{ id: 'ghost', version: 1, deleted_at: null }] }], meta: [] });
+    await store.applyPage({
+      changes: [{ table: 'projects', rows: [{ id: 'ghost', version: 1, deleted_at: null }] }],
+      meta: [],
+    });
     const outcome = await pullChanges(deps());
     expect(outcome).toMatchObject({ reset: true, done: true });
     expect((await store.allRows('projects')).map((r) => r.id).sort()).toEqual([...ids].sort());
+  });
+
+  describe('a page that cannot be stored', () => {
+    /** Refuses transactions with more than `max` rows, like IndexedDB on a starved phone. */
+    function limitedDb(max: number, error: () => unknown): DbPort {
+      return Object.assign(Object.create(store) as DbPort, {
+        applyPage: async (page: PageToApply) => {
+          const rows = page.changes.reduce(
+            (sum, c) => sum + (c.rows?.length ?? 0) + (c.gone?.length ?? 0),
+            0,
+          );
+          if (rows > max) throw error();
+          await store.applyPage(page);
+        },
+      });
+    }
+    const prematureCommit = (): Error =>
+      Object.assign(new Error('Transaction committed too early'), { name: 'PrematureCommitError' });
+
+    it('is requested again in smaller pages from the same cursor, and the smaller size is kept', async () => {
+      seedProjects(600);
+      const tuning = { ceiling: null as number | null };
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const outcome = await pullChanges(deps(limitedDb(120, prematureCommit)), { tuning });
+      warn.mockRestore();
+      expect(outcome).toMatchObject({ done: true, rows: 600 });
+      const limits = server.calls.pull.map((c) => c.limit);
+      expect(limits.slice(0, 4)).toEqual([500, 250, 125, 62]);
+      expect(limits.slice(3).every((l) => l === 62)).toBe(true);
+      // The refused requests started from the same (null) cursor: nothing was skipped.
+      expect(server.calls.pull.slice(0, 4).map((c) => c.cursor)).toEqual([null, null, null, null]);
+      expect(await store.allRows('projects')).toHaveLength(600);
+      expect(tuning.ceiling).toBe(62);
+
+      // The next cycle starts with the size that worked.
+      seedProjects(10);
+      await pullChanges(deps(limitedDb(120, prematureCommit)), { tuning });
+      expect(server.calls.pull.at(-1)!.limit).toBe(62);
+    });
+
+    it('is reported when even a small page cannot be stored, and the cursor stays', async () => {
+      seedProjects(100);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      await expect(
+        pullChanges(deps(limitedDb(0, () => new Error('broken store')))),
+      ).rejects.toMatchObject({
+        kind: 'unknown',
+      });
+      warn.mockRestore();
+      expect(server.calls.pull.map((c) => c.limit)).toEqual([500, 50, 25, 20]);
+      expect(await store.getMeta(META_PULL_STATE)).toBeUndefined();
+      expect(await store.allRows('projects')).toEqual([]);
+    });
+
+    it('is not retried when the device is full', async () => {
+      seedProjects(100);
+      const quota = (): unknown => ({ name: 'QuotaExceededError', message: 'quota' });
+      await expect(pullChanges(deps(limitedDb(0, quota)))).rejects.toMatchObject({
+        kind: 'storage_full',
+      });
+      expect(server.calls.pull).toHaveLength(1);
+    });
+  });
+
+  it('finishes a reset that was interrupted, before pulling on top of stale rows', async () => {
+    const [kept] = seedProjects(1) as [string];
+    await pullChanges(deps());
+    const ghost = uid(); // deleted on the server meanwhile; a first round would never say so
+    await store.applyPage({
+      changes: [{ table: 'projects', rows: [{ id: ghost, version: 1, deleted_at: null }] }],
+      meta: [],
+    });
+    const mine = uid();
+    await store.mutate('projects', mine, { name_ar: 'غير مرسل', type: 'school' });
+
+    // The tab dies inside the discard: the marker is written, the tables are not cleared.
+    const dying: DbPort = Object.assign(Object.create(store) as DbPort, {
+      resetScopedData: async () => {
+        throw new Error('tab closed');
+      },
+    });
+    await expect(resetSyncedData(dying, 'epoch-1')).rejects.toThrow('tab closed');
+    expect(await store.getMeta<PullState>(META_PULL_STATE)).toMatchObject({
+      cursor: null,
+      wipePending: true,
+    });
+
+    const outcome = await pullChanges(deps());
+    expect(outcome).toMatchObject({ reset: true, done: true });
+    expect(server.calls.pull.at(-1)!.cursor).toBeNull();
+    expect(await store.getRow('projects', ghost)).toBeUndefined();
+    expect(await store.getRow('projects', kept)).toBeDefined();
+    expect(await store.getRow('projects', mine)).toMatchObject({ name_ar: 'غير مرسل', _dirty: 1 });
+    expect(await store.getMeta<PullState>(META_PULL_STATE)).toMatchObject({
+      epoch: 'epoch-1',
+      complete: true,
+    });
+    expect((await store.getMeta<PullState>(META_PULL_STATE))?.wipePending).toBeUndefined();
   });
 
   it('stops between pages when aborted and leaves a consistent cursor', async () => {
@@ -271,7 +386,9 @@ describe('pullChanges', () => {
     server.onPull = async () => {
       if (++calls === 2) controller.abort();
     };
-    await expect(pullChanges(deps(), { pageSize: 100, signal: controller.signal })).rejects.toMatchObject({
+    await expect(
+      pullChanges(deps(), { pageSize: 100, signal: controller.signal }),
+    ).rejects.toMatchObject({
       kind: 'aborted',
     });
     const stored = (await store.allRows('projects')).length;

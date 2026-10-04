@@ -8,7 +8,14 @@
  * instances with different database names simulate two devices. Never imported by the app.
  */
 import Dexie, { type Table } from 'dexie';
-import type { DbPort, LocalCounts, OutboxOp, PageToApply, PhotoKind, SyncTableInfo } from '../ports';
+import type {
+  DbPort,
+  LocalCounts,
+  OutboxOp,
+  PageToApply,
+  PhotoKind,
+  SyncTableInfo,
+} from '../ports';
 import type { AppliedStatus, PushResult } from '../types';
 import { PROJECT_CHILDREN, REGISTRY, isRestricted } from './registry';
 
@@ -127,8 +134,15 @@ export class LocalStore implements DbPort {
 
       const ops = await this.opsForRow(table, id);
       const last = ops[ops.length - 1];
-      const stateChange = 'record_state' in patch || (last !== undefined && 'record_state' in last.fields);
-      if (last && last.kind === 'upsert' && last.state === 'pending' && last.attempts === 0 && !stateChange) {
+      const stateChange =
+        'record_state' in patch || (last !== undefined && 'record_state' in last.fields);
+      if (
+        last &&
+        last.kind === 'upsert' &&
+        last.state === 'pending' &&
+        last.attempts === 0 &&
+        !stateChange
+      ) {
         // Coalesce: union of fields, oldest base_version and the op id are kept (never sent).
         await this.outbox.update(last.seq, { fields: { ...last.fields, ...patch } });
       } else {
@@ -157,7 +171,8 @@ export class LocalStore implements DbPort {
       const childIds: Array<[string, string]> = [];
       if (table === 'projects') {
         for (const child of PROJECT_CHILDREN) {
-          for (const r of await this.t(child).where('project_id').equals(id).toArray()) childIds.push([child, r.id]);
+          for (const r of await this.t(child).where('project_id').equals(id).toArray())
+            childIds.push([child, r.id]);
         }
       }
       await this.removeLocalRow(table, id);
@@ -261,7 +276,8 @@ export class LocalStore implements DbPort {
       // Device rule for restricted tables: gone from the device once acknowledged.
       if (this.usesRestrictedLocal(op.table)) {
         const remaining = await this.opsForRow(op.table, op.id);
-        if (remaining.length === 0) await this.t<RestrictedLocal>('restricted_local').delete([op.table, op.id]);
+        if (remaining.length === 0)
+          await this.t<RestrictedLocal>('restricted_local').delete([op.table, op.id]);
         return;
       }
       if (op.kind === 'delete') {
@@ -285,7 +301,11 @@ export class LocalStore implements DbPort {
             const point = (value ?? {}) as { lon?: unknown; lat?: unknown };
             if (!pendingFields.has('lon')) next.lon = point.lon ?? null;
             if (!pendingFields.has('lat')) next.lat = point.lat ?? null;
-          } else if (result.server_values && field in result.server_values && !pendingFields.has(field)) {
+          } else if (
+            result.server_values &&
+            field in result.server_values &&
+            !pendingFields.has(field)
+          ) {
             next[field] = value;
           }
         }
@@ -300,7 +320,10 @@ export class LocalStore implements DbPort {
   }
 
   async counts(): Promise<LocalCounts> {
-    const [pendingOps, failedOps] = await Promise.all([this.outbox.count(), this.t('failed_ops').count()]);
+    const [pendingOps, failedOps] = await Promise.all([
+      this.outbox.count(),
+      this.t('failed_ops').count(),
+    ]);
     return { pendingOps, failedOps };
   }
 
@@ -329,7 +352,10 @@ export class LocalStore implements DbPort {
             continue;
           }
           // Never overwrite local edits: pulled row first, pending fields on top.
-          const overlay = Object.assign({}, ...pending.map((o) => o.fields)) as Record<string, unknown>;
+          const overlay = Object.assign({}, ...pending.map((o) => o.fields)) as Record<
+            string,
+            unknown
+          >;
           await table.put({ ...incoming, ...overlay, id, _dirty: 1 });
         }
         for (const id of change.gone ?? []) await this.removeLocalRow(change.table, id);
@@ -380,7 +406,10 @@ export class LocalStore implements DbPort {
     return this.t<{ key: string; value: T }>('meta').where('key').startsWith(prefix).sortBy('key');
   }
 
-  async updateMeta<T>(key: string, fn: (current: T | undefined) => T | undefined): Promise<T | undefined> {
+  async updateMeta<T>(
+    key: string,
+    fn: (current: T | undefined) => T | undefined,
+  ): Promise<T | undefined> {
     const meta = this.t<{ key: string; value: T }>('meta');
     const result = await this.dexie.transaction('rw', meta, async () => {
       const next = fn((await meta.get(key))?.value);

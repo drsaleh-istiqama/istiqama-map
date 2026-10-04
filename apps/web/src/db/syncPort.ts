@@ -5,7 +5,14 @@
  * `syncPort.test.ts`); `src/db` itself does not import anything from `src/sync`.
  */
 import { liveQuery } from 'dexie';
-import { ackOp, markInflight, pendingOps, queueCounts, requeueInflight, type QueueCounts } from './ack';
+import {
+  ackOp,
+  markInflight,
+  pendingOps,
+  queueCounts,
+  requeueInflight,
+  type QueueCounts,
+} from './ack';
 import { applyPage, resetScopedData, wipeAllLocalData, type PullPageInput } from './apply';
 import { dropPhotoBlob, photoBlob } from './blobs';
 import { publicRow } from './bundle';

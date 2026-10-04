@@ -46,7 +46,12 @@ export function requireEnv(name: string): string {
 }
 
 /** Integer setting with bounds; falls back when unset or not a number. */
-export function intEnv(name: string, fallback: number, min = 0, max = Number.MAX_SAFE_INTEGER): number {
+export function intEnv(
+  name: string,
+  fallback: number,
+  min = 0,
+  max = Number.MAX_SAFE_INTEGER,
+): number {
   const raw = env(name);
   if (raw === undefined) return fallback;
   const n = Number(raw);

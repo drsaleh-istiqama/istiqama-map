@@ -12,7 +12,11 @@ import { SyncError } from '../errors';
 import type { DeviceAnswer, PullChange, PullPage, PushOp, PushResult, Transport } from '../types';
 import { ONE_PER_PROJECT, PROJECT_CHILDREN, REGISTRY, isRestricted } from './registry';
 
-type ServerRow = Record<string, unknown> & { id: string; version: number; deleted_at: string | null };
+type ServerRow = Record<string, unknown> & {
+  id: string;
+  version: number;
+  deleted_at: string | null;
+};
 
 interface Stamp {
   xid: number;
@@ -125,7 +129,13 @@ export class FakeServer {
     const t = this.table(table);
     const current = t.get(id);
     const version = (current?.version ?? 0) + 1;
-    const next = { ...(current ?? { id, deleted_at: null }), ...fields, id, version, xid: this.xid++ } as ServerRow & Stamp;
+    const next = {
+      ...(current ?? { id, deleted_at: null }),
+      ...fields,
+      id,
+      version,
+      xid: this.xid++,
+    } as ServerRow & Stamp;
     t.set(id, next);
     this.log(table, id, { version, fields: Object.keys(fields), device });
     return next;
@@ -168,7 +178,8 @@ export class FakeServer {
     this.calls.push.push({ device, ops: structuredClone(ops) });
     if (this.onPush) await this.onPush();
     FakeServer.cancelled(signal);
-    if (ops.length > 50) throw new SyncError('invalid', 'sync_push: too_many_ops', { status: 422, code: 'PT422' });
+    if (ops.length > 50)
+      throw new SyncError('invalid', 'sync_push: too_many_ops', { status: 422, code: 'PT422' });
     const refused = this.pushGuard?.(ops);
     if (refused) throw refused;
     const results = ops.map((op) => this.apply(op, device));
@@ -180,7 +191,11 @@ export class FakeServer {
     const known = this.ledger.get(op.op_id);
     if (known) {
       const { status, ...rest } = known;
-      return { ...rest, status: 'duplicate', original_status: status as PushResult['original_status'] };
+      return {
+        ...rest,
+        status: 'duplicate',
+        original_status: status as PushResult['original_status'],
+      };
     }
     const result = this.applyNew(op, device);
     if (result.status !== 'rejected') this.ledger.set(op.op_id, result);
@@ -202,7 +217,8 @@ export class FakeServer {
     let rowId: string | undefined;
 
     if (op.kind === 'delete') {
-      if (!current || current.deleted_at !== null) return { op_id: op.op_id, status: 'applied', version: current?.version };
+      if (!current || current.deleted_at !== null)
+        return { op_id: op.op_id, status: 'applied', version: current?.version };
       const stale = base < current.version;
       const next = this.write(op.table, id, { deleted_at: new Date().toISOString() }, device);
       return { op_id: op.op_id, status: stale ? 'merged' : 'applied', version: next.version };
@@ -217,7 +233,9 @@ export class FakeServer {
         if (!parent) return this.reject(op, 'parent_missing');
         if (parent.deleted_at !== null) return this.reject(op, 'parent_deleted');
         if (ONE_PER_PROJECT.includes(op.table)) {
-          const existing = [...t.values()].find((r) => r.project_id === projectId && r.deleted_at === null);
+          const existing = [...t.values()].find(
+            (r) => r.project_id === projectId && r.deleted_at === null,
+          );
           if (existing) {
             // Natural key: apply to the existing row as an update on base 0.
             id = existing.id;
@@ -234,9 +252,12 @@ export class FakeServer {
     }
     if (current.deleted_at !== null) return this.reject(op, 'row_deleted');
 
-    const differing = Object.keys(fields).filter((k) => JSON.stringify(fields[k]) !== JSON.stringify(current[k]));
+    const differing = Object.keys(fields).filter(
+      (k) => JSON.stringify(fields[k]) !== JSON.stringify(current[k]),
+    );
     const extra = rowId ? { row_id: rowId } : {};
-    if (differing.length === 0) return { op_id: op.op_id, status: 'applied', version: current.version, ...extra };
+    if (differing.length === 0)
+      return { op_id: op.op_id, status: 'applied', version: current.version, ...extra };
 
     let conflicting: string[] = [];
     let status: 'applied' | 'merged' | 'conflict' = 'applied';
@@ -249,17 +270,24 @@ export class FakeServer {
       conflicting = differing.filter((k) => changedElsewhere.has(k));
       status = conflicting.length > 0 ? 'conflict' : 'merged';
     }
-    const toWrite = Object.fromEntries(differing.filter((k) => !conflicting.includes(k)).map((k) => [k, fields[k]]));
-    const next = Object.keys(toWrite).length > 0 ? this.write(op.table, id, toWrite, device) : current;
+    const toWrite = Object.fromEntries(
+      differing.filter((k) => !conflicting.includes(k)).map((k) => [k, fields[k]]),
+    );
+    const next =
+      Object.keys(toWrite).length > 0 ? this.write(op.table, id, toWrite, device) : current;
     if (status !== 'conflict') return { op_id: op.op_id, status, version: next.version, ...extra };
 
     // lon/lat conflict as one field `geom`, like the real server.
-    const reported = [...new Set(conflicting.map((k) => (k === 'lon' || k === 'lat' ? 'geom' : k)))];
+    const reported = [
+      ...new Set(conflicting.map((k) => (k === 'lon' || k === 'lat' ? 'geom' : k))),
+    ];
     const conflictIds: string[] = [];
     const serverValues: Record<string, unknown> = {};
     for (const field of reported) {
-      const serverValue = field === 'geom' ? { lon: current.lon ?? null, lat: current.lat ?? null } : current[field];
-      const clientValue = field === 'geom' ? { lon: fields.lon ?? null, lat: fields.lat ?? null } : fields[field];
+      const serverValue =
+        field === 'geom' ? { lon: current.lon ?? null, lat: current.lat ?? null } : current[field];
+      const clientValue =
+        field === 'geom' ? { lon: fields.lon ?? null, lat: fields.lat ?? null } : fields[field];
       const conflict: FakeConflict = {
         id: `conflict-${this.conflicts.length + 1}`,
         table_name: op.table,
@@ -304,7 +332,14 @@ export class FakeServer {
     const round: Cursor =
       cursor && cursor.hi !== null
         ? cursor
-        : { e: this.epoch, lo: cursor?.lo ?? 0, hi: this.xid, first: cursor === null, t: -1, id: '' };
+        : {
+            e: this.epoch,
+            lo: cursor?.lo ?? 0,
+            hi: this.xid,
+            first: cursor === null,
+            t: -1,
+            id: '',
+          };
     const startOfRound = !cursor || cursor.hi === null;
     const hi = round.hi as number;
 
@@ -319,7 +354,9 @@ export class FakeServer {
         candidates.push({ t, table: info.name, row });
       }
     });
-    candidates.sort((a, b) => a.t - b.t || (a.row.id < b.row.id ? -1 : a.row.id > b.row.id ? 1 : 0));
+    candidates.sort(
+      (a, b) => a.t - b.t || (a.row.id < b.row.id ? -1 : a.row.id > b.row.id ? 1 : 0),
+    );
     const page = candidates.slice(0, Math.max(1, Math.min(1000, limit)));
     const changes: PullChange[] = [];
     for (const item of page) {
@@ -344,8 +381,22 @@ export class FakeServer {
     const last = page[page.length - 1];
     const next: Cursor = done
       ? { e: this.epoch, lo: hi, hi: null }
-      : { e: this.epoch, lo: round.lo, hi, first: round.first, t: last?.t ?? round.t, id: last?.row.id ?? round.id };
-    return { changes, cursor: next, done, reset, scope_epoch: this.epoch, server_time: new Date().toISOString() };
+      : {
+          e: this.epoch,
+          lo: round.lo,
+          hi,
+          first: round.first,
+          t: last?.t ?? round.t,
+          id: last?.row.id ?? round.id,
+        };
+    return {
+      changes,
+      cursor: next,
+      done,
+      reset,
+      scope_epoch: this.epoch,
+      server_time: new Date().toISOString(),
+    };
   }
 
   private async rpc(fn: string, args: Record<string, unknown>): Promise<unknown> {

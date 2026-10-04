@@ -1,9 +1,9 @@
 import { useState } from 'preact/hooks';
 import { lockMinutes, pin, session, signOut } from '../auth';
 import { hasTranslation, t } from '../i18n';
-import { clearViewFilters } from '../routes';
 import { syncStatus } from '../sync';
-import { Button, confirm, Field, IconLock, IconSignOut, purgeUserCaches, toast } from '../ui';
+import { Button, confirm, Field, IconLock, IconSignOut, toast } from '../ui';
+import { clearUserTraces } from '../ui/shell/signOutCleanup';
 
 export const PIN_MIN = 4;
 export const PIN_MAX = 8;
@@ -33,11 +33,42 @@ function failureMessage(error: unknown): string {
     : t('settings.pinErrSave');
 }
 
+export type PinCheck = 'ok' | 'wrong' | 'throttled' | 'wiped' | 'no_vault';
+
+interface PinExtensions {
+  /** Auth extension: tells a wrong PIN from a throttled or wiped vault. */
+  tryUnlock?: (code: string) => Promise<PinCheck>;
+  attempts?: { value: { failures: number } };
+  maxFailures?: number;
+}
+
+/**
+ * Checks the current PIN. While unlocked this only verifies it, but wrong guesses still count
+ * towards the wipe limit (auth module). Uses the auth extension when present; the contract's
+ * `pin.unlock()` alone only answers yes / no.
+ */
+async function checkCurrentPin(code: string): Promise<PinCheck> {
+  const extended = pin as typeof pin & PinExtensions;
+  if (typeof extended.tryUnlock === 'function') return extended.tryUnlock(code);
+  return (await pin.unlock(code)) ? 'ok' : 'wrong';
+}
+
+/** Guesses left before the vault wipes itself, when the auth module tells. */
+function attemptsLeft(): number | null {
+  const extended = pin as typeof pin & PinExtensions;
+  const failures = extended.attempts?.value.failures;
+  const max = extended.maxFailures;
+  return typeof failures === 'number' && typeof max === 'number'
+    ? Math.max(0, max - failures)
+    : null;
+}
+
 function PinForm() {
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [repeat, setRepeat] = useState('');
   const [errors, setErrors] = useState<PinErrors>({});
+  const [remaining, setRemaining] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const range = { min: PIN_MIN, max: PIN_MAX };
 
@@ -45,14 +76,25 @@ function PinForm() {
     event.preventDefault();
     const found = validatePinChange(current, next, repeat);
     setErrors(found);
+    setRemaining(null);
     if (Object.keys(found).length > 0 || busy) return;
     setBusy(true);
     try {
-      // While unlocked this only verifies the PIN; wrong guesses still count (auth module).
-      if (!(await pin.unlock(current))) {
-        setErrors({ current: 'settings.pinErrCurrent' });
+      const check = await checkCurrentPin(current);
+      if (check === 'wrong') {
+        const left = attemptsLeft();
+        setRemaining(left);
+        setErrors({
+          current: left === null ? 'settings.pinErrCurrent' : 'settings.pinErrCurrentLeft',
+        });
         return;
       }
+      if (check === 'throttled') {
+        setErrors({ current: 'settings.pinErrThrottled' });
+        return;
+      }
+      // 'wiped' / 'no_vault': the sign-in data is gone and the auth gate takes over the screen.
+      if (check !== 'ok') return;
       await pin.set(next);
       setCurrent('');
       setNext('');
@@ -94,7 +136,7 @@ function PinForm() {
         label={t('settings.pinCurrent')}
         htmlFor="pin-current"
         required
-        error={errors.current && t(errors.current, range)}
+        error={errors.current && t(errors.current, { ...range, remaining: remaining ?? 0 })}
       >
         {input(current, setCurrent, 'pin-current', 'current-password')}
       </Field>
@@ -142,9 +184,9 @@ async function leave(): Promise<void> {
     return;
   }
   if (session.value) return; // the user kept the session
-  // Nothing of this user may stay readable for the next person on a shared device.
-  clearViewFilters();
-  await purgeUserCaches();
+  // Nothing of this user may stay readable for the next person on a shared device. The app
+  // root does the same for every other way a session ends; doing it here too is harmless.
+  await clearUserTraces();
 }
 
 /** PIN change, "lock now" and sign-out (brief §3). */

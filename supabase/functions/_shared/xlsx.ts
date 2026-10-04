@@ -53,7 +53,8 @@ export function xmlEscape(text: string): string {
     else if (isInvalidXmlChar(c)) rep = '';
     else if (c >= 0xd800 && c <= 0xdbff) {
       const next = text.charCodeAt(i + 1);
-      if (next >= 0xdc00 && next <= 0xdfff) i++; // valid pair: keep both
+      if (next >= 0xdc00 && next <= 0xdfff)
+        i++; // valid pair: keep both
       else rep = String.fromCharCode(0xfffd);
     } else if (c >= 0xdc00 && c <= 0xdfff) rep = String.fromCharCode(0xfffd);
     if (rep !== null) {

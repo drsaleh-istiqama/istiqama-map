@@ -80,8 +80,12 @@ async function addPhoto(projectId: string): Promise<string> {
     storage_path_thumb: `projects/TZ/${projectId}/${row.id}_thumb.webp`,
   };
   await mutate('project_photos', row.id, { ...row, ...paths }, { insert: true });
-  await putPhotoBlob(row.id, 'full', new Blob([new Uint8Array(2048)], { type: 'image/webp' }), { projectId });
-  await putPhotoBlob(row.id, 'thumb', new Blob([new Uint8Array(256)], { type: 'image/webp' }), { projectId });
+  await putPhotoBlob(row.id, 'full', new Blob([new Uint8Array(2048)], { type: 'image/webp' }), {
+    projectId,
+  });
+  await putPhotoBlob(row.id, 'thumb', new Blob([new Uint8Array(256)], { type: 'image/webp' }), {
+    projectId,
+  });
   await engine.enqueuePhotoUpload(row.id);
   return row.id;
 }
@@ -90,7 +94,12 @@ beforeEach(async () => {
   await wipeAllLocalData();
   await setLocalSession({ userId: USER, canSeeRestricted: false });
   server = new FakeServer();
-  server.write('countries', COUNTRY, { iso2: 'TZ', name_ar: 'تنزانيا', name_en: 'Tanzania', active: true });
+  server.write('countries', COUNTRY, {
+    iso2: 'TZ',
+    name_ar: 'تنزانيا',
+    name_en: 'Tanzania',
+    active: true,
+  });
   auth = new FakeAuth();
   auth.user = USER;
   net = new FakeNetwork();
@@ -120,9 +129,17 @@ describe('engine + real local database', () => {
 
     net.online = true;
     await engine.syncNow();
-    expect(engine.status.value).toMatchObject({ state: 'idle', lastError: null, pendingOps: 0, pendingPhotos: 0, failedOps: 0 });
+    expect(engine.status.value).toMatchObject({
+      state: 'idle',
+      lastError: null,
+      pendingOps: 0,
+      pendingPhotos: 0,
+      failedOps: 0,
+    });
     expect(server.liveRows('projects')).toHaveLength(20);
-    expect(server.liveRows('project_photos').every((p) => p.upload_state === 'uploaded')).toBe(true);
+    expect(server.liveRows('project_photos').every((p) => p.upload_state === 'uploaded')).toBe(
+      true,
+    );
     expect(uploader.stored.size).toBe(40);
     // parents went first, and inserts carried the device's creation time
     const firstBatch = server.calls.push[0]!.ops;
@@ -144,7 +161,11 @@ describe('engine + real local database', () => {
     const ids = [await createProject(), await createProject(), await createProject()];
     server.dropNextPushResponse();
     await engine.syncNow();
-    expect(engine.status.value).toMatchObject({ state: 'error', lastError: 'sync.error_network', pendingOps: 3 });
+    expect(engine.status.value).toMatchObject({
+      state: 'error',
+      lastError: 'sync.error_network',
+      pendingOps: 3,
+    });
     expect(server.liveRows('projects')).toHaveLength(3);
 
     engine.stop();
@@ -158,6 +179,29 @@ describe('engine + real local database', () => {
       expect(row?.version).toBe(1);
       expect(row?._dirty).toBeUndefined();
     }
+  });
+
+  it('sends the offline entry time (created_at) with an insert only, never with an update', async () => {
+    net.online = false;
+    const id = await createProject();
+    const createdAt = (await db.projects.get(id))?.created_at;
+    expect(typeof createdAt).toBe('string');
+    net.online = true;
+    await engine.syncNow();
+    await mutate('projects', id, { builder: 'later edit' });
+    await engine.syncNow();
+
+    const sent = server.calls.push.flatMap((c) => c.ops).filter((o) => o.id === id);
+    expect(sent).toHaveLength(2);
+    expect(sent[0]).toMatchObject({ kind: 'upsert', base_version: 0 });
+    expect(sent[0]!.fields?.created_at).toBe(createdAt);
+    expect(String(createdAt)).toMatch(/Z$/); // UTC, ISO 8601 (sync.md §7.5)
+    expect(sent[1]).toMatchObject({
+      kind: 'upsert',
+      base_version: 1,
+      fields: { builder: 'later edit' },
+    });
+    expect(sent[1]!.fields).not.toHaveProperty('created_at');
   });
 
   it('recovers operations left inflight by a crash', async () => {
@@ -177,10 +221,17 @@ describe('engine + real local database', () => {
 
     await mutate('projects', id, { builder: 'changed here', name_latin: 'renamed here' });
     await engine.syncNow();
-    expect(server.row('projects', id)).toMatchObject({ builder: 'changed elsewhere', name_latin: 'renamed here' });
+    expect(server.row('projects', id)).toMatchObject({
+      builder: 'changed elsewhere',
+      name_latin: 'renamed here',
+    });
     expect(server.conflicts.map((c) => c.field)).toEqual(['builder']);
     const local = await db.projects.get(id);
-    expect(local).toMatchObject({ builder: 'changed elsewhere', name_latin: 'renamed here', capacity: 90 });
+    expect(local).toMatchObject({
+      builder: 'changed elsewhere',
+      name_latin: 'renamed here',
+      capacity: 90,
+    });
     expect(engine.status.value).toMatchObject({ pendingOps: 0, failedOps: 0, state: 'idle' });
   });
 
@@ -215,8 +266,16 @@ describe('engine + real local database', () => {
     const mine = await createProject();
     await engine.syncNow();
     const theirs = '44444444-4444-4444-8444-444444444444';
-    server.write('projects', theirs, { name_ar: 'آخر', type: 'school', country_id: COUNTRY, branch_id: BRANCH });
-    server.write('project_land', '55555555-5555-4555-8555-555555555555', { project_id: theirs, ownership: 'waqf' });
+    server.write('projects', theirs, {
+      name_ar: 'آخر',
+      type: 'school',
+      country_id: COUNTRY,
+      branch_id: BRANCH,
+    });
+    server.write('project_land', '55555555-5555-4555-8555-555555555555', {
+      project_id: theirs,
+      ownership: 'waqf',
+    });
     await engine.syncNow();
     expect(await db.project_land.count()).toBe(1);
 
@@ -231,7 +290,11 @@ describe('engine + real local database', () => {
 
   it('on a scope_epoch change discards the synced copy but keeps unsent work', async () => {
     const stale = '66666666-6666-4666-8666-666666666666';
-    server.write('projects', stale, { name_ar: 'خارج النطاق', type: 'mosque', country_id: COUNTRY });
+    server.write('projects', stale, {
+      name_ar: 'خارج النطاق',
+      type: 'mosque',
+      country_id: COUNTRY,
+    });
     await engine.syncNow();
     expect(await db.projects.get(stale)).toBeDefined();
 
@@ -249,7 +312,10 @@ describe('engine + real local database', () => {
     expect(await db.projects.get(stale)).toBeUndefined();
     expect((await db.projects.get(unsent))?.name_latin).toBe('unsent');
     expect(server.row('projects', unsent)).toBeDefined();
-    expect(await port.getMeta<PullState>(META_PULL_STATE)).toMatchObject({ epoch: 'epoch-2', complete: true });
+    expect(await port.getMeta<PullState>(META_PULL_STATE)).toMatchObject({
+      epoch: 'epoch-2',
+      complete: true,
+    });
     expect(engine.status.value).toMatchObject({ state: 'idle', pendingOps: 0 });
   });
 
@@ -280,6 +346,11 @@ describe('engine + real local database', () => {
     await addPhoto(project);
     await engine.resetLocalData('revoked');
     for (const table of db.tables) expect(await table.count(), table.name).toBe(0);
-    expect(engine.status.value).toMatchObject({ pendingOps: 0, pendingPhotos: 0, failedOps: 0, lastSyncAt: null });
+    expect(engine.status.value).toMatchObject({
+      pendingOps: 0,
+      pendingPhotos: 0,
+      failedOps: 0,
+      lastSyncAt: null,
+    });
   });
 });

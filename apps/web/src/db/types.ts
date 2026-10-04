@@ -68,7 +68,14 @@ export type PhotoCategory = (typeof PHOTO_CATEGORIES)[number];
 export const PHOTO_UPLOAD_STATES = ['pending', 'uploaded'] as const;
 export type PhotoUploadState = (typeof PHOTO_UPLOAD_STATES)[number];
 
-export const STAFF_ROLES = ['imam', 'teacher', 'agent', 'administrator', 'manager', 'other'] as const;
+export const STAFF_ROLES = [
+  'imam',
+  'teacher',
+  'agent',
+  'administrator',
+  'manager',
+  'other',
+] as const;
 export type StaffRole = (typeof STAFF_ROLES)[number];
 
 export const CURRENCIES = ['TZS', 'KES', 'UGX', 'RWF', 'BIF', 'MZN', 'OMR', 'USD'] as const;
@@ -350,7 +357,9 @@ export interface ProjectStaffRow extends StdColumns {
   end_date: IsoDate | null;
 }
 
-type OptionColumns = { [K in OptionListKey]: Uuid[] } & { [K in OptionListKey as `${K}_other`]: string | null };
+type OptionColumns = { [K in OptionListKey]: Uuid[] } & {
+  [K in OptionListKey as `${K}_other`]: string | null;
+};
 
 export interface CommunityProfileRow extends StdColumns, OptionColumns {
   project_id: Uuid;
@@ -520,7 +529,8 @@ export interface PushError {
 export interface PushResult {
   op_id: Uuid;
   status: PushStatus;
-  version?: number;
+  /** `null` in the constant answer to a blind write of a restricted row (sync.md §4.4). */
+  version?: number | null;
   /** Present on `duplicate`: the status the operation had when it was first applied. */
   original_status?: Exclude<PushStatus, 'duplicate' | 'rejected'>;
   /** Natural-key redirect: the op was applied to this already existing row. */

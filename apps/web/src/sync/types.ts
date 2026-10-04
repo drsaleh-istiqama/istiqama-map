@@ -36,7 +36,8 @@ export interface PushErrorInfo {
 export interface PushResult {
   op_id: string;
   status: PushStatus;
-  version?: number;
+  /** `null` in the constant answer to a blind write of a restricted row (sync.md §4.4). */
+  version?: number | null;
   /** Present when `status` is `duplicate`. */
   original_status?: AppliedStatus;
   conflict_ids?: string[];

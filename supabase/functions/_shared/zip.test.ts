@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import * as XLSXNS from 'xlsx';
-import { ZipEntryStream, ZipError, ZipWriter, crc32, isZip, readZipDirectory, readZipEntry } from './zip.ts';
+import {
+  ZipEntryStream,
+  ZipError,
+  ZipWriter,
+  crc32,
+  isZip,
+  readZipDirectory,
+  readZipEntry,
+} from './zip.ts';
 
 const XLSX: typeof XLSXNS = (XLSXNS as unknown as { default?: typeof XLSXNS }).default ?? XLSXNS;
 
@@ -42,7 +50,9 @@ describe('ZipWriter / reader round trip', () => {
 
     const entries = readZipDirectory(bytes);
     expect(entries.map((e) => e.name)).toEqual(['hello.txt', 'عربي/ملف.txt', 'big.bin']);
-    expect(new TextDecoder().decode(await readZipEntry(bytes, entries[0]!, 1000))).toBe('hello world');
+    expect(new TextDecoder().decode(await readZipEntry(bytes, entries[0]!, 1000))).toBe(
+      'hello world',
+    );
     expect(new TextDecoder().decode(await readZipEntry(bytes, entries[1]!, 1_000_000))).toBe(
       'مسجد ومدرسة '.repeat(500),
     );
@@ -86,7 +96,9 @@ describe('reader limits', () => {
     const bytes = join(zip.finish().chunks);
     expect(bytes.byteLength).toBeLessThan(100_000);
     const [entry] = readZipDirectory(bytes);
-    await expect(readZipEntry(bytes, entry!, 5_000_000)).rejects.toMatchObject({ code: 'too_large' });
+    await expect(readZipEntry(bytes, entry!, 5_000_000)).rejects.toMatchObject({
+      code: 'too_large',
+    });
     expect((await readZipEntry(bytes, entry!, 25_000_000)).byteLength).toBe(20_000_000);
   });
 

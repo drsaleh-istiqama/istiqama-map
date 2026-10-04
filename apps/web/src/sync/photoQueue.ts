@@ -79,10 +79,14 @@ export interface PhotoQueue {
 }
 
 const metaKey = (photoId: string): string => `${PHOTO_META_PREFIX}${photoId}`;
-const emptyPart = (): PhotoPartState => ({ done: false, uploadUrl: null, offset: 0, objectName: null });
+const emptyPart = (): PhotoPartState => ({
+  done: false,
+  uploadUrl: null,
+  offset: 0,
+  objectName: null,
+});
 
-const PATH_RE =
-  /^projects\/[A-Z]{2}\/[0-9a-f-]{36}\/[0-9a-f-]{36}_(full|thumb)\.(webp|jpg|jpeg)$/;
+const PATH_RE = /^projects\/[A-Z]{2}\/[0-9a-f-]{36}\/[0-9a-f-]{36}_(full|thumb)\.(webp|jpg|jpeg)$/;
 
 function extensionFor(blob: Blob): 'webp' | 'jpg' {
   return blob.type === 'image/jpeg' ? 'jpg' : 'webp';
@@ -97,8 +101,13 @@ function acknowledged(row: Record<string, unknown> | undefined): boolean {
 }
 
 /** Retry delays of a failing photo: 15 s, 30 s, 1 min … capped at 30 min (4 h when refused). */
-function retryDelay(kind: SyncErrorKind, attempts: number, retryAfterMs: number | undefined): number {
-  const permanent = kind === 'forbidden' || kind === 'invalid' || kind === 'not_found' || kind === 'conflict';
+function retryDelay(
+  kind: SyncErrorKind,
+  attempts: number,
+  retryAfterMs: number | undefined,
+): number {
+  const permanent =
+    kind === 'forbidden' || kind === 'invalid' || kind === 'not_found' || kind === 'conflict';
   const base = permanent ? 10 * 60_000 : 15_000;
   const cap = permanent ? 4 * 60 * 60_000 : 30 * 60_000;
   return Math.max(retryAfterMs ?? 0, Math.min(cap, base * Math.pow(2, Math.max(0, attempts - 1))));
@@ -111,7 +120,8 @@ export function createPhotoQueue(deps: PhotoQueueDeps): PhotoQueue {
   async function list(): Promise<PhotoUploadEntry[]> {
     const entries = (await db.listMeta<PhotoUploadEntry>(PHOTO_META_PREFIX)).map((e) => e.value);
     return entries.sort(
-      (a, b) => a.enqueuedAt - b.enqueuedAt || a.order - b.order || (a.photoId < b.photoId ? -1 : 1),
+      (a, b) =>
+        a.enqueuedAt - b.enqueuedAt || a.order - b.order || (a.photoId < b.photoId ? -1 : 1),
     );
   }
 
@@ -120,11 +130,20 @@ export function createPhotoQueue(deps: PhotoQueueDeps): PhotoQueue {
     change: (entry: PhotoUploadEntry) => PhotoUploadEntry,
   ): Promise<PhotoUploadEntry | undefined> {
     // Never re-create an entry that was removed meanwhile (photo deleted, other tab finished).
-    return db.updateMeta<PhotoUploadEntry>(metaKey(photoId), (cur) => (cur ? change(cur) : undefined));
+    return db.updateMeta<PhotoUploadEntry>(metaKey(photoId), (cur) =>
+      cur ? change(cur) : undefined,
+    );
   }
 
-  function patchPart(photoId: string, kind: PhotoKind, part: Partial<PhotoPartState>): Promise<unknown> {
-    return patchEntry(photoId, (e) => ({ ...e, parts: { ...e.parts, [kind]: { ...e.parts[kind], ...part } } }));
+  function patchPart(
+    photoId: string,
+    kind: PhotoKind,
+    part: Partial<PhotoPartState>,
+  ): Promise<unknown> {
+    return patchEntry(photoId, (e) => ({
+      ...e,
+      parts: { ...e.parts, [kind]: { ...e.parts[kind], ...part } },
+    }));
   }
 
   async function drop(photoId: string, alsoThumb: boolean): Promise<void> {
@@ -153,13 +172,18 @@ export function createPhotoQueue(deps: PhotoQueueDeps): PhotoQueue {
       const blob = blobs[kind];
       const storedOk = typeof stored === 'string' && PATH_RE.test(stored);
       // Keep the stored name unless the blob is of the other image type (JPEG fallback).
-      if (storedOk && (!blob || contentTypeFor(stored) === (blob.type === 'image/jpeg' ? 'image/jpeg' : 'image/webp'))) {
+      if (
+        storedOk &&
+        (!blob ||
+          contentTypeFor(stored) === (blob.type === 'image/jpeg' ? 'image/jpeg' : 'image/webp'))
+      ) {
         names[kind] = stored;
         continue;
       }
       if (iso2 === null) {
         const countryId = project.country_id;
-        const country = typeof countryId === 'string' ? await db.getRow('countries', countryId) : undefined;
+        const country =
+          typeof countryId === 'string' ? await db.getRow('countries', countryId) : undefined;
         const code = country?.iso2;
         if (typeof code !== 'string' || !/^[A-Z]{2}$/.test(code)) return null;
         iso2 = code;
@@ -172,7 +196,10 @@ export function createPhotoQueue(deps: PhotoQueueDeps): PhotoQueue {
 
   type OneResult = 'uploaded' | 'waiting' | 'dropped';
 
-  async function processOne(entry: PhotoUploadEntry, signal: AbortSignal | undefined): Promise<OneResult> {
+  async function processOne(
+    entry: PhotoUploadEntry,
+    signal: AbortSignal | undefined,
+  ): Promise<OneResult> {
     const { photoId } = entry;
     const row = await db.getRow('project_photos', photoId);
     if (!row || (row.deleted_at !== null && row.deleted_at !== undefined)) {
@@ -186,7 +213,8 @@ export function createPhotoQueue(deps: PhotoQueueDeps): PhotoQueue {
       return 'dropped';
     }
     if (!acknowledged(row)) return 'waiting';
-    const project = typeof row.project_id === 'string' ? await db.getRow('projects', row.project_id) : undefined;
+    const project =
+      typeof row.project_id === 'string' ? await db.getRow('projects', row.project_id) : undefined;
     if (!project || !acknowledged(project)) return 'waiting';
 
     const blobs: Partial<Record<PhotoKind, Blob>> = {};
@@ -212,7 +240,8 @@ export function createPhotoQueue(deps: PhotoQueueDeps): PhotoQueue {
       const objectName = names[kind];
       // A stored URL belongs to one object name; never resume it under another name.
       const resumeUrl = part.objectName === objectName ? part.uploadUrl : null;
-      if (part.objectName !== objectName) await patchPart(photoId, kind, { objectName, uploadUrl: null, offset: 0 });
+      if (part.objectName !== objectName)
+        await patchPart(photoId, kind, { objectName, uploadUrl: null, offset: 0 });
       const abort = new AbortController();
       const forward = (): void => abort.abort();
       signal?.addEventListener('abort', forward, { once: true });
@@ -224,7 +253,8 @@ export function createPhotoQueue(deps: PhotoQueueDeps): PhotoQueue {
           objectName,
           contentType: contentTypeFor(objectName),
           uploadUrl: resumeUrl,
-          onUploadUrl: (url) => writes.push(patchPart(photoId, kind, { uploadUrl: url, objectName })),
+          onUploadUrl: (url) =>
+            writes.push(patchPart(photoId, kind, { uploadUrl: url, objectName })),
           onProgress: (offset) => writes.push(patchPart(photoId, kind, { offset })),
           signal: abort.signal,
         });
@@ -273,7 +303,14 @@ export function createPhotoQueue(deps: PhotoQueueDeps): PhotoQueue {
 
     async run(options = {}) {
       const signal = options.signal;
-      const outcome: PhotoRunOutcome = { uploaded: 0, waiting: 0, failed: 0, dropped: 0, more: false, blocked: null };
+      const outcome: PhotoRunOutcome = {
+        uploaded: 0,
+        waiting: 0,
+        failed: 0,
+        dropped: 0,
+        more: false,
+        blocked: null,
+      };
       const deadline = clock.now() + (options.budgetMs ?? 90_000);
       const entries = await list();
       if (entries.length === 0) return outcome;

@@ -23,13 +23,17 @@ export interface ExportPage {
 export type PageFetcher = (after: unknown) => Promise<ExportPage>;
 
 /** Pages of cells (already translated to the job language), following `next` until `done`. */
-export async function* cellPages(columns: ExportColumns, fetchPage: PageFetcher): AsyncGenerator<Cell[][]> {
+export async function* cellPages(
+  columns: ExportColumns,
+  fetchPage: PageFetcher,
+): AsyncGenerator<Cell[][]> {
   const separator = columns.list_separator ?? ' | ';
   let after: unknown = null;
   for (;;) {
     const page = await fetchPage(after);
     const rows = Array.isArray(page.rows) ? page.rows : [];
-    if (rows.length > 0) yield rows.map((r) => exportRow(columns.columns, r, columns.enums, separator));
+    if (rows.length > 0)
+      yield rows.map((r) => exportRow(columns.columns, r, columns.enums, separator));
     if (page.done || page.next === null || page.next === undefined) return;
     after = page.next;
   }
@@ -136,7 +140,10 @@ export async function buildXlsxExport(
   const writer = new XlsxWriter({
     sheetName: SHEET_NAMES[columns.lang] ?? SHEET_NAMES.en!,
     rtl: columns.dir === 'rtl',
-    columns: columns.columns.map((c) => ({ header: c.header, width: columnWidth(c.kind, c.header) })),
+    columns: columns.columns.map((c) => ({
+      header: c.header,
+      width: columnWidth(c.kind, c.header),
+    })),
   });
   for (;;) {
     const { done, value } = await pages.next();
@@ -152,7 +159,12 @@ export async function buildXlsxExport(
   }
   const result = await writer.finish();
   progress.bytes = result.size;
-  return { overflow: false, chunks: result.chunks, size: result.size, truncatedCells: result.truncatedCells };
+  return {
+    overflow: false,
+    chunks: result.chunks,
+    size: result.size,
+    truncatedCells: result.truncatedCells,
+  };
 }
 
 /** `istiqama-projects-20261003-1a2b3c4d.csv` — ASCII only, safe in Content-Disposition. */

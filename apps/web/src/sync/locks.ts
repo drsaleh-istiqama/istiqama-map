@@ -43,10 +43,14 @@ type LockResult<T> = { acquired: true; value: T } | { acquired: false };
 export function webLock(locks: LockManagerLike, name = SYNC_LOCK_NAME): LockPort {
   return {
     async run<T>(fn: () => Promise<T>, opts: { wait: boolean }): Promise<LockResult<T>> {
-      const result = await locks.request(name, { mode: 'exclusive', ifAvailable: !opts.wait }, async (lock) => {
-        if (lock === null) return { acquired: false } satisfies LockResult<T>;
-        return { acquired: true, value: await fn() } satisfies LockResult<T>;
-      });
+      const result = await locks.request(
+        name,
+        { mode: 'exclusive', ifAvailable: !opts.wait },
+        async (lock) => {
+          if (lock === null) return { acquired: false } satisfies LockResult<T>;
+          return { acquired: true, value: await fn() } satisfies LockResult<T>;
+        },
+      );
       return result as LockResult<T>;
     },
   };
@@ -58,7 +62,11 @@ function randomOwner(): string {
     : `tab-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
-export function leaseLock(db: Pick<DbPort, 'updateMeta'>, clock: Clock, options: LeaseOptions = {}): LockPort {
+export function leaseLock(
+  db: Pick<DbPort, 'updateMeta'>,
+  clock: Clock,
+  options: LeaseOptions = {},
+): LockPort {
   const ttlMs = options.ttlMs ?? 30_000;
   const pollMs = options.pollMs ?? 500;
   const maxWaitMs = options.maxWaitMs ?? 120_000;
@@ -66,7 +74,9 @@ export function leaseLock(db: Pick<DbPort, 'updateMeta'>, clock: Clock, options:
 
   async function tryAcquire(): Promise<boolean> {
     const lease = await db.updateMeta<Lease>(META_LEASE, (cur) =>
-      !cur || cur.owner === owner || cur.expiresAt <= clock.now() ? { owner, expiresAt: clock.now() + ttlMs } : cur,
+      !cur || cur.owner === owner || cur.expiresAt <= clock.now()
+        ? { owner, expiresAt: clock.now() + ttlMs }
+        : cur,
     );
     return lease?.owner === owner;
   }

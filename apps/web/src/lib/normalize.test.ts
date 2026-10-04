@@ -61,7 +61,9 @@ describe('norm — the steps of schema.md 2.1', () => {
     for (const mark of [0x064b, 0x0652, 0x065f, 0x0670, 0x06d6, 0x06ed, 0x0640]) {
       expect(norm(beh + cp(mark) + beh)).toBe(beh + beh);
     }
-    for (const invisible of [0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0x202a, 0x202e, 0x2066, 0x2069, 0xfeff]) {
+    for (const invisible of [
+      0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0x202a, 0x202e, 0x2066, 0x2069, 0xfeff,
+    ]) {
       expect(norm('ab' + cp(invisible) + 'cd')).toBe('abcd');
     }
     // neighbours of the ranges stay
@@ -103,7 +105,10 @@ describe('norm — the steps of schema.md 2.1', () => {
   });
 
   it('step 5: every kind of white space collapses to one blank, both ends are trimmed', () => {
-    const spaces = [0x0009, 0x000a, 0x000b, 0x000c, 0x000d, 0x0020, 0x0085, 0x00a0, 0x1680, 0x2000, 0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000];
+    const spaces = [
+      0x0009, 0x000a, 0x000b, 0x000c, 0x000d, 0x0020, 0x0085, 0x00a0, 0x1680, 0x2000, 0x200a,
+      0x2028, 0x2029, 0x202f, 0x205f, 0x3000,
+    ];
     for (const s of spaces) {
       expect(norm('a' + cp(s) + cp(s) + 'b')).toBe('a b');
       expect(norm(cp(s) + 'a' + cp(s))).toBe('a');

@@ -12,6 +12,24 @@ import './auth.css';
 
 const LOCALES: readonly Locale[] = ['ar', 'sw', 'en'];
 
+/** Private-use character standing in for the version while the sentence is translated. */
+const VERSION_MARK = String.fromCharCode(0xe000);
+
+/**
+ * "الإصدار 3.0.0" — the translated words follow the page direction, the (Latin) version string
+ * is isolated so that suffixes such as "-rc.1" keep their order inside Arabic text.
+ */
+function AppVersion() {
+  const parts = t('auth.version', { version: VERSION_MARK }).split(VERSION_MARK);
+  return (
+    <span data-testid="app-version">
+      {parts[0]}
+      <bdi dir="ltr">{APP_VERSION}</bdi>
+      {parts.slice(1).join('')}
+    </span>
+  );
+}
+
 export function LanguageSwitcher() {
   const current = locale.value;
   return (
@@ -35,11 +53,16 @@ export function LanguageSwitcher() {
 
 export function AuthScreen(props: { title: string; testId: string; children: ComponentChildren }) {
   // Reading the signal re-renders the frame (and its children) when the language changes.
-  void locale.value;
+  const language = locale.value;
+  const brand = env.appName || t('auth.app_title');
+  // Like the shell's pages: the tab / task switcher names the screen (login, PIN, MFA).
+  useEffect(() => {
+    document.title = `${props.title} — ${brand}`;
+  }, [props.title, brand, language]);
   return (
     <div class="auth-screen" data-testid={props.testId}>
       <header class="auth-screen__header">
-        <p class="auth-screen__brand">{env.appName || t('auth.app_title')}</p>
+        <p class="auth-screen__brand">{brand}</p>
         <LanguageSwitcher />
       </header>
       <main class="auth-card">
@@ -47,9 +70,7 @@ export function AuthScreen(props: { title: string; testId: string; children: Com
         {props.children}
       </main>
       <footer class="auth-screen__footer">
-        <span dir="ltr" data-testid="app-version">
-          {t('auth.version', { version: APP_VERSION })}
-        </span>
+        <AppVersion />
       </footer>
     </div>
   );

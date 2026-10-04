@@ -31,6 +31,8 @@
   "pinErrSame": "Choose a PIN different from the current one.",
   "pinErrMismatch": "The two PINs do not match.",
   "pinErrCurrent": "The current PIN is not correct.",
+  "pinErrCurrentLeft": "The current PIN is not correct. Attempts left: {remaining}.",
+  "pinErrThrottled": "Too many wrong attempts. Wait a moment and try again.",
   "pinErrSave": "The PIN could not be saved. Try again.",
   "lockNow": "Lock the app now",
   "signOut": "Sign out",

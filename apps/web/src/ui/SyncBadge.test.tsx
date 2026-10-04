@@ -22,7 +22,7 @@ vi.mock('../sync', async () => {
 import { setLocale } from '../i18n';
 import { defineMessages } from '../i18n/messages';
 import { syncStatus } from '../sync';
-import { SyncBadge, syncBadgeState } from './SyncBadge';
+import { errorDetail, SyncBadge, syncBadgeState } from './SyncBadge';
 
 type Status = typeof syncStatus.value;
 const HEALTHY: Status = {
@@ -104,11 +104,11 @@ describe('<SyncBadge>', () => {
     );
   });
 
-  it('error: generic message, or the message behind the key reported by the sync engine', async () => {
+  it('error: a short visible label, plus the message behind the key reported by the sync engine', async () => {
     setStatus({ state: 'error', lastError: 'sync.error_unknown_key_for_this_test' });
     render(<SyncBadge />);
     expect(screen.getByTestId('sync-badge').getAttribute('data-state')).toBe('error');
-    expect(screen.getByRole('status').textContent).toContain('Sync failed');
+    expect(screen.getByRole('status').textContent).toBe('Sync failed');
     expect((screen.getByTestId('sync-now') as HTMLButtonElement).disabled).toBe(false);
 
     defineMessages('en', { 'sync.error_test_only': 'The server is busy' });
@@ -116,6 +116,23 @@ describe('<SyncBadge>', () => {
     await waitFor(() =>
       expect(screen.getByRole('status').textContent).toContain('The server is busy'),
     );
+    // The long explanation is announced and in the tooltip, never in the narrow visible label.
+    const label = screen.getByTestId('sync-badge').querySelector('.sync__label');
+    expect(label?.textContent).toBe('Sync failed');
+    expect(
+      screen.getByTestId('sync-badge').querySelector('.sync__state')?.getAttribute('title'),
+    ).toContain('The server is busy');
+    expect(errorDetail({ state: 'idle', lastError: 'sync.error_test_only' })).toBeNull();
+    expect(errorDetail({ state: 'error', lastError: null })).toBeNull();
+  });
+
+  it('keeps the ticking "last sync" time out of the live region', () => {
+    setStatus({ lastSyncAt: Date.now() - 5 * 60_000 });
+    render(<SyncBadge />);
+    const live = screen.getByRole('status');
+    expect(live.getAttribute('aria-live')).toBe('polite');
+    expect(live.textContent).toBe('Online');
+    expect(screen.getByTestId('sync-badge').textContent).toContain('5 minutes ago');
   });
 
   it('shows operations that need attention', () => {

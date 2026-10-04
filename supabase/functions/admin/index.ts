@@ -24,7 +24,15 @@ import { requireUser } from '../_shared/auth.ts';
 import { endAuthSessions, setAuthBan } from '../_shared/authAdmin.ts';
 import { serviceClient, userClient, withRetry } from '../_shared/clients.ts';
 import { serveIfEntryPoint } from '../_shared/env.ts';
-import { createHandler, errors, isRecord, isUuid, json, readJson, unwrap } from '../_shared/http.ts';
+import {
+  createHandler,
+  errors,
+  isRecord,
+  isUuid,
+  json,
+  readJson,
+  unwrap,
+} from '../_shared/http.ts';
 import { enforceRateLimit } from '../_shared/ratelimit.ts';
 
 type Body = Record<string, unknown>;
@@ -46,12 +54,17 @@ function optionalString(body: Body, key: string, max = 200): string | null {
 
 function requiredString(body: Body, key: string, max = 200): string {
   const v = optionalString(body, key, max);
-  if (v === null || v.trim() === '') throw errors.validation('invalid_argument', `${key} is required.`);
+  if (v === null || v.trim() === '')
+    throw errors.validation('invalid_argument', `${key} is required.`);
   return v.trim();
 }
 
 /** The admin RPCs are idempotent, so a transient failure may be retried. */
-async function adminRpc(user: SupabaseClient, fn: string, args: Record<string, unknown>): Promise<RpcResult> {
+async function adminRpc(
+  user: SupabaseClient,
+  fn: string,
+  args: Record<string, unknown>,
+): Promise<RpcResult> {
   return unwrap<RpcResult>(await withRetry<RpcResult>(() => user.rpc(fn, args)));
 }
 
@@ -78,7 +91,8 @@ async function createUser(user: SupabaseClient, body: Body): Promise<Response> {
   const email = optionalString(body, 'email', 254)?.trim().toLowerCase() ?? null;
   const phone = optionalString(body, 'phone', 20)?.replace(/[\s-]/g, '') ?? null;
   if (!email && !phone) throw errors.validation('invalid_argument', 'email or phone is required.');
-  if (email && !EMAIL_RE.test(email)) throw errors.validation('invalid_argument', 'email is not valid.');
+  if (email && !EMAIL_RE.test(email))
+    throw errors.validation('invalid_argument', 'email is not valid.');
   if (phone && !PHONE_RE.test(phone))
     throw errors.validation('invalid_argument', 'phone must be in E.164 form (+255…).');
   const fullName = requiredString(body, 'full_name');
@@ -88,8 +102,10 @@ async function createUser(user: SupabaseClient, body: Body): Promise<Response> {
   const role = optionalString(body, 'role', 40);
   const scopeType = optionalString(body, 'scope_type', 20);
   const scopeId = optionalString(body, 'scope_id', 64);
-  if (role && !scopeType) throw errors.validation('invalid_argument', 'scope_type is required with role.');
-  if (scopeId && !isUuid(scopeId)) throw errors.validation('invalid_argument', 'scope_id must be a UUID.');
+  if (role && !scopeType)
+    throw errors.validation('invalid_argument', 'scope_type is required with role.');
+  if (scopeId && !isUuid(scopeId))
+    throw errors.validation('invalid_argument', 'scope_id must be a UUID.');
 
   const svc = serviceClient();
   const created = await svc.auth.admin.createUser({
@@ -120,12 +136,25 @@ async function createUser(user: SupabaseClient, body: Body): Promise<Response> {
   let roleError: unknown = null;
   if (role) {
     const res = await withRetry<RpcResult>(() =>
-      user.rpc('admin_set_role', { p_user_id: id, p_role: role, p_scope_type: scopeType, p_scope_id: scopeId }),
+      user.rpc('admin_set_role', {
+        p_user_id: id,
+        p_role: role,
+        p_scope_type: scopeType,
+        p_scope_id: scopeId,
+      }),
     );
-    if (res.error) roleError = { code: res.error.code, message: res.error.message, details: res.error.details ?? null };
+    if (res.error)
+      roleError = {
+        code: res.error.code,
+        message: res.error.message,
+        details: res.error.details ?? null,
+      };
     else grant = res.data;
   }
-  return json({ user_id: id, email, phone, profile: profile.data, role: grant, role_error: roleError }, 201);
+  return json(
+    { user_id: id, email, phone, profile: profile.data, role: grant, role_error: roleError },
+    201,
+  );
 }
 
 export const handler = createHandler('admin', ['POST'], async (req) => {
@@ -150,12 +179,16 @@ export const handler = createHandler('admin', ['POST'], async (req) => {
       const userId = uuid(body, 'user_id');
       if (typeof body.active !== 'boolean')
         throw errors.validation('invalid_argument', 'active must be true or false.');
-      const result = await adminRpc(user, 'admin_set_user_active', { p_user_id: userId, p_active: body.active });
+      const result = await adminRpc(user, 'admin_set_user_active', {
+        p_user_id: userId,
+        p_active: body.active,
+      });
       const withLogout = await withAuthLogout(result, userId);
       // Deactivated accounts are banned in Auth as well (no sign-in, no token refresh);
       // reactivation lifts the ban.
       const ban = await setAuthBan(userId, !body.active);
-      if (!ban.done) console.error(`[admin] auth ban of ${userId} not updated: ${ban.detail ?? ''}`);
+      if (!ban.done)
+        console.error(`[admin] auth ban of ${userId} not updated: ${ban.detail ?? ''}`);
       return json({ ...withLogout, auth_ban: ban });
     }
     case 'restore_device':

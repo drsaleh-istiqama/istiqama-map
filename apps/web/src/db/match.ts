@@ -84,7 +84,10 @@ export async function findLocalDuplicates(input: {
     for (const p of await projectsNear(input.lon, input.lat, reach)) pool.set(p.id, p);
   }
   if (hasName && input.localityId) {
-    const same = (await db.projects.where('locality_id').equals(input.localityId).toArray()) as StoredProject[];
+    const same = (await db.projects
+      .where('locality_id')
+      .equals(input.localityId)
+      .toArray()) as StoredProject[];
     for (const p of same) pool.set(p.id, p);
   }
 
@@ -93,7 +96,10 @@ export async function findLocalDuplicates(input: {
     if (p.id === input.excludeId) continue;
     const distance = hasPoint && isValidLonLat(p) ? haversineMeters(input, p) : null;
     const sim = hasName
-      ? Math.max(similarity(norm(p.name_ar ?? ''), name), similarity(norm(p.name_latin ?? ''), name))
+      ? Math.max(
+          similarity(norm(p.name_ar ?? ''), name),
+          similarity(norm(p.name_latin ?? ''), name),
+        )
       : null;
 
     const sameType = p.type === input.type || p.type === 'combined' || input.type === 'combined';
@@ -123,7 +129,8 @@ export async function findLocalDuplicates(input: {
     });
   }
 
-  const rank = (h: DuplicateHit): number => (h.reason === 'both' ? 0 : h.reason === 'nearby' ? 1 : 2);
+  const rank = (h: DuplicateHit): number =>
+    h.reason === 'both' ? 0 : h.reason === 'nearby' ? 1 : 2;
   hits.sort(
     (a, b) =>
       rank(a) - rank(b) ||
@@ -204,8 +211,14 @@ async function nameCandidates(name: string, threshold: number): Promise<Map<stri
 
   if (nameWords.length === 1) {
     // One word can only reach the threshold against a name that IS that word: equality.
-    const ids = (await db.persons.where('_tokens').equals(name).limit(WORD_KEY_BUDGET).primaryKeys()) as string[];
-    const rows = (await db.persons.bulkGet([...new Set(ids)].slice(0, NAME_POOL * 4))) as Array<StoredPerson | undefined>;
+    const ids = (await db.persons
+      .where('_tokens')
+      .equals(name)
+      .limit(WORD_KEY_BUDGET)
+      .primaryKeys()) as string[];
+    const rows = (await db.persons.bulkGet([...new Set(ids)].slice(0, NAME_POOL * 4))) as Array<
+      StoredPerson | undefined
+    >;
     for (const p of rows) {
       if (!p || p.merged_into_id) continue;
       if (norm(p.name_ar ?? '') === name || norm(p.name_latin ?? '') === name) out.set(p.id, 1);
@@ -221,10 +234,16 @@ async function nameCandidates(name: string, threshold: number): Promise<Map<stri
   // Prefix of the word without the Arabic article (the index holds both forms), so that
   // "al-" does not make every prefix the same.
   const prefixes = [
-    ...new Set(nameWords.filter((w) => w.length >= 2).map((w) => (stripArabicArticle(w) ?? w).slice(0, 3))),
+    ...new Set(
+      nameWords.filter((w) => w.length >= 2).map((w) => (stripArabicArticle(w) ?? w).slice(0, 3)),
+    ),
   ];
   for (const prefix of prefixes) {
-    const ids = (await db.persons.where('_tokens').startsWith(prefix).limit(WORD_KEY_BUDGET).primaryKeys()) as string[];
+    const ids = (await db.persons
+      .where('_tokens')
+      .startsWith(prefix)
+      .limit(WORD_KEY_BUDGET)
+      .primaryKeys()) as string[];
     // A prefix that fills the budget is too common to tell anything: a whole vote only for
     // the selective ones.
     const weight = ids.length < WORD_KEY_BUDGET ? 2 : 1;
@@ -264,116 +283,124 @@ export async function findLocalPersonCandidates(input: {
   const useName = name.length >= 2;
   if (!useName && !phone) return [];
 
-  return db.transaction('r', [db.persons, db.project_staff, db.projects, db.admin_areas], async () => {
-    const found = new Map<string, { byPhone: boolean; sim: number | null }>();
-    if (phone) {
-      const rows = await db.persons.where('phone_e164').equals(phone).toArray();
-      for (const p of rows) {
-        if (!p.merged_into_id) found.set(p.id, { byPhone: true, sim: null });
-      }
-    }
-    if (useName) {
-      for (const [id, sim] of await nameCandidates(name, threshold)) {
-        const entry = found.get(id);
-        if (entry) entry.sim = sim;
-        else found.set(id, { byPhone: false, sim });
-      }
-    }
-    if (found.size === 0) return [];
-
-    const requestedChain = input.adminAreaId ? await areaChain(input.adminAreaId) : [];
-    const persons = (await db.persons.bulkGet([...found.keys()])) as Array<Row<'persons'> | undefined>;
-    const out: PersonCandidate[] = [];
-
-    for (const p of persons) {
-      if (!p) continue;
-      const entry = found.get(p.id)!;
-      const sim = useName ? (entry.sim ?? personSimilarity(p, name)) : null;
-
-      const links = await db.project_staff.where('person_id').equals(p.id).toArray();
-      const projects = await db.projects.bulkGet(links.map((l) => l.project_id));
-      const staff: PersonCandidate['staff'] = [];
-      let hidden = 0;
-      let worksInArea = false;
-      links.forEach((l, i) => {
-        const pr = projects[i];
-        if (!pr) {
-          hidden++;
-          return;
+  return db.transaction(
+    'r',
+    [db.persons, db.project_staff, db.projects, db.admin_areas],
+    async () => {
+      const found = new Map<string, { byPhone: boolean; sim: number | null }>();
+      if (phone) {
+        const rows = await db.persons.where('phone_e164').equals(phone).toArray();
+        for (const p of rows) {
+          if (!p.merged_into_id) found.set(p.id, { byPhone: true, sim: null });
         }
-        if (input.adminAreaId && pr.admin_area_id === input.adminAreaId) worksInArea = true;
-        staff.push({
-          project_staff_id: l.id,
-          project_id: pr.id,
-          project_code: pr.code,
-          project_name_ar: pr.name_ar,
-          project_name_latin: pr.name_latin,
-          project_type: pr.type,
-          role: l.role,
-          start_date: l.start_date,
-          end_date: l.end_date,
+      }
+      if (useName) {
+        for (const [id, sim] of await nameCandidates(name, threshold)) {
+          const entry = found.get(id);
+          if (entry) entry.sim = sim;
+          else found.set(id, { byPhone: false, sim });
+        }
+      }
+      if (found.size === 0) return [];
+
+      const requestedChain = input.adminAreaId ? await areaChain(input.adminAreaId) : [];
+      const persons = (await db.persons.bulkGet([...found.keys()])) as Array<
+        Row<'persons'> | undefined
+      >;
+      const out: PersonCandidate[] = [];
+
+      for (const p of persons) {
+        if (!p) continue;
+        const entry = found.get(p.id)!;
+        const sim = useName ? (entry.sim ?? personSimilarity(p, name)) : null;
+
+        const links = await db.project_staff.where('person_id').equals(p.id).toArray();
+        const projects = await db.projects.bulkGet(links.map((l) => l.project_id));
+        const staff: PersonCandidate['staff'] = [];
+        let hidden = 0;
+        let worksInArea = false;
+        links.forEach((l, i) => {
+          const pr = projects[i];
+          if (!pr) {
+            hidden++;
+            return;
+          }
+          if (input.adminAreaId && pr.admin_area_id === input.adminAreaId) worksInArea = true;
+          staff.push({
+            project_staff_id: l.id,
+            project_id: pr.id,
+            project_code: pr.code,
+            project_name_ar: pr.name_ar,
+            project_name_latin: pr.name_latin,
+            project_type: pr.type,
+            role: l.role,
+            start_date: l.start_date,
+            end_date: l.end_date,
+          });
         });
-      });
-      staff.sort(
-        (a, b) =>
-          Number(a.end_date !== null) - Number(b.end_date !== null) ||
-          (b.end_date ?? '').localeCompare(a.end_date ?? '') ||
-          (b.start_date ?? '').localeCompare(a.start_date ?? '') ||
-          (a.project_staff_id < b.project_staff_id ? -1 : 1),
-      );
+        staff.sort(
+          (a, b) =>
+            Number(a.end_date !== null) - Number(b.end_date !== null) ||
+            (b.end_date ?? '').localeCompare(a.end_date ?? '') ||
+            (b.start_date ?? '').localeCompare(a.start_date ?? '') ||
+            (a.project_staff_id < b.project_staff_id ? -1 : 1),
+        );
 
-      let homeInArea = false;
-      let home: PersonCandidate['home_area'] = null;
-      if (p.home_admin_area_id || p.home_area_text) {
-        const area = p.home_admin_area_id ? await db.admin_areas.get(p.home_admin_area_id) : undefined;
-        home = {
-          id: p.home_admin_area_id,
-          name_ar: area?.name_ar ?? null,
-          name_en: area?.name_en ?? null,
-          name_sw: area?.name_sw ?? null,
-          text: p.home_area_text,
-        };
-        if (input.adminAreaId && p.home_admin_area_id) {
-          const homeChain = await areaChain(p.home_admin_area_id);
-          homeInArea =
-            requestedChain.includes(p.home_admin_area_id) || // the area itself or one of its ancestors
-            homeChain.includes(input.adminAreaId); // home lies inside the requested area
+        let homeInArea = false;
+        let home: PersonCandidate['home_area'] = null;
+        if (p.home_admin_area_id || p.home_area_text) {
+          const area = p.home_admin_area_id
+            ? await db.admin_areas.get(p.home_admin_area_id)
+            : undefined;
+          home = {
+            id: p.home_admin_area_id,
+            name_ar: area?.name_ar ?? null,
+            name_en: area?.name_en ?? null,
+            name_sw: area?.name_sw ?? null,
+            text: p.home_area_text,
+          };
+          if (input.adminAreaId && p.home_admin_area_id) {
+            const homeChain = await areaChain(p.home_admin_area_id);
+            homeInArea =
+              requestedChain.includes(p.home_admin_area_id) || // the area itself or one of its ancestors
+              homeChain.includes(input.adminAreaId); // home lies inside the requested area
+          }
         }
+
+        const sameArea = homeInArea || worksInArea;
+        const byName = sim !== null && sim >= threshold;
+        const reasons: PersonCandidate['reasons'] = [];
+        if (entry.byPhone) reasons.push('phone');
+        if (byName) reasons.push('name');
+        if (sameArea) reasons.push('area');
+
+        out.push({
+          id: p.id,
+          name_ar: p.name_ar,
+          name_latin: p.name_latin,
+          phone: p.phone_e164,
+          phone_masked: false,
+          gender: p.gender,
+          birth_year: p.birth_year,
+          home_area: home,
+          roles: [...new Set(staff.map((s) => s.role))],
+          staff,
+          hidden_projects: hidden,
+          similarity: sim === null ? null : Math.round(sim * 1000) / 1000,
+          same_area: sameArea,
+          reasons,
+        });
       }
 
-      const sameArea = homeInArea || worksInArea;
-      const byName = sim !== null && sim >= threshold;
-      const reasons: PersonCandidate['reasons'] = [];
-      if (entry.byPhone) reasons.push('phone');
-      if (byName) reasons.push('name');
-      if (sameArea) reasons.push('area');
-
-      out.push({
-        id: p.id,
-        name_ar: p.name_ar,
-        name_latin: p.name_latin,
-        phone: p.phone_e164,
-        phone_masked: false,
-        gender: p.gender,
-        birth_year: p.birth_year,
-        home_area: home,
-        roles: [...new Set(staff.map((s) => s.role))],
-        staff,
-        hidden_projects: hidden,
-        similarity: sim === null ? null : Math.round(sim * 1000) / 1000,
-        same_area: sameArea,
-        reasons,
-      });
-    }
-
-    out.sort(
-      (a, b) =>
-        Number(b.reasons.includes('phone')) - Number(a.reasons.includes('phone')) ||
-        Number(b.same_area) - Number(a.same_area) ||
-        (b.similarity ?? -1) - (a.similarity ?? -1) ||
-        (a.name_ar ?? '').localeCompare(b.name_ar ?? '') ||
-        (a.id < b.id ? -1 : 1),
-    );
-    return out.slice(0, MAX_CANDIDATES);
-  });
+      out.sort(
+        (a, b) =>
+          Number(b.reasons.includes('phone')) - Number(a.reasons.includes('phone')) ||
+          Number(b.same_area) - Number(a.same_area) ||
+          (b.similarity ?? -1) - (a.similarity ?? -1) ||
+          (a.name_ar ?? '').localeCompare(b.name_ar ?? '') ||
+          (a.id < b.id ? -1 : 1),
+      );
+      return out.slice(0, MAX_CANDIDATES);
+    },
+  );
 }

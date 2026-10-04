@@ -8,15 +8,7 @@
 import type { LocalRowState, RestrictedTableName, Row, StdColumns, TableName } from './types';
 
 export type ScopeKind =
-  | 'global'
-  | 'country'
-  | 'row'
-  | 'project'
-  | 'staff'
-  | 'person'
-  | 'own'
-  | 'conflict'
-  | 'donor';
+  'global' | 'country' | 'row' | 'project' | 'staff' | 'person' | 'own' | 'conflict' | 'donor';
 export type Audience = 'all' | 'people' | 'restricted' | 'review';
 export type PushClass = 'none' | 'writer' | 'creator' | 'project_editor' | 'reviewer' | 'self';
 
@@ -88,7 +80,10 @@ type OwnKey<T extends TableName> = Exclude<keyof Row<T>, keyof StdColumns> & str
  */
 function columns<T extends TableName>() {
   return <const L extends ReadonlyArray<OwnKey<T>>>(
-    list: L & (Exclude<OwnKey<T>, L[number]> extends never ? unknown : { missing: Exclude<OwnKey<T>, L[number]> }),
+    list: L &
+      (Exclude<OwnKey<T>, L[number]> extends never
+        ? unknown
+        : { missing: Exclude<OwnKey<T>, L[number]> }),
   ): L => list;
 }
 
@@ -111,7 +106,15 @@ const OPTION_COLUMNS = [
 
 /** Wire columns per table (without the standard columns), in database order. */
 export const TABLE_COLUMNS = {
-  countries: columns<'countries'>()(['iso2', 'iso3', 'name_ar', 'name_en', 'name_sw', 'default_currency', 'active']),
+  countries: columns<'countries'>()([
+    'iso2',
+    'iso3',
+    'name_ar',
+    'name_en',
+    'name_sw',
+    'default_currency',
+    'active',
+  ]),
   admin_areas: columns<'admin_areas'>()([
     'country_id',
     'parent_id',
@@ -227,7 +230,13 @@ export const TABLE_COLUMNS = {
     'upload_state',
     'purged_at',
   ]),
-  project_donors: columns<'project_donors'>()(['project_id', 'donor_id', 'amount', 'currency', 'year']),
+  project_donors: columns<'project_donors'>()([
+    'project_id',
+    'donor_id',
+    'amount',
+    'currency',
+    'year',
+  ]),
   persons: columns<'persons'>()([
     'name_ar',
     'name_latin',
@@ -244,7 +253,13 @@ export const TABLE_COLUMNS = {
     'branch_id',
     'merged_into_id',
   ]),
-  project_staff: columns<'project_staff'>()(['project_id', 'person_id', 'role', 'start_date', 'end_date']),
+  project_staff: columns<'project_staff'>()([
+    'project_id',
+    'person_id',
+    'role',
+    'start_date',
+    'end_date',
+  ]),
   community_profiles: columns<'community_profiles'>()([
     'project_id',
     'branch_name',
@@ -317,7 +332,14 @@ export const TABLE_COLUMNS = {
 type DefInput = Partial<
   Pick<
     SyncTableDef,
-    'scopeCol' | 'audience' | 'naturalKey' | 'geomPoint' | 'protectedCols' | 'immutableCols' | 'writableCols' | 'refs'
+    | 'scopeCol'
+    | 'audience'
+    | 'naturalKey'
+    | 'geomPoint'
+    | 'protectedCols'
+    | 'immutableCols'
+    | 'writableCols'
+    | 'refs'
   >
 >;
 
@@ -348,7 +370,11 @@ function def<T extends TableName>(
 }
 
 const NONE: [PushClass, PushClass, PushClass] = ['none', 'none', 'none'];
-const EDITOR: [PushClass, PushClass, PushClass] = ['project_editor', 'project_editor', 'project_editor'];
+const EDITOR: [PushClass, PushClass, PushClass] = [
+  'project_editor',
+  'project_editor',
+  'project_editor',
+];
 const projectChild = (extra: DefInput = {}): DefInput => ({
   scopeCol: 'project_id',
   immutableCols: ['project_id'],
@@ -372,7 +398,14 @@ export const SYNC_TABLES: readonly SyncTableDef[] = [
   def('donors', 70, 'donor', ['writer', 'writer', 'creator'], { protectedCols: ['name_norm'] }),
   def('projects', 80, 'row', ['writer', 'creator', 'creator'], {
     geomPoint: true,
-    protectedCols: ['code', 'completeness', 'search_norm', 'import_batch_id', 'reviewed_by', 'reviewed_at'],
+    protectedCols: [
+      'code',
+      'completeness',
+      'search_norm',
+      'import_batch_id',
+      'reviewed_by',
+      'reviewed_at',
+    ],
     refs: { locality_id: 'localities' },
   }),
   def('project_land', 90, 'project', EDITOR, projectChild({ naturalKey: ['project_id'] })),
@@ -390,7 +423,13 @@ export const SYNC_TABLES: readonly SyncTableDef[] = [
     audience: 'people',
     protectedCols: ['name_normalized', 'merged_into_id'],
   }),
-  def('project_staff', 150, 'project', EDITOR, projectChild({ audience: 'people', refs: { person_id: 'persons' } })),
+  def(
+    'project_staff',
+    150,
+    'project',
+    EDITOR,
+    projectChild({ audience: 'people', refs: { person_id: 'persons' } }),
+  ),
   def('community_profiles', 160, 'project', EDITOR, projectChild({ naturalKey: ['project_id'] })),
   def('staff_compensation', 170, 'staff', ['writer', 'writer', 'creator'], {
     scopeCol: 'project_staff_id',
@@ -414,7 +453,10 @@ export const SYNC_TABLES: readonly SyncTableDef[] = [
     refs: { source_person_id: 'persons', target_person_id: 'persons' },
   }),
   def('sync_conflicts', 200, 'conflict', NONE, { audience: 'review' }),
-  def('notifications', 210, 'own', ['none', 'self', 'none'], { scopeCol: 'user_id', writableCols: ['read_at'] }),
+  def('notifications', 210, 'own', ['none', 'self', 'none'], {
+    scopeCol: 'user_id',
+    writableCols: ['read_at'],
+  }),
   def('map_packs', 220, 'global', NONE),
 ];
 
@@ -432,16 +474,19 @@ export function tableDef(name: TableName): SyncTableDef {
   return d;
 }
 
-export const RESTRICTED_TABLES: readonly RestrictedTableName[] = ['staff_compensation', 'community_sensitive'];
+export const RESTRICTED_TABLES: readonly RestrictedTableName[] = [
+  'staff_compensation',
+  'community_sensitive',
+];
 
 export function isRestrictedTable(name: TableName): name is RestrictedTableName {
   return tableDef(name).restricted;
 }
 
 /** Tables with a direct `project_id` link that are dropped locally together with the project. */
-export const PROJECT_CHILD_TABLES = SYNC_TABLES.filter((t) => t.scope === 'project' && t.scopeCol === 'project_id').map(
-  (t) => t.name,
-);
+export const PROJECT_CHILD_TABLES = SYNC_TABLES.filter(
+  (t) => t.scope === 'project' && t.scopeCol === 'project_id',
+).map((t) => t.name);
 
 /** The five child tables that count towards `projects.completeness` (schema.md §5). */
 export const COMPLETENESS_CHILD_TABLES = [

@@ -46,10 +46,7 @@ describe('tableToObjects', () => {
   });
 
   it('skips blank rows and reports where the data rows came from', () => {
-    const t = tableToObjects(
-      [['h'], ['1'], ['', ''], ['2'], [' '], ['3']],
-      [1, 2, 3, 4, 5, 6],
-    );
+    const t = tableToObjects([['h'], ['1'], ['', ''], ['2'], [' '], ['3']], [1, 2, 3, 4, 5, 6]);
     expect(t.rows).toEqual([{ h: '1' }, { h: '2' }, { h: '3' }]);
     expect(t.sourceRows).toEqual([2, 4, 6]);
     expect(t.skippedBlankRows).toBe(2);
@@ -79,7 +76,10 @@ describe('tableToObjects', () => {
   });
 
   it('drops the apostrophe our own export adds in front of formula-looking text', () => {
-    const t = tableToObjects([['phone', 'note', 'name'], [`'+255700000001`, `'=not a formula`, `'quoted'`]]);
+    const t = tableToObjects([
+      ['phone', 'note', 'name'],
+      [`'+255700000001`, `'=not a formula`, `'quoted'`],
+    ]);
     expect(t.rows).toEqual([{ phone: '+255700000001', note: '=not a formula', name: `'quoted'` }]);
   });
 
@@ -96,6 +96,10 @@ describe('tableToObjects', () => {
   it('an empty table or a header without data yields no rows', () => {
     expect(tableToObjects([])).toMatchObject({ headerRow: 0, rows: [] });
     expect(tableToObjects([[''], [null]])).toMatchObject({ headerRow: 0, rows: [] });
-    expect(tableToObjects([['a', 'b']])).toMatchObject({ headerRow: 1, headers: ['a', 'b'], rows: [] });
+    expect(tableToObjects([['a', 'b']])).toMatchObject({
+      headerRow: 1,
+      headers: ['a', 'b'],
+      rows: [],
+    });
   });
 });

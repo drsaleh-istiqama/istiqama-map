@@ -5,7 +5,8 @@
  * last change): every entry is `[facet, sort key, id]`, so one filter (or none) is a single
  * index range and a page costs `limit` row reads. With several filters the rarest facet
  * drives; the others (and a text query) are checked on index keys only, and rows are read
- * for the final page alone.
+ * for the final page alone. The first page of a multi-filter list counts its total in the
+ * same pass over the driving facet (index keys, no rows).
  */
 import Dexie from 'dexie';
 import { bboxContains, gridCell, gridRangesForBBox, isValidLonLat, type BBox } from '../lib/geo';
@@ -106,10 +107,11 @@ export interface ProjectPage {
 // Helpers
 // ---------------------------------------------------------------------------------------
 
-type FacetKey = [string, string | number, string];
-
-const clampLimit = (limit: number | undefined, fallback: number, max: number): number =>
-  Math.max(1, Math.min(max, Math.floor(limit ?? fallback) || fallback));
+/** Like the server: a missing / non-numeric limit is the default, anything else is clamped to 1..max. */
+const clampLimit = (limit: number | undefined, fallback: number, max: number): number => {
+  const n = typeof limit === 'number' && Number.isFinite(limit) ? Math.floor(limit) : fallback;
+  return Math.max(1, Math.min(max, n));
+};
 
 function facetsFor(filter: ProjectFilter, userId: string | null): string[] {
   const f: string[] = [];
@@ -131,36 +133,46 @@ function facetsFor(filter: ProjectFilter, userId: string | null): string[] {
 const indexOfSort = (sort: ProjectSort): '_fn' | '_fu' => (sort === 'name' ? '_fn' : '_fu');
 
 function facetRange(sort: ProjectSort, facet: string) {
-  return db.projects.where(indexOfSort(sort)).between([facet, Dexie.minKey], [facet, Dexie.maxKey], true, true);
-}
-
-/** The next index keys of a facet in list order, strictly after `after`. */
-async function nextKeys(sort: ProjectSort, facet: string, after: FacetKey | null, n: number): Promise<FacetKey[]> {
-  const index = indexOfSort(sort);
-  let c;
-  if (sort === 'name') {
-    c = db.projects
-      .where(index)
-      .between(after ? [facet, after[1], after[2]] : [facet, Dexie.minKey], [facet, Dexie.maxKey], !after, true);
-  } else {
-    c = db.projects
-      .where(index)
-      .between([facet, Dexie.minKey], after ? [facet, after[1], after[2]] : [facet, Dexie.maxKey], true, !after)
-      .reverse();
-  }
-  return (await c.limit(n).keys()) as unknown as FacetKey[];
-}
-
-/** Ids among `candidates` that also belong to `facet` (index keys only). */
-async function alsoIn(sort: ProjectSort, facet: string, candidates: FacetKey[]): Promise<Set<string>> {
-  const keys = (await db.projects
+  return db.projects
     .where(indexOfSort(sort))
-    .anyOf(candidates.map((k) => [facet, k[1], k[2]]))
-    .keys()) as unknown as FacetKey[];
-  return new Set(keys.map((k) => k[2]));
+    .between([facet, Dexie.minKey], [facet, Dexie.maxKey], true, true);
 }
 
-/** All project ids of a facet (one native key read of the index range, no rows). */
+/**
+ * The next project ids of a facet in list order, strictly after `pos` (`[sort key, id]`).
+ * Primary keys only, read in ONE batch request (`getAllKeys`) — no cursor step per key,
+ * which is what makes index walks slow on IndexedDB.
+ */
+async function nextIds(
+  sort: ProjectSort,
+  facet: string,
+  pos: [string | number, string] | null,
+  n: number,
+): Promise<string[]> {
+  const index = indexOfSort(sort);
+  const c =
+    sort === 'name'
+      ? db.projects
+          .where(index)
+          .between(
+            pos ? [facet, pos[0], pos[1]] : [facet, Dexie.minKey],
+            [facet, Dexie.maxKey],
+            !pos,
+            true,
+          )
+      : db.projects
+          .where(index)
+          .between(
+            [facet, Dexie.minKey],
+            pos ? [facet, pos[0], pos[1]] : [facet, Dexie.maxKey],
+            true,
+            !pos,
+          )
+          .reverse();
+  return (await c.limit(n).primaryKeys()) as string[];
+}
+
+/** All project ids of a facet (one batch key read of the index range, no rows). */
 async function facetIds(sort: ProjectSort, facet: string): Promise<Set<string>> {
   return new Set((await facetRange(sort, facet).primaryKeys()) as string[]);
 }
@@ -171,6 +183,10 @@ function intersect(a: Set<string>, b: Set<string>): Set<string> {
   for (const id of small) if (large.has(id)) out.add(id);
   return out;
 }
+
+/** The value a row has in the sort index (`_fn` / `_fu` middle component). */
+const sortKeyOf = (sort: ProjectSort, p: StoredProject): string | number =>
+  sort === 'name' ? (p.name_ar ?? '') : (p._u ?? 0);
 
 /** List order of stored rows: the same order as the `_fn` / `_fu` index entries. */
 function compareRows(sort: ProjectSort): (a: StoredProject, b: StoredProject) => number {
@@ -262,7 +278,12 @@ export function toListItem(p: StoredProject, lookups?: Lookups): ProjectListItem
 }
 
 /** The filter as a predicate on a stored row (map viewport, joined lists). */
-function matchesFilter(p: StoredProject, filter: ProjectFilter, userId: string | null, qWords: string[] | null): boolean {
+function matchesFilter(
+  p: StoredProject,
+  filter: ProjectFilter,
+  userId: string | null,
+  qWords: string[] | null,
+): boolean {
   if (filter.type && p.type !== filter.type) return false;
   if (filter.status && p.status !== filter.status) return false;
   if (filter.recordState && p.record_state !== filter.recordState) return false;
@@ -317,93 +338,94 @@ export async function listProjects(
     const qIds = qWords.length > 0 ? await projectIdsMatching(qWords) : null;
     if (qIds && qIds.size === 0) return { rows: [], next: null, total: 0 };
 
-    if (qIds && qIds.size <= smallSetLimit(size)) {
-      // Few text matches: read exactly those rows, filter and sort them in memory. Walking a
-      // facet index to find a handful of ids would touch far more keys.
-      const found = (await db.projects.bulkGet([...qIds])) as Array<StoredProject | undefined>;
-      const rest: ProjectFilter = { ...filter, q: undefined };
-      const matching = found
-        .filter((r): r is StoredProject => !!r && matchesFilter(r, rest, userId, null))
-        .sort(compareRows(sort));
+    // The rarest facet drives the walk. (Native counts walk the index range inside the engine:
+    // a later page of a one-facet list needs neither a driver choice nor a total.)
+    const sizes =
+      facets.length === 1 && after
+        ? [after.total]
+        : await Promise.all(facets.map((f) => facetRange(sort, f).count()));
+    let driverAt = 0;
+    for (let i = 1; i < sizes.length; i++)
+      if ((sizes[i] ?? 0) < (sizes[driverAt] ?? 0)) driverAt = i;
+    const driver = facets[driverAt]!;
+    const conditions = facets
+      .map((f, i) => ({ f, n: sizes[i] ?? 0 }))
+      .filter((x) => x.f !== FACET_ALL)
+      .sort((a, b) => a.n - b.n);
+    const simple = conditions.length <= 1 && qIds === null;
+    if (!after && (sizes[driverAt] ?? 0) === 0) return { rows: [], next: null, total: 0 };
+
+    // Several conditions (or a text query): the exact set of matching ids, intersected on
+    // index keys read in batches, smallest first — never rows.
+    let matchSet: Set<string> | null = null;
+    if (!simple) {
+      let set: Set<string> | null = qIds;
+      for (const { f } of conditions) {
+        const ids = await facetIds(sort, f);
+        set = set ? intersect(set, ids) : ids;
+        if (set.size === 0) break;
+      }
+      matchSet = set ?? new Set<string>();
+    }
+    const total = after ? after.total : matchSet ? matchSet.size : (sizes[driverAt] ?? 0);
+    if (!after && total === 0) return { rows: [], next: null, total: 0 };
+    const cmp = compareRows(sort);
+
+    if (matchSet && matchSet.size <= smallSetLimit(size)) {
+      // Few matches: read exactly those rows and order them in memory — fewer reads than
+      // walking an index to find a handful of ids.
+      const found = (await db.projects.bulkGet([...matchSet])) as Array<StoredProject | undefined>;
+      const matching = found.filter((r): r is StoredProject => !!r).sort(cmp);
       let start = 0;
       if (after) {
-        const cmp = compareRows(sort);
-        const probe = { name_ar: String(after.k), _u: Number(after.k), id: after.id } as StoredProject;
+        const probe = {
+          name_ar: String(after.k),
+          _u: Number(after.k),
+          id: after.id,
+        } as StoredProject;
         while (start < matching.length && cmp(matching[start]!, probe) <= 0) start++;
       }
       const page = matching.slice(start, start + size);
       const lookups = await lookupsFor(page);
       const lastRow = page[page.length - 1];
-      const total = after ? after.total : matching.length;
       const next: ListCursor | null =
         matching.length > start + size && lastRow
-          ? { s: sort, k: sort === 'name' ? (lastRow.name_ar ?? '') : (lastRow._u ?? 0), id: lastRow.id, total }
+          ? { s: sort, k: sortKeyOf(sort, lastRow), id: lastRow.id, total }
           : null;
       return { rows: page.map((r) => toListItem(r, lookups)), next, total };
     }
 
-    // The rarest facet drives the scan.
-    const sizes = await Promise.all(facets.map((f) => facetRange(sort, f).count()));
-    let driverAt = 0;
-    for (let i = 1; i < sizes.length; i++) if ((sizes[i] ?? 0) < (sizes[driverAt] ?? 0)) driverAt = i;
-    const driver = facets[driverAt]!;
-    const others = facets.filter((_, i) => i !== driverAt);
-    const simple = others.length === 0 && qIds === null;
-
-    const keep = async (batch: FacetKey[]): Promise<FacetKey[]> => {
-      let cand = qIds ? batch.filter((k) => qIds.has(k[2])) : batch;
-      for (const f of others) {
-        if (cand.length === 0) break;
-        const present = await alsoIn(sort, f, cand);
-        cand = cand.filter((k) => present.has(k[2]));
-      }
-      return cand;
-    };
-
-    let total: number;
-    if (after) total = after.total;
-    else if (simple) total = sizes[driverAt] ?? 0;
-    else {
-      // Several conditions: intersect the id lists of the index ranges (first page only;
-      // native key reads, no rows), smallest facet first.
-      let set: Set<string> | null = qIds;
-      const order = facets
-        .map((f, i) => ({ f, n: sizes[i] ?? 0 }))
-        .filter((x) => x.f !== FACET_ALL)
-        .sort((a, b) => a.n - b.n);
-      for (const { f } of order) {
-        const ids = await facetIds(sort, f);
-        set = set ? intersect(set, ids) : ids;
-        if (set.size === 0) break;
-      }
-      total = set ? set.size : (sizes[driverAt] ?? 0);
-    }
-    if (total === 0 && !after) return { rows: [], next: null, total: 0 };
-
-    // Collect limit + 1 matching keys: the extra one tells whether another page exists.
+    // Walk the driving facet in list order, in batches of ids; one row read per batch tells
+    // where the next batch starts. Collect limit + 1 ids: the extra one tells whether another
+    // page exists.
     const wanted = size + 1;
-    const picked: FacetKey[] = [];
-    let pos: FacetKey | null = after ? [driver, after.k, after.id] : null;
-    let chunk = simple ? wanted : wanted * 4;
-    while (picked.length < wanted) {
-      const batch = await nextKeys(sort, driver, pos, chunk);
-      if (batch.length === 0) break;
-      for (const k of await keep(batch)) {
-        picked.push(k);
+    const picked: string[] = [];
+    let pos: [string | number, string] | null = after ? [after.k, after.id] : null;
+    let chunk = matchSet ? wanted * 4 : wanted;
+    for (;;) {
+      const batch = await nextIds(sort, driver, pos, chunk);
+      for (const id of batch) {
+        if (matchSet && !matchSet.has(id)) continue;
+        picked.push(id);
         if (picked.length === wanted) break;
       }
-      pos = batch[batch.length - 1]!;
-      if (batch.length < chunk) break;
-      chunk = Math.min(chunk * 2, 4000);
+      if (picked.length >= wanted || batch.length < chunk) break;
+      const lastId = batch[batch.length - 1]!;
+      const lastRow = (await db.projects.get(lastId)) as StoredProject | undefined;
+      if (!lastRow) break;
+      pos = [sortKeyOf(sort, lastRow), lastId];
+      chunk = Math.min(chunk * 2, 8000);
     }
 
-    const pageKeys = picked.slice(0, size);
-    const found = (await db.projects.bulkGet(pageKeys.map((k) => k[2]))) as Array<StoredProject | undefined>;
+    const pageIds = picked.slice(0, size);
+    const found = (await db.projects.bulkGet(pageIds)) as Array<StoredProject | undefined>;
     const rows = found.filter((r): r is StoredProject => !!r);
     const lookups = await lookupsFor(rows);
-    const last = pageKeys[pageKeys.length - 1];
+    const last = rows[rows.length - 1];
     const next: ListCursor | null =
-      picked.length > size && last ? { s: sort, k: last[1], id: last[2], total } : null;
+      picked.length > size && last
+        ? { s: sort, k: sortKeyOf(sort, last), id: last.id, total }
+        : null;
     return { rows: rows.map((r) => toListItem(r, lookups)), next, total };
   });
 }
@@ -414,7 +436,11 @@ export function listIncompleteProjects(
   after: ListCursor | null = null,
   limit?: number,
 ): Promise<ProjectPage> {
-  return listProjects({ incomplete: true, mine: opts.mine ?? true, sort: opts.sort ?? 'updated' }, after, limit);
+  return listProjects(
+    { incomplete: true, mine: opts.mine ?? true, sort: opts.sort ?? 'updated' },
+    after,
+    limit,
+  );
 }
 
 // ---------------------------------------------------------------------------------------
@@ -463,7 +489,12 @@ export async function projectsInBounds(
   const budget = Math.max(size * 4, IN_BOUNDS_SCAN_BUDGET);
   const rows = (await db.projects
     .where('_cell')
-    .between(gridCell({ lon: box[0], lat: box[1] }), gridCell({ lon: box[2], lat: box[3] }), true, true)
+    .between(
+      gridCell({ lon: box[0], lat: box[1] }),
+      gridCell({ lon: box[2], lat: box[3] }),
+      true,
+      true,
+    )
     .until(() => ++examined > budget)
     .filter((p) => inside(p as StoredProject))
     .limit(size)
@@ -508,7 +539,9 @@ export async function listOpenMaintenance(
     const chunk = filtered ? size * 2 : size + 1;
 
     const join = async (entries: StoredMaintenance[]): Promise<MaintenanceListItem[]> => {
-      const projects = (await db.projects.bulkGet(entries.map((e) => e.project_id))) as Array<StoredProject | undefined>;
+      const projects = (await db.projects.bulkGet(entries.map((e) => e.project_id))) as Array<
+        StoredProject | undefined
+      >;
       const items: MaintenanceListItem[] = [];
       entries.forEach((e, i) => {
         const p = projects[i];
@@ -539,7 +572,11 @@ export async function listOpenMaintenance(
 
     let total: number;
     if (after) total = after.total;
-    else if (!filtered) total = await db.project_maintenance.where('_mk').between([Dexie.minKey], [Dexie.maxKey]).count();
+    else if (!filtered)
+      total = await db.project_maintenance
+        .where('_mk')
+        .between([Dexie.minKey], [Dexie.maxKey])
+        .count();
     else {
       // Open entries are few; count the filtered ones by walking them once (first page only).
       total = 0;
@@ -590,20 +627,27 @@ export async function listPersons(
   if (q && q.trim() !== '' && qWords.length > 0) {
     const cap = size * 4;
     const lists = await Promise.all(
-      qWords.map((w) => db.persons.where('_tokens').startsWith(w).limit(cap).primaryKeys() as Promise<string[]>),
+      qWords.map(
+        (w) =>
+          db.persons.where('_tokens').startsWith(w).limit(cap).primaryKeys() as Promise<string[]>,
+      ),
     );
     lists.sort((a, b) => a.length - b.length);
     const ids = [...new Set(lists[0] ?? [])];
     const found = (await db.persons.bulkGet(ids)) as Array<StoredPerson | undefined>;
     const rows = found
       .filter((p): p is StoredPerson => !!p && matchesAllWords(p._tokens, qWords))
-      .sort((a, b) => ((a._name ?? '') < (b._name ?? '') ? -1 : (a._name ?? '') > (b._name ?? '') ? 1 : 0))
+      .sort((a, b) =>
+        (a._name ?? '') < (b._name ?? '') ? -1 : (a._name ?? '') > (b._name ?? '') ? 1 : 0,
+      )
       .slice(0, size);
     return { rows: rows.map(publicRow), next: null };
   }
   const rows = (await db.persons
     .where('[_name+id]')
-    .between(after ? [after.k, after.id] : [Dexie.minKey, Dexie.minKey], [Dexie.maxKey, Dexie.maxKey], !after, true)
+    // `[maxKey]` sorts after every `[name, id]`. Never put the shared `Dexie.maxKey` object
+    // twice into one key: IndexedDB rejects a key that contains the same array twice.
+    .between(after ? [after.k, after.id] : [Dexie.minKey], [Dexie.maxKey], !after, true)
     .limit(size + 1)
     .toArray()) as StoredPerson[];
   const page = rows.slice(0, size);

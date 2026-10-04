@@ -42,11 +42,14 @@ export async function endAuthSessions(userId: string): Promise<AuthLogoutOutcome
   }
 
   try {
-    const res = await fetch(`${supabaseUrl()}/auth/v1/admin/users/${encodeURIComponent(userId)}/logout`, {
-      method: 'POST',
-      headers: serviceHeaders({ 'content-type': 'application/json' }),
-      body: '{}',
-    });
+    const res = await fetch(
+      `${supabaseUrl()}/auth/v1/admin/users/${encodeURIComponent(userId)}/logout`,
+      {
+        method: 'POST',
+        headers: serviceHeaders({ 'content-type': 'application/json' }),
+        body: '{}',
+      },
+    );
     await res.body?.cancel().catch(() => undefined);
     if (res.ok) return { done: true, method: 'admin_endpoint' };
     notes.push(`admin logout endpoint answered ${res.status}`);

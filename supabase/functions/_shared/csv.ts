@@ -21,13 +21,15 @@ const CR = 13;
 const QUOTE = 34;
 
 // "= + - @" and their full-width forms (Excel treats those as formula starters as well).
-const FORMULA_STARTERS = new Set<number>([
-  0x3d, 0x2b, 0x2d, 0x40, 0xff1d, 0xff0b, 0xff0d, 0xff20,
-]);
+const FORMULA_STARTERS = new Set<number>([0x3d, 0x2b, 0x2d, 0x40, 0xff1d, 0xff0b, 0xff0d, 0xff20]);
 
 function isSpace(code: number): boolean {
   return (
-    code === 0x20 || (code >= 9 && code <= 13) || code === 0xa0 || code === 0xfeff || code === 0x3000
+    code === 0x20 ||
+    (code >= 9 && code <= 13) ||
+    code === 0xa0 ||
+    code === 0xfeff ||
+    code === 0x3000
   );
 }
 

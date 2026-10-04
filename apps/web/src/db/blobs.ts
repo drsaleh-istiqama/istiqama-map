@@ -12,6 +12,25 @@ export interface PhotoBlobInfo {
   mime?: string;
 }
 
+let blobsSurviveClone: boolean | null = null;
+
+/**
+ * Whether this engine's structured clone keeps a Blob a Blob (every current browser does, and
+ * stores it efficiently). Where it does not — some old WebViews, DOM emulations in tests — the
+ * clone silently turns into an empty object, so the bytes are stored instead.
+ */
+function canStoreBlobs(sample: Blob): boolean {
+  if (blobsSurviveClone !== null) return blobsSurviveClone;
+  const clone = (globalThis as { structuredClone?: (value: unknown) => unknown }).structuredClone;
+  if (typeof clone !== 'function') return (blobsSurviveClone = true);
+  try {
+    blobsSurviveClone = clone(sample) instanceof Blob;
+  } catch {
+    blobsSurviveClone = false;
+  }
+  return blobsSurviveClone;
+}
+
 /** Stores (or replaces) the blob of a photo. */
 export async function putPhotoBlob(
   photoId: string,
@@ -23,27 +42,37 @@ export async function putPhotoBlob(
     id: blobKey(photoId, kind),
     photo_id: photoId,
     kind,
-    mime: info.mime ?? blob.type ?? 'application/octet-stream',
+    mime: info.mime || blob.type || 'application/octet-stream',
     bytes: blob.size,
     project_id: info.projectId ?? null,
     created_at: Date.now(),
   };
+  // Read the bytes BEFORE opening the write (an await inside the put would end the transaction).
+  if (!canStoreBlobs(blob)) {
+    const bytes = await blob.arrayBuffer();
+    await db.photo_blobs.put({ ...base, data: bytes });
+    return;
+  }
   try {
     await db.photo_blobs.put({ ...base, data: blob });
   } catch (err) {
-    // Engines that cannot clone a Blob into IndexedDB (old WebKit, test environments):
-    // store the bytes instead.
-    if (!(err instanceof Error) || !/DataClone|clone/i.test(`${err.name} ${err.message}`)) throw err;
+    // Engines that refuse to clone a Blob into IndexedDB (old WebKit): store the bytes instead.
+    if (!(err instanceof Error) || !/DataClone|clone/i.test(`${err.name} ${err.message}`))
+      throw err;
     await db.photo_blobs.put({ ...base, data: await blob.arrayBuffer() });
   }
 }
 
-/** The stored blob of a photo, or `undefined`. */
+/** The stored blob of a photo, or `undefined` (also when the stored value is unreadable). */
 export async function photoBlob(photoId: string, kind: PhotoBlobKind): Promise<Blob | undefined> {
   const rec = await db.photo_blobs.get(blobKey(photoId, kind));
   if (!rec) return undefined;
-  if (typeof Blob !== 'undefined' && rec.data instanceof Blob) return rec.data;
-  return new Blob([rec.data as ArrayBuffer], { type: rec.mime });
+  const data: unknown = rec.data;
+  if (typeof Blob !== 'undefined' && data instanceof Blob) return data;
+  if (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) {
+    return new Blob([data as ArrayBuffer], { type: rec.mime });
+  }
+  return undefined;
 }
 
 /** Frees one blob (the full-size image after its upload). */
@@ -72,16 +101,29 @@ export async function photoBlobBytes(): Promise<number> {
  * reset. Returns the number of blobs removed.
  */
 export async function pruneOrphanPhotoBlobs(uploadMetaPrefix = 'photo_upload:'): Promise<number> {
-  return db.transaction('rw', [db.photo_blobs, db.project_photos, db.outbox, db.failed_ops, db.meta], async () => {
-    const photoIds = (await db.photo_blobs.orderBy('photo_id').uniqueKeys()) as string[];
-    let removed = 0;
-    for (const photoId of photoIds) {
-      if (await db.project_photos.get(photoId)) continue;
-      if ((await db.outbox.where('[table+row_id]').equals(['project_photos', photoId]).count()) > 0) continue;
-      if ((await db.failed_ops.where('[table+row_id]').equals(['project_photos', photoId]).count()) > 0) continue;
-      if (await db.meta.get(uploadMetaPrefix + photoId)) continue;
-      removed += await db.photo_blobs.where('photo_id').equals(photoId).delete();
-    }
-    return removed;
-  });
+  return db.transaction(
+    'rw',
+    [db.photo_blobs, db.project_photos, db.outbox, db.failed_ops, db.meta],
+    async () => {
+      const photoIds = (await db.photo_blobs.orderBy('photo_id').uniqueKeys()) as string[];
+      let removed = 0;
+      for (const photoId of photoIds) {
+        if (await db.project_photos.get(photoId)) continue;
+        if (
+          (await db.outbox.where('[table+row_id]').equals(['project_photos', photoId]).count()) > 0
+        )
+          continue;
+        if (
+          (await db.failed_ops
+            .where('[table+row_id]')
+            .equals(['project_photos', photoId])
+            .count()) > 0
+        )
+          continue;
+        if (await db.meta.get(uploadMetaPrefix + photoId)) continue;
+        removed += await db.photo_blobs.where('photo_id').equals(photoId).delete();
+      }
+      return removed;
+    },
+  );
 }

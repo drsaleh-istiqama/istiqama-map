@@ -189,6 +189,14 @@
 .chip:disabled {
   opacity: 0.55;
 }
+/* Chips plus the free-text box of the "Other" chip */
+.chips-field {
+  display: grid;
+  gap: var(--sp-2);
+}
+.field--invalid .chip {
+  border-color: var(--c-danger);
+}
 
 /* ---------- Badges ---------- */
 .badge {

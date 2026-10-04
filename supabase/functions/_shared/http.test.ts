@@ -68,14 +68,16 @@ describe('database error mapping', () => {
     const e = fromDbError({ code: 'PT429', message: 'rate_limited', hint: 'Retry in 17 seconds.' });
     expect(e.status).toBe(429);
     expect(e.headers['retry-after']).toBe('17');
-    expect(fromDbError({ code: 'PT429', message: 'rate_limited' }).headers['retry-after']).toBe('60');
+    expect(fromDbError({ code: 'PT429', message: 'rate_limited' }).headers['retry-after']).toBe(
+      '60',
+    );
   });
 
   it('unwrap returns data or throws the mapped error', () => {
     expect(unwrap({ data: { a: 1 }, error: null })).toEqual({ a: 1 });
-    expect(() => unwrap({ data: null, error: { code: 'PT404', message: 'user_not_found' }, status: 404 })).toThrowError(
-      HttpError,
-    );
+    expect(() =>
+      unwrap({ data: null, error: { code: 'PT404', message: 'user_not_found' }, status: 404 }),
+    ).toThrowError(HttpError);
     try {
       unwrap({ data: null, error: { message: 'fetch failed' }, status: 0 });
     } catch (e) {
@@ -85,15 +87,25 @@ describe('database error mapping', () => {
   });
 
   it('storage errors carry the semantic status in statusCode', () => {
-    expect(fromStorageError({ message: 'Object not found', statusCode: '404', status: 400 }).status).toBe(404);
-    expect(fromStorageError({ message: 'new row violates row-level security policy', statusCode: '403' }).status).toBe(403);
+    expect(
+      fromStorageError({ message: 'Object not found', statusCode: '404', status: 400 }).status,
+    ).toBe(404);
+    expect(
+      fromStorageError({ message: 'new row violates row-level security policy', statusCode: '403' })
+        .status,
+    ).toBe(403);
     expect(fromStorageError({ message: 'boom' }).status).toBe(500);
   });
 
   it('toHttpError hides nothing and never leaks a stack', () => {
     const e = toHttpError(new Error('kaboom'));
     expect(e.status).toBe(500);
-    expect(e.body()).toEqual({ code: 'PT500', message: 'internal_error', details: 'kaboom', hint: null });
+    expect(e.body()).toEqual({
+      code: 'PT500',
+      message: 'internal_error',
+      details: 'kaboom',
+      hint: null,
+    });
     expect(toHttpError(errors.notFound())).toMatchObject({ status: 404 });
   });
 });
@@ -109,7 +121,11 @@ describe('request helpers', () => {
 
   it('readBytes enforces the limit with and without Content-Length', async () => {
     const big = new Uint8Array(2048);
-    const declared = new Request('http://x/', { method: 'POST', body: big, headers: { 'content-length': '2048' } });
+    const declared = new Request('http://x/', {
+      method: 'POST',
+      body: big,
+      headers: { 'content-length': '2048' },
+    });
     await expect(readBytes(declared, 1024)).rejects.toMatchObject({ status: 413 });
     const streamed = new Request('http://x/', {
       method: 'POST',
@@ -129,7 +145,9 @@ describe('request helpers', () => {
 
   it('readJson: empty body is {}, invalid JSON is a 400', async () => {
     expect(await readJson(new Request('http://x/', { method: 'POST' }), 100)).toEqual({});
-    await expect(readJson(new Request('http://x/', { method: 'POST', body: '{nope' }), 100)).rejects.toMatchObject({
+    await expect(
+      readJson(new Request('http://x/', { method: 'POST', body: '{nope' }), 100),
+    ).rejects.toMatchObject({
       status: 400,
       message: 'invalid_json',
     });
@@ -168,8 +186,14 @@ describe('CORS', () => {
 
   it('corsHeaders / preflight', () => {
     vi.stubEnv('APP_ORIGINS', 'https://map.example.org');
-    const good = new Request('http://x/fn', { method: 'OPTIONS', headers: { origin: 'https://map.example.org' } });
-    const bad = new Request('http://x/fn', { method: 'OPTIONS', headers: { origin: 'https://evil.example' } });
+    const good = new Request('http://x/fn', {
+      method: 'OPTIONS',
+      headers: { origin: 'https://map.example.org' },
+    });
+    const bad = new Request('http://x/fn', {
+      method: 'OPTIONS',
+      headers: { origin: 'https://evil.example' },
+    });
     expect(corsHeaders(good).get('access-control-allow-origin')).toBe('https://map.example.org');
     expect(corsHeaders(good).get('vary')).toBe('Origin');
     expect(corsHeaders(bad).has('access-control-allow-origin')).toBe(false);
@@ -216,7 +240,12 @@ describe('createHandler', () => {
 
     const forbidden = await call('POST', 'forbidden');
     expect(forbidden.status).toBe(403);
-    expect(await forbidden.json()).toEqual({ code: 'PT403', message: 'forbidden', details: null, hint: null });
+    expect(await forbidden.json()).toEqual({
+      code: 'PT403',
+      message: 'forbidden',
+      details: null,
+      hint: null,
+    });
     expect(forbidden.headers.get('access-control-allow-origin')).toBe('https://map.example.org');
 
     const crash = await call('POST', 'crash');

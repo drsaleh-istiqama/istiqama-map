@@ -91,6 +91,12 @@ function setViewport(desktop: boolean): void {
   })) as unknown as typeof window.matchMedia;
 }
 
+/**
+ * Views are lazy chunks: the first import in a busy test worker (the whole suite runs in
+ * parallel) can take longer than Testing Library's default 1 s.
+ */
+const LAZY_VIEW = { timeout: 8000 };
+
 const linkIds = (container: HTMLElement): Array<string | null> =>
   [...container.querySelectorAll('a[data-testid]')].map((a) => a.getAttribute('data-testid'));
 
@@ -128,7 +134,7 @@ describe('<Shell> on a phone', () => {
     // Test ids are unique: no second navigation is rendered on a phone.
     expect(screen.getAllByTestId('nav-maintenance')).toHaveLength(1);
     expect(screen.getAllByTestId('add-project')).toHaveLength(1);
-    await screen.findByTestId('stub-map');
+    await screen.findByTestId('stub-map', {}, LAZY_VIEW);
   });
 
   it('marks the active item with aria-current="page"', async () => {
@@ -144,7 +150,7 @@ describe('<Shell> on a phone', () => {
     expect(window.location.pathname).toBe('/maintenance');
     expect(screen.getByTestId('view-title').textContent).toBe('Maintenance');
     await waitFor(() => expect(document.title).toContain('Maintenance'));
-    await screen.findByTestId('stub-maintenance');
+    await screen.findByTestId('stub-maintenance', {}, LAZY_VIEW);
   });
 
   it('the "more" sheet holds the remaining destinations and closes on navigation', async () => {
@@ -229,7 +235,7 @@ describe('<Shell> on a desktop', () => {
     expect(screen.getAllByTestId('add-project')).toHaveLength(1);
     fireEvent.click(screen.getByTestId('add-project'));
     await waitFor(() => expect(window.location.pathname).toBe('/projects/new'));
-    await screen.findByTestId('stub-project-form');
+    await screen.findByTestId('stub-project-form', {}, LAZY_VIEW);
   });
 
   it('a viewer has no "add project" button', () => {
@@ -345,6 +351,21 @@ describe('<Shell> chrome', () => {
     expect(screen.getByTestId('update-accept')).toBeTruthy();
     fireEvent.click(screen.getByTestId('update-later'));
     await waitFor(() => expect(screen.queryByTestId('update-prompt')).toBeNull());
+  });
+
+  it('moves focus to the content on navigation, but not when only the language changes', async () => {
+    render(<Shell />);
+    const main = document.getElementById('main') as HTMLElement;
+    const syncNowButton = screen.getByTestId('sync-now');
+    syncNowButton.focus();
+
+    await setLocale('ar');
+    await waitFor(() => expect(document.title).toContain('الخارطة'));
+    expect(document.activeElement).toBe(syncNowButton);
+
+    fireEvent.click(screen.getByTestId('nav-reports'));
+    await waitFor(() => expect(document.activeElement).toBe(main));
+    expect(document.title).toContain('التقارير');
   });
 
   it('renders the 404 view for an unknown address', async () => {

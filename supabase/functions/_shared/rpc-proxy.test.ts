@@ -26,24 +26,39 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function post(handler: (r: Request) => Promise<Response>, body: unknown, headers: Record<string, string> = {}): Promise<Response> {
+function post(
+  handler: (r: Request) => Promise<Response>,
+  body: unknown,
+  headers: Record<string, string> = {},
+): Promise<Response> {
   return handler(
     new Request('http://fn.test/sync', {
       method: 'POST',
-      headers: { authorization: auth, 'content-type': 'application/json', 'x-device-id': 'device-1', ...headers },
+      headers: {
+        authorization: auth,
+        'content-type': 'application/json',
+        'x-device-id': 'device-1',
+        ...headers,
+      },
       body: typeof body === 'string' ? body : JSON.stringify(body),
     }),
   );
 }
 
 const okJson = (value: unknown, status = 200): Response =>
-  new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json; charset=utf-8' } });
+  new Response(JSON.stringify(value), {
+    status,
+    headers: { 'content-type': 'application/json; charset=utf-8' },
+  });
 
 describe('sync_push wrapper', () => {
   it('forwards the RPC arguments untouched, with the caller credentials and device id', async () => {
     const result = { results: [{ op_id: 'a', status: 'applied', version: 1 }], server_time: 'now' };
     fetchMock.mockResolvedValueOnce(okJson(result));
-    const raw = JSON.stringify({ p_ops: [{ op_id: 'a', table: 'projects', name_ar: 'مسجد النور' }], p_device_id: 'device-1' });
+    const raw = JSON.stringify({
+      p_ops: [{ op_id: 'a', table: 'projects', name_ar: 'مسجد النور' }],
+      p_device_id: 'device-1',
+    });
     const res = await post(syncPush, raw, { apikey: 'client-anon-key' });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual(result);
@@ -62,9 +77,15 @@ describe('sync_push wrapper', () => {
   it('accepts the aliases ops / device_id and falls back to the x-device-id header', async () => {
     fetchMock.mockResolvedValue(okJson({ results: [] }));
     await post(syncPush, { ops: [{ op_id: 'b' }], device_id: 'device-9' });
-    expect(JSON.parse(fetchMock.mock.calls[0]![1]!.body as string)).toEqual({ p_ops: [{ op_id: 'b' }], p_device_id: 'device-9' });
+    expect(JSON.parse(fetchMock.mock.calls[0]![1]!.body as string)).toEqual({
+      p_ops: [{ op_id: 'b' }],
+      p_device_id: 'device-9',
+    });
     await post(syncPush, { p_ops: [] });
-    expect(JSON.parse(fetchMock.mock.calls[1]![1]!.body as string)).toEqual({ p_ops: [], p_device_id: 'device-1' });
+    expect(JSON.parse(fetchMock.mock.calls[1]![1]!.body as string)).toEqual({
+      p_ops: [],
+      p_device_id: 'device-1',
+    });
   });
 
   it('passes database errors through with their status and body', async () => {
@@ -78,7 +99,10 @@ describe('sync_push wrapper', () => {
 
   it('adds Retry-After to a database 429', async () => {
     fetchMock.mockResolvedValueOnce(
-      okJson({ code: 'PT429', message: 'rate_limited', details: '…', hint: 'Retry in 23 seconds.' }, 429),
+      okJson(
+        { code: 'PT429', message: 'rate_limited', details: '…', hint: 'Retry in 23 seconds.' },
+        429,
+      ),
     );
     const res = await post(syncPush, { p_ops: [], p_device_id: 'device-1' });
     expect(res.status).toBe(429);
@@ -97,9 +121,13 @@ describe('sync_push wrapper', () => {
   it('refuses bad requests before touching the database', async () => {
     expect((await post(syncPush, '{broken')).status).toBe(400);
     expect((await post(syncPush, '[1,2,3]')).status).toBe(422);
-    const anonymous = await syncPush(new Request('http://fn.test/sync_push', { method: 'POST', body: '{}' }));
+    const anonymous = await syncPush(
+      new Request('http://fn.test/sync_push', { method: 'POST', body: '{}' }),
+    );
     expect(anonymous.status).toBe(401);
-    const get = await syncPush(new Request('http://fn.test/sync_push', { headers: { authorization: auth } }));
+    const get = await syncPush(
+      new Request('http://fn.test/sync_push', { headers: { authorization: auth } }),
+    );
     expect(get.status).toBe(405);
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -121,17 +149,28 @@ describe('sync_pull wrapper', () => {
     const res = await post(syncPull, { cursor: { lo: 1 }, limit: 200 });
     expect(await res.json()).toEqual(page);
     expect(fetchMock.mock.calls[0]![0]).toBe('http://api.test/rest/v1/rpc/sync_pull');
-    expect(JSON.parse(fetchMock.mock.calls[0]![1]!.body as string)).toEqual({ p_cursor: { lo: 1 }, p_limit: 200 });
+    expect(JSON.parse(fetchMock.mock.calls[0]![1]!.body as string)).toEqual({
+      p_cursor: { lo: 1 },
+      p_limit: 200,
+    });
     await post(syncPull, {});
     expect(JSON.parse(fetchMock.mock.calls[1]![1]!.body as string)).toEqual({ p_cursor: null });
     await post(syncPull, { p_cursor: null, p_limit: 500 });
-    expect(JSON.parse(fetchMock.mock.calls[2]![1]!.body as string)).toEqual({ p_cursor: null, p_limit: 500 });
+    expect(JSON.parse(fetchMock.mock.calls[2]![1]!.body as string)).toEqual({
+      p_cursor: null,
+      p_limit: 500,
+    });
   });
 });
 
 describe('rate limiting of a wrapper', () => {
   it('answers 429 in the common error shape once the per-user budget is used', async () => {
-    const limited = createRpcProxy({ name: `limited-${Math.random()}`, rpc: 'x', perMinute: 2, maxBodyBytes: 1000 });
+    const limited = createRpcProxy({
+      name: `limited-${Math.random()}`,
+      rpc: 'x',
+      perMinute: 2,
+      maxBodyBytes: 1000,
+    });
     fetchMock.mockImplementation(async () => okJson({ ok: true }));
     expect((await post(limited, {})).status).toBe(200);
     expect((await post(limited, {})).status).toBe(200);
@@ -143,7 +182,12 @@ describe('rate limiting of a wrapper', () => {
   });
 
   it('refuses oversized bodies', async () => {
-    const small = createRpcProxy({ name: `small-${Math.random()}`, rpc: 'x', perMinute: 10, maxBodyBytes: 100 });
+    const small = createRpcProxy({
+      name: `small-${Math.random()}`,
+      rpc: 'x',
+      perMinute: 10,
+      maxBodyBytes: 100,
+    });
     const res = await post(small, { blob: 'x'.repeat(500) });
     expect(res.status).toBe(413);
     expect(fetchMock).not.toHaveBeenCalled();

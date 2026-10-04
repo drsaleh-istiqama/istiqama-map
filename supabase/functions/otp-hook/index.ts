@@ -14,7 +14,9 @@
  *   - the service-role key as bearer (the local gateway calls the hook this way).
  * Anything else is refused: the body contains a live sign-in code.
  *
- * Providers: see ./providers.ts (only `fake` until owner decision #4 is taken).
+ * Providers: see ./providers.ts (only `fake` until owner decision #4 is taken). Behind the
+ * real (signed) hook a provider must be configured explicitly — see the handler.
+ * Configuration: supabase/functions/README.md.
  */
 import { isServiceRequest } from '../_shared/auth.ts';
 import { env, serveIfEntryPoint } from '../_shared/env.ts';
@@ -24,6 +26,7 @@ import {
   OtpProviderError,
   countryOfPhone,
   normalisePhone,
+  providerConfigured,
   providerNameFor,
   resolveProvider,
   type OtpMessage,
@@ -47,9 +50,19 @@ export function messageFromPayload(payload: unknown): OtpMessage | null {
   if (isRecord(payload.sms) && typeof payload.sms.otp === 'string' && payload.sms.otp !== '') {
     const phone = typeof user.phone === 'string' ? normalisePhone(user.phone) : '';
     if (phone === '') return null;
-    return { channel: 'sms', to: phone, code: payload.sms.otp, country: countryOfPhone(phone), userId };
+    return {
+      channel: 'sms',
+      to: phone,
+      code: payload.sms.otp,
+      country: countryOfPhone(phone),
+      userId,
+    };
   }
-  if (isRecord(payload.email_data) && typeof payload.email_data.token === 'string' && payload.email_data.token !== '') {
+  if (
+    isRecord(payload.email_data) &&
+    typeof payload.email_data.token === 'string' &&
+    payload.email_data.token !== ''
+  ) {
     const email = typeof user.email === 'string' ? user.email.trim() : '';
     if (email === '') return null;
     return { channel: 'email', to: email, code: payload.email_data.token, country: null, userId };
@@ -60,7 +73,9 @@ export function messageFromPayload(payload: unknown): OtpMessage | null {
 export const handler = createHandler('otp-hook', ['POST'], async (req) => {
   const raw = await readText(req, 64 * 1024);
 
-  if (!isServiceRequest(req)) {
+  // The local gateway calls with the service key; Supabase Auth calls with a signed webhook.
+  const viaAuthHook = !isServiceRequest(req);
+  if (viaAuthHook) {
     const secrets = hookSecrets();
     if (secrets.length === 0) return hookError(401, 'The hook secret is not configured.');
     const verdict = await verifyWebhook(secrets, req.headers, raw);
@@ -77,7 +92,16 @@ export const handler = createHandler('otp-hook', ['POST'], async (req) => {
   if (!message) return hookError(400, 'The hook payload has no recipient or no one-time code.');
 
   try {
-    const provider = resolveProvider(providerNameFor(message, req.headers.get('x-otp-provider')));
+    const name = providerNameFor(message, viaAuthHook ? null : req.headers.get('x-otp-provider'));
+    // Fail closed on a hosted project: behind the real Auth hook the fake provider must be
+    // chosen explicitly (`OTP_PROVIDER=fake`, e.g. a staging project). An unconfigured
+    // production project then refuses to "send" instead of writing sign-in codes into the log.
+    if (viaAuthHook && name === 'fake' && !providerConfigured(message))
+      throw new OtpProviderError(
+        'provider_not_configured',
+        'No OTP provider is configured (set OTP_PROVIDER or OTP_PROVIDER_<ISO2>).',
+      );
+    const provider = resolveProvider(name);
     await provider.send(message);
   } catch (e) {
     const status = e instanceof OtpProviderError ? e.status : 500;

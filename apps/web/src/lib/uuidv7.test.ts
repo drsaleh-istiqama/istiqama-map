@@ -80,7 +80,13 @@ describe('uuidv7', () => {
   });
 
   it('sorts by creation time as text (the property the outbox and keyset cursors rely on)', () => {
-    const ids = [uuidv7(1000), uuidv7(2000), uuidv7(2000), uuidv7(70_000_000_000), uuidv7(1_800_000_000_000)];
+    const ids = [
+      uuidv7(1000),
+      uuidv7(2000),
+      uuidv7(2000),
+      uuidv7(70_000_000_000),
+      uuidv7(1_800_000_000_000),
+    ];
     expect([...ids].sort()).toEqual(ids);
   });
 

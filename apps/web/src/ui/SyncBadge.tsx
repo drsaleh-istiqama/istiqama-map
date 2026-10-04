@@ -15,6 +15,7 @@ export function syncBadgeState(status: Pick<Status, 'online' | 'state'>): SyncBa
   return 'ok';
 }
 
+/** Short visible label of the state (the badge sits in the top bar: a word or two). */
 function stateLabel(status: Status, state: SyncBadgeState): string {
   switch (state) {
     case 'offline':
@@ -22,13 +23,17 @@ function stateLabel(status: Status, state: SyncBadgeState): string {
     case 'syncing':
       return status.state === 'pushing' ? t('ui.syncPushing') : t('ui.syncPulling');
     case 'error':
-      // The sync engine reports a translation key; fall back to a generic message.
-      return status.lastError && hasTranslation(status.lastError)
-        ? t(status.lastError)
-        : t('ui.syncError');
+      return t('ui.syncError');
     default:
       return t('ui.syncOnline');
   }
+}
+
+/** Explanation of a failure: the sync engine reports a translation key (`sync.error_*`). */
+export function errorDetail(status: Pick<Status, 'state' | 'lastError'>): string | null {
+  if (status.state !== 'error' || !status.lastError || !hasTranslation(status.lastError))
+    return null;
+  return t(status.lastError);
 }
 
 /** Re-render every `ms` so "2 minutes ago" stays true. */
@@ -53,10 +58,14 @@ export function SyncBadge() {
     status.lastSyncAt == null
       ? t('ui.syncNever')
       : t('ui.syncLast', { time: fmt.relative(new Date(status.lastSyncAt)) });
+  const detail = errorDetail(status);
 
   return (
     <div class={`sync sync--${state}`} data-testid="sync-badge" data-state={state}>
-      <span class="sync__state" role="status" aria-live="polite" title={lastSync}>
+      <span
+        class="sync__state"
+        title={detail && state === 'error' ? `${detail}\n${lastSync}` : lastSync}
+      >
         {state === 'offline' ? (
           <IconOffline size={20} />
         ) : state === 'error' ? (
@@ -66,8 +75,14 @@ export function SyncBadge() {
         ) : (
           <IconOnline size={20} />
         )}
-        <span class="sync__label">{stateLabel(status, state)}</span>
-        <span class="sync__detail">{lastSync}</span>
+        {/* Live region: announces state changes only, not the ticking "last sync" time. */}
+        <span role="status" aria-live="polite" data-testid="sync-state">
+          <span class="sync__label">{stateLabel(status, state)}</span>
+          {detail && state === 'error' && <span class="sr-only"> {detail}</span>}
+        </span>
+        <span class="sync__detail" data-testid="sync-last" data-at={status.lastSyncAt ?? ''}>
+          {lastSync}
+        </span>
       </span>
 
       <span class="sync__count" title={t('ui.syncPendingOps', { count: status.pendingOps })}>

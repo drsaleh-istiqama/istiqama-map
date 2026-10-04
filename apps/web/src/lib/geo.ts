@@ -17,7 +17,9 @@ export const METERS_PER_DEGREE = 111320;
 
 const toRad = (deg: number): number => (deg * Math.PI) / 180;
 
-export function isValidLonLat<T extends { lon?: unknown; lat?: unknown }>(p: T | null | undefined): p is T & LonLat {
+export function isValidLonLat<T extends { lon?: unknown; lat?: unknown }>(
+  p: T | null | undefined,
+): p is T & LonLat {
   return (
     !!p &&
     typeof p.lon === 'number' &&

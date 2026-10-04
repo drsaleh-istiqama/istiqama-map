@@ -71,6 +71,18 @@ function flag(name: keyof Capabilities): ReadonlySignal<boolean> {
   return computed(() => capabilities.value[name]);
 }
 
+/** Resolves to `true` only when `T` is assignable to `Contract` (compile error otherwise). */
+type AssertExtends<T extends Contract, Contract> = T extends Contract ? true : never;
+
+/** Shape of `can` in docs/contracts/web.md §3.6 (the object below may only add to it). */
+interface CanContract {
+  review: ReadonlySignal<boolean>;
+  seeRestricted: ReadonlySignal<boolean>;
+  seePeople: ReadonlySignal<boolean>;
+  write: ReadonlySignal<boolean>;
+  admin: ReadonlySignal<boolean>;
+}
+
 /** UI capability flags. They hide or show; the server (RLS, RPC checks) is what enforces. */
 export const can = {
   review: flag('review'),
@@ -81,6 +93,9 @@ export const can = {
   /** Extension to the contract: HQ, or a country manager (users/devices of the own country). */
   manage: flag('manage'),
 } as const;
+
+/** Compile-time proof that `can` offers (at least) the contract shape; extensions are allowed. */
+export type _CanMeetsContract = AssertExtends<typeof can, CanContract>;
 
 // ----------------------------------------------------------------------------- ports
 
@@ -250,6 +265,10 @@ export function initAuth(): Promise<void> {
 
 // ----------------------------------------------------------------------------- context
 
+/** Gateway answers worth a retry of `my_context()`, and the waits before each retry. */
+const TRANSIENT_STATUS: ReadonlySet<number> = new Set([502, 503, 504]);
+const CONTEXT_RETRY_MS: readonly number[] = [1000, 3000];
+
 let contextInFlight: Promise<MyContext | null> | null = null;
 let contextRerun = false;
 
@@ -282,8 +301,23 @@ export function refreshContext(): Promise<MyContext | null> {
 async function loadContext(): Promise<MyContext | null> {
   const started = session.peek();
   if (!started) return null;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    // No request without a connection (an unlock offline must not hit the network): the cached
+    // context stays in use and the 'online' listener at the end of this file refreshes it.
+    contextError.value = 'offline';
+    return me.peek();
+  }
   if (!me.peek()) contextError.value = null; // back to "loading" on the pending screen
   let result = await supabase.rpc('my_context');
+  // A proxy between the phone and the API answered for it (502/503/504: restart, idle
+  // connection dropped, mobile carrier gateway): try again a little later before showing an
+  // error — on the first sign-in that error blocks the whole app.
+  for (const wait of CONTEXT_RETRY_MS) {
+    if (!result.error || !TRANSIENT_STATUS.has(result.status)) break;
+    await new Promise((resolve) => setTimeout(resolve, wait));
+    if (session.peek()?.user.id !== started.user.id) return null;
+    result = await supabase.rpc('my_context');
+  }
   if (result.error && result.status === 401) {
     // The access token was refused (expired while the phone slept, wrong device clock): one
     // forced refresh, then one more try.
@@ -324,9 +358,11 @@ async function loadContext(): Promise<MyContext | null> {
 }
 
 /**
- * A different account on a device that still holds another user's local data (possible after a
- * PIN wipe, which keeps that data on purpose): hand over to the sync module BEFORE the new
- * context becomes visible, so nothing of the previous user is shown or pushed under the new one.
+ * A different account on a device that still holds another user's local data (after a PIN wipe
+ * or "forgot PIN", which keep that data on purpose, and after a sign-out, which keeps the unsent
+ * work so that its owner can push it after signing in again): hand over to the sync module
+ * BEFORE the new context becomes visible, so nothing of the previous user is shown to or pushed
+ * under the new one. The same user signing in again keeps everything.
  */
 async function noteUser(userId: string): Promise<void> {
   const last = getPref<string>(LAST_USER_PREF, '');
@@ -465,6 +501,15 @@ async function forgetPin(): Promise<void> {
   }
 }
 
+/** Shape of `pin` in docs/contracts/web.md §3.6 (the object below may only add to it). */
+interface PinContract {
+  isSet(): Promise<boolean>;
+  set(pin: string): Promise<void>;
+  unlock(pin: string): Promise<boolean>;
+  lock(): void;
+  locked: Signal<boolean>;
+}
+
 export const pin = {
   isSet: (): Promise<boolean> => vault.isSet(),
   set: (pinCode: string): Promise<void> => vault.setPin(pinCode),
@@ -479,6 +524,9 @@ export const pin = {
   maxFailures: MAX_PIN_FAILURES,
   forget: forgetPin,
 } as const;
+
+/** Compile-time proof that `pin` offers (at least) the contract shape. */
+export type _PinMeetsContract = AssertExtends<typeof pin, PinContract>;
 
 // ----------------------------------------------------------------------------- sign-out
 
@@ -544,8 +592,10 @@ export async function signOut(options: { force?: boolean } = {}): Promise<void> 
   // Nothing is stored any more, so this makes no request: it only tells listeners and other tabs.
   await withTimeout(supabase.auth.signOut({ scope: 'local' }), 3000);
   authNotice.value = null;
+  // The sync module keeps unsent work on a sign-out. `auth.last_user_id` is deliberately kept
+  // too: if somebody else signs in next, `noteUser` hands that work over ('user_changed')
+  // before anything of it can be shown to or pushed as the new user.
   await resetLocalData('sign_out');
-  setPref(LAST_USER_PREF, '');
 }
 
 /**

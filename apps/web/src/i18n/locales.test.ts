@@ -3,6 +3,7 @@
  * the three languages have exactly the same keys, no text is empty, placeholders agree, and the
  * shipped `locales/<lang>.json` files are what the fragments produce.
  */
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -12,6 +13,23 @@ type Lang = (typeof LANGS)[number];
 
 const localesDir = path.resolve(__dirname, '..', '..', 'locales');
 const partsDir = path.join(localesDir, '_parts');
+const repoRoot = path.resolve(localesDir, '..', '..', '..');
+
+describe('scripts/merge-locales.ts --check', () => {
+  it('passes: identical key sets in ar/sw/en and shipped files up to date', () => {
+    const tsx = path.join(repoRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs');
+    const script = path.join(repoRoot, 'scripts', 'merge-locales.ts');
+    const run = spawnSync(process.execPath, [tsx, script, '--check'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      timeout: 60_000,
+    });
+    // On failure the script names every missing key / stale file on stderr.
+    expect(run.stderr.trim(), run.stderr).toBe('');
+    expect(run.status).toBe(0);
+    expect(run.stdout).toMatch(/locales: \d+ keys × 3 languages/);
+  }, 90_000);
+});
 
 function readJson(file: string): Record<string, unknown> {
   return JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>;

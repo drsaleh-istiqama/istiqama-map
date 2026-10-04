@@ -1,6 +1,12 @@
 import { effect } from '@preact/signals';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { type EngineOptions, META_LAST_SYNC, META_USER, type SyncEngine, createSyncEngine } from './engine';
+import {
+  type EngineOptions,
+  META_LAST_SYNC,
+  META_USER,
+  type SyncEngine,
+  createSyncEngine,
+} from './engine';
 import { SyncError } from './errors';
 import { META_PULL_STATE, type PullState } from './pull';
 import { FakeAuth, FakeLock, FakeNetwork, FakePrefs, FakeUploader, fakeApp } from './testing/fakes';
@@ -98,7 +104,10 @@ describe('sync engine — cycles', () => {
     });
     expect(server.row('projects', mine)).toMatchObject({ name_ar: 'محلي' });
     expect(await store.allRows('projects')).toHaveLength(2);
-    expect(rpcCalls('report_device_status').at(-1)!.args).toMatchObject({ p_pending_ops: 0, p_pending_photos: 0 });
+    expect(rpcCalls('report_device_status').at(-1)!.args).toMatchObject({
+      p_pending_ops: 0,
+      p_pending_photos: 0,
+    });
     expect(engine.status.value).toEqual({
       online: true,
       state: 'idle',
@@ -272,7 +281,12 @@ describe('sync engine — live counters', () => {
     server.rejectIf = () => 'out_of_scope';
     await store.mutate('projects', uid(), { name_ar: 'x', type: 'mosque' });
     await started();
-    expect(engine.status.value).toMatchObject({ pendingOps: 0, failedOps: 1, state: 'idle', lastError: null });
+    expect(engine.status.value).toMatchObject({
+      pendingOps: 0,
+      failedOps: 1,
+      state: 'idle',
+      lastError: null,
+    });
   });
 
   it('uploads photos after their rows were pushed and pushes the flip in the same cycle', async () => {
@@ -299,7 +313,10 @@ describe('sync engine — live counters', () => {
       `projects/TZ/${project}/${photo}_thumb.webp`,
       `projects/TZ/${project}/${photo}_full.webp`,
     ]);
-    expect(server.row('project_photos', photo)).toMatchObject({ upload_state: 'uploaded', version: 2 });
+    expect(server.row('project_photos', photo)).toMatchObject({
+      upload_state: 'uploaded',
+      version: 2,
+    });
     expect(engine.status.value).toMatchObject({ pendingPhotos: 0, pendingOps: 0, state: 'idle' });
     expect(await store.photoBlob(photo, 'full')).toBeUndefined();
     expect(await store.photoBlob(photo, 'thumb')).toBeDefined();
@@ -332,7 +349,11 @@ describe('sync engine — failures', () => {
   it('backs off exponentially with jitter and recovers', async () => {
     server.failNext('pull', new SyncError('server', 'HTTP 502', { status: 502 }), 2);
     await started();
-    expect(engine.status.value).toMatchObject({ state: 'error', lastError: 'sync.error_server', lastSyncAt: null });
+    expect(engine.status.value).toMatchObject({
+      state: 'error',
+      lastError: 'sync.error_server',
+      lastSyncAt: null,
+    });
     expect(clock.waiting()).toEqual([3_750]); // 5 s base, equal jitter at 0.5
 
     await clock.advance(3_750);
@@ -349,16 +370,27 @@ describe('sync engine — failures', () => {
 
   it('waits at least as long as the rate limiter asks', async () => {
     await store.mutate('donors', uid(), { name_ar: 'x' });
-    server.failNext('push', new SyncError('rate_limited', 'slow down', { status: 429, retryAfterMs: 45_000 }));
+    server.failNext(
+      'push',
+      new SyncError('rate_limited', 'slow down', { status: 429, retryAfterMs: 45_000 }),
+    );
     await started();
-    expect(engine.status.value).toMatchObject({ state: 'error', lastError: 'sync.error_rate_limited', pendingOps: 1 });
+    expect(engine.status.value).toMatchObject({
+      state: 'error',
+      lastError: 'sync.error_rate_limited',
+      pendingOps: 1,
+    });
     expect(clock.waiting()[0]).toBeGreaterThanOrEqual(45_000);
   });
 
   it('reports a network failure with a translatable key; syncNow() skips the backoff', async () => {
     server.offline = true;
     await started();
-    expect(engine.status.value).toMatchObject({ state: 'error', lastError: 'sync.error_network', online: true });
+    expect(engine.status.value).toMatchObject({
+      state: 'error',
+      lastError: 'sync.error_network',
+      online: true,
+    });
     server.offline = false;
     await engine.syncNow();
     expect(engine.status.value).toMatchObject({ state: 'idle', lastError: null });
@@ -374,7 +406,10 @@ describe('sync engine — failures', () => {
     };
     engine.start();
     await engine.whenIdle();
-    expect(engine.status.value).toMatchObject({ state: 'error', lastError: 'sync.error_storage_full' });
+    expect(engine.status.value).toMatchObject({
+      state: 'error',
+      lastError: 'sync.error_storage_full',
+    });
     expect(await store.getMeta(META_PULL_STATE)).toBeUndefined();
     store.applyPage = original;
     await engine.syncNow();
@@ -382,7 +417,10 @@ describe('sync engine — failures', () => {
   });
 
   it('refreshes the token once on 401 and carries on', async () => {
-    server.failNext('pull', new SyncError('unauthenticated', 'sync_pull: JWT expired', { status: 401 }));
+    server.failNext(
+      'pull',
+      new SyncError('unauthenticated', 'sync_pull: JWT expired', { status: 401 }),
+    );
     build();
     engine.start();
     for (let i = 0; i < 20 && engine.status.value.lastSyncAt === null; i++) {
@@ -395,7 +433,11 @@ describe('sync engine — failures', () => {
 
   it('asks auth for a new sign-in when 401 persists, keeps the data and keeps trying', async () => {
     await store.mutate('donors', uid(), { name_ar: 'unsent' });
-    server.failNext('rpc', new SyncError('unauthenticated', 'register_device: not_authenticated', { status: 401 }), 3);
+    server.failNext(
+      'rpc',
+      new SyncError('unauthenticated', 'register_device: not_authenticated', { status: 401 }),
+      3,
+    );
     build();
     engine.start();
     for (let i = 0; i < 20 && auth.problems.length === 0; i++) {
@@ -403,7 +445,11 @@ describe('sync engine — failures', () => {
       await new Promise((r) => setTimeout(r, 5));
     }
     expect(auth.problems).toEqual([{ reason: 'not_authenticated', wiped: false }]);
-    expect(engine.status.value).toMatchObject({ state: 'error', lastError: 'sync.error_auth', pendingOps: 1 });
+    expect(engine.status.value).toMatchObject({
+      state: 'error',
+      lastError: 'sync.error_auth',
+      pendingOps: 1,
+    });
     expect(await store.pendingOps()).toHaveLength(1);
     // still scheduled: syncing resumes by itself once a valid session exists
     expect(clock.waiting().length).toBe(1);
@@ -460,7 +506,13 @@ describe('sync engine — revocation', () => {
 
   it('wipes and signs out on PT403 session_revoked from any call', async () => {
     await seedLocalData();
-    server.failNext('push', new SyncError('session_revoked', 'sync_push: session_revoked', { status: 403, code: 'PT403' }));
+    server.failNext(
+      'push',
+      new SyncError('session_revoked', 'sync_push: session_revoked', {
+        status: 403,
+        code: 'PT403',
+      }),
+    );
     await started();
     expect(auth.problems).toEqual([{ reason: 'session_revoked', wiped: true }]);
     await expectWiped();
@@ -511,9 +563,16 @@ describe('sync engine — scope changes and reset', () => {
     expect(server.row('projects', kept)).toMatchObject({ capacity: 50 });
     expect(server.row('projects', fresh)).toBeDefined();
     expect(await store.getRow('projects', lost)).toBeUndefined();
-    expect(await store.getRow('projects', kept)).toMatchObject({ capacity: 50, builder: 'late edit', _dirty: 1 });
+    expect(await store.getRow('projects', kept)).toMatchObject({
+      capacity: 50,
+      builder: 'late edit',
+      _dirty: 1,
+    });
     expect(await store.getRow('projects', fresh)).toMatchObject({ name_ar: 'جديد', version: 1 });
-    expect(await store.getMeta<PullState>(META_PULL_STATE)).toMatchObject({ epoch: 'epoch-2', complete: true });
+    expect(await store.getMeta<PullState>(META_PULL_STATE)).toMatchObject({
+      epoch: 'epoch-2',
+      complete: true,
+    });
     expect((await store.pendingOps()).map((o) => o.fields)).toEqual([{ builder: 'late edit' }]);
 
     server.onPull = null;
@@ -543,19 +602,22 @@ describe('sync engine — scope changes and reset', () => {
     expect(await store.allRows('projects')).toHaveLength(2);
   });
 
-  it.each(['revoked', 'user_changed'] as const)("resetLocalData('%s') removes everything", async (reason) => {
-    await started();
-    net.online = false;
-    await store.mutate('projects', uid(), { name_ar: 'unsent', type: 'mosque' });
-    await store.putPhotoBlob('p', 'full', new Blob(['x']));
-    await engine.resetLocalData(reason);
-    expect(await store.allOps()).toHaveLength(0);
-    expect(await store.allRows('projects')).toHaveLength(0);
-    expect(await store.photoBlob('p', 'full')).toBeUndefined();
-    expect(engine.status.value).toMatchObject({ pendingOps: 0, lastSyncAt: null });
-  });
+  it.each(['revoked', 'user_changed'] as const)(
+    "resetLocalData('%s') removes everything",
+    async (reason) => {
+      await started();
+      net.online = false;
+      await store.mutate('projects', uid(), { name_ar: 'unsent', type: 'mosque' });
+      await store.putPhotoBlob('p', 'full', new Blob(['x']));
+      await engine.resetLocalData(reason);
+      expect(await store.allOps()).toHaveLength(0);
+      expect(await store.allRows('projects')).toHaveLength(0);
+      expect(await store.photoBlob('p', 'full')).toBeUndefined();
+      expect(engine.status.value).toMatchObject({ pendingOps: 0, lastSyncAt: null });
+    },
+  );
 
-  it('never pushes the previous user\'s queue under a new user', async () => {
+  it("never pushes the previous user's queue under a new user", async () => {
     await started();
     net.online = false;
     await store.mutate('projects', uid(), { name_ar: 'work of user 1', type: 'mosque' });

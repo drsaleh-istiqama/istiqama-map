@@ -10,7 +10,7 @@
  */
 import { REQUEST_BACKOFF, backoffDelay } from './backoff';
 import { type Clock, sleep, throwIfAborted, yieldToUi } from './clock';
-import type { SyncError} from './errors';
+import type { SyncError } from './errors';
 import { toSyncError } from './errors';
 import type { AuthPort, DbPort, OutboxOp, SyncTableInfo } from './ports';
 import type { PushOp, PushResult, Transport } from './types';
@@ -83,7 +83,10 @@ export function orderOps(ops: readonly OutboxOp[], tables: readonly SyncTableInf
     for (const child of DEPENDANTS[table] ?? []) r = Math.max(r, (rank.get(child) ?? -1) + 0.5);
     return r;
   };
-  const keyed = ops.map((op) => ({ op, key: op.kind === 'delete' ? deleteRank(op.table) : upsertRank(op.table) }));
+  const keyed = ops.map((op) => ({
+    op,
+    key: op.kind === 'delete' ? deleteRank(op.table) : upsertRank(op.table),
+  }));
   keyed.sort((a, b) => a.key - b.key || a.op.seq - b.op.seq);
   return keyed.map((k) => k.op);
 }

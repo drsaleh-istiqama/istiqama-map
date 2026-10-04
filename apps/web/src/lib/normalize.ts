@@ -11,11 +11,13 @@
  *   4. alef forms to alef, alef maksura to yeh, teh marbuta to heh
  *   5. collapse white space, trim
  *
- * Verified against the database for every BMP code point: identical for ASCII, Latin-1,
- * Latin Extended-A/B and Additional, IPA, Arabic (all blocks), Greek and general
- * punctuation. Not mirrored (characters that do not occur in names): `unaccent` rules of the
- * letter-like, enclosed, CJK-unit and full-width blocks, and case folding of scripts such as
- * Cherokee or Georgian, which depends on the database locale anyway.
+ * Verified against the database (tests/integration/registry.live.test.ts sweeps these blocks
+ * code point by code point): identical for ASCII, Latin-1, Latin Extended-A/B and
+ * Additional, IPA, combining marks, Arabic (all blocks incl. presentation forms), Greek and
+ * general punctuation. Not mirrored (characters that do not occur in names): `unaccent`
+ * rules of the letter-like, enclosed, CJK-unit and full-width blocks, and lower-casing that
+ * depends on the Unicode version of the database locale (Greek U+037F / U+03F4, Cherokee,
+ * Georgian, …).
  *
  * This file is pure ASCII on purpose: every non-ASCII character is written as a code point
  * number, so no editor or tool can silently change a range.

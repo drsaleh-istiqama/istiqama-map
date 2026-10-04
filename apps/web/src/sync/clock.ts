@@ -17,7 +17,8 @@ export interface Clock {
 export const systemClock: Clock = {
   now: () => Date.now(),
   setTimeout: (fn, ms) => globalThis.setTimeout(fn, ms),
-  clearTimeout: (handle) => globalThis.clearTimeout(handle as ReturnType<typeof globalThis.setTimeout>),
+  clearTimeout: (handle) =>
+    globalThis.clearTimeout(handle as ReturnType<typeof globalThis.setTimeout>),
   random: () => Math.random(),
 };
 
@@ -32,10 +33,13 @@ export function sleep(clock: Clock, ms: number, signal?: AbortSignal): Promise<v
       clock.clearTimeout(handle);
       reject(new SyncError('aborted', 'aborted'));
     };
-    const handle = clock.setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve();
-    }, Math.max(0, ms));
+    const handle = clock.setTimeout(
+      () => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      },
+      Math.max(0, ms),
+    );
     signal?.addEventListener('abort', onAbort, { once: true });
   });
 }

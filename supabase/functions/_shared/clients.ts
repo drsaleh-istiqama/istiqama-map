@@ -129,7 +129,8 @@ export async function withRetry<T>(
       const seconds = Number(/(\d+)\s*seconds?/i.exec(result.error.hint ?? '')?.[1] ?? '5');
       const ms = seconds * 1000;
       if (ms <= (opts.maxRateLimitWaitMs ?? 15_000)) waitMs = ms;
-    } else if (!/^(PT|PGRST|\d\d)/.test(code) && (status === 0 || status >= 502)) waitMs = 200 * attempt;
+    } else if (!/^(PT|PGRST|\d\d)/.test(code) && (status === 0 || status >= 502))
+      waitMs = 200 * attempt;
     if (waitMs === null) break;
     await sleep(waitMs);
     result = await call();

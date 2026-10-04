@@ -14,7 +14,14 @@ import { callerHeaders, restFetch } from '../_shared/clients.ts';
 import { boolEnv, intEnv, serveIfEntryPoint } from '../_shared/env.ts';
 import { createHandler, errors } from '../_shared/http.ts';
 import { enforceRateLimit } from '../_shared/ratelimit.ts';
-import { MVT, bodyEtag, etagMatches, parseTileFilters, parseTilePath, tileCacheControl } from './path.ts';
+import {
+  MVT,
+  bodyEtag,
+  etagMatches,
+  parseTileFilters,
+  parseTilePath,
+  tileCacheControl,
+} from './path.ts';
 
 // A map move requests 12–40 tiles; 1,200 / minute leaves room for fast panning.
 const PER_MINUTE = intEnv('TILES_RATE_PER_MINUTE', 1200, 1);

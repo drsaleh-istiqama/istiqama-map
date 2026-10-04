@@ -23,7 +23,8 @@ function join(chunks: Uint8Array[]): Uint8Array {
   return out;
 }
 
-const NS = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
+const NS =
+  'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
 const REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 
 interface Parts {
@@ -59,7 +60,8 @@ async function makeXlsx(parts: Parts): Promise<Uint8Array> {
   return join(zip.finish().chunks);
 }
 
-const sheet = (rows: string): string => `<worksheet ${NS}><sheetData>${rows}</sheetData></worksheet>`;
+const sheet = (rows: string): string =>
+  `<worksheet ${NS}><sheetData>${rows}</sheetData></worksheet>`;
 
 function sheetJsBytes(wb: XLSXNS.WorkBook): Uint8Array {
   return new Uint8Array(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer);
@@ -67,7 +69,9 @@ function sheetJsBytes(wb: XLSXNS.WorkBook): Uint8Array {
 
 describe('small parsers', () => {
   it('decodeXml handles named and numeric entities', () => {
-    expect(decodeXml('a &amp; b &lt;c&gt; &quot;d&quot; &apos;e&apos; &#1605;&#x633;')).toBe(`a & b <c> "d" 'e' مس`);
+    expect(decodeXml('a &amp; b &lt;c&gt; &quot;d&quot; &apos;e&apos; &#1605;&#x633;')).toBe(
+      `a & b <c> "d" 'e' مس`,
+    );
     expect(decodeXml('no entities')).toBe('no entities');
     expect(decodeXml('&unknown; stays')).toBe('&unknown; stays');
   });
@@ -83,9 +87,26 @@ describe('small parsers', () => {
   });
 
   it('isDateFormatCode', () => {
-    for (const code of ['yyyy-mm-dd', 'dd/mm/yyyy', 'd-mmm-yy', 'h:mm:ss', '[$-409]mmmm d, yyyy', '[h]:mm'])
+    for (const code of [
+      'yyyy-mm-dd',
+      'dd/mm/yyyy',
+      'd-mmm-yy',
+      'h:mm:ss',
+      '[$-409]mmmm d, yyyy',
+      '[h]:mm',
+    ])
       expect(isDateFormatCode(code), code).toBe(true);
-    for (const code of ['General', '0.00', '#,##0', '0%', '0.00E+00', '@', '#,##0 "days"', '0.0 "m"', '[Red]0.00'])
+    for (const code of [
+      'General',
+      '0.00',
+      '#,##0',
+      '0%',
+      '0.00E+00',
+      '@',
+      '#,##0 "days"',
+      '0.0 "m"',
+      '[Red]0.00',
+    ])
       expect(isDateFormatCode(code), code).toBe(false);
   });
 
@@ -148,7 +169,10 @@ describe('readXlsx — workbooks written by SheetJS', () => {
   });
 
   it('uses the cached value of formula cells and counts them — nothing is evaluated', async () => {
-    const ws = XLSX.utils.aoa_to_sheet([['a', 'b', 'total'], [2, 3, 5]]);
+    const ws = XLSX.utils.aoa_to_sheet([
+      ['a', 'b', 'total'],
+      [2, 3, 5],
+    ]);
     ws.C2 = { t: 'n', v: 5, f: 'A2+B2' };
     ws.D2 = { t: 's', v: 'cached text', f: 'HYPERLINK("http://evil.example","click")' };
     ws['!ref'] = 'A1:D2';
@@ -171,7 +195,9 @@ describe('readXlsx — workbooks written by SheetJS', () => {
     expect(auto.sheetNames).toEqual(['Hidden', 'Data', 'More']);
     expect((await readXlsx(bytes, { maxRows: 10, sheet: 'More' })).rows).toEqual([['third']]);
     expect((await readXlsx(bytes, { maxRows: 10, sheet: 0 })).rows).toEqual([['hidden']]);
-    await expect(readXlsx(bytes, { maxRows: 10, sheet: 'Nope' })).rejects.toMatchObject({ code: 'no_sheet' });
+    await expect(readXlsx(bytes, { maxRows: 10, sheet: 'Nope' })).rejects.toMatchObject({
+      code: 'no_sheet',
+    });
   });
 
   it('stops at the row limit and says so', async () => {
@@ -213,7 +239,11 @@ describe('readXlsx — hand-made XML', () => {
       ),
     });
     const result = await readXlsx(bytes, { maxRows: 10 });
-    expect(result.rows).toEqual([['a', 'b'], [null, null, null, 4], [null, 7, 8]]);
+    expect(result.rows).toEqual([
+      ['a', 'b'],
+      [null, null, null, 4],
+      [null, 7, 8],
+    ]);
     expect(result.rowNumbers).toEqual([1, 3, 7]);
   });
 
@@ -234,18 +264,31 @@ describe('readXlsx — hand-made XML', () => {
   it('converts numbers with a date style, honours the 1904 date system', async () => {
     const styles =
       '<styleSheet><cellXfs count="2"><xf numFmtId="0"/><xf numFmtId="14"/></cellXfs></styleSheet>';
-    const cells = sheet('<row r="1"><c r="A1" s="1"><v>45000</v></c><c r="B1" s="0"><v>45000</v></c><c r="C1" t="d"><v>2024-02-29T00:00:00Z</v></c></row>');
-    expect((await readXlsx(await makeXlsx({ styles, sheet: cells }), { maxRows: 5 })).rows).toEqual([
-      ['2023-03-15', 45000, '2024-02-29'],
-    ]);
+    const cells = sheet(
+      '<row r="1"><c r="A1" s="1"><v>45000</v></c><c r="B1" s="0"><v>45000</v></c><c r="C1" t="d"><v>2024-02-29T00:00:00Z</v></c></row>',
+    );
+    expect((await readXlsx(await makeXlsx({ styles, sheet: cells }), { maxRows: 5 })).rows).toEqual(
+      [['2023-03-15', 45000, '2024-02-29']],
+    );
     const wb1904 = `<workbook ${NS}><workbookPr date1904="1"/><sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets></workbook>`;
     expect(
-      (await readXlsx(await makeXlsx({ styles, workbook: wb1904, sheet: sheet('<row r="1"><c r="A1" s="1"><v>43538</v></c></row>') }), { maxRows: 5 })).rows,
+      (
+        await readXlsx(
+          await makeXlsx({
+            styles,
+            workbook: wb1904,
+            sheet: sheet('<row r="1"><c r="A1" s="1"><v>43538</v></c></row>'),
+          }),
+          { maxRows: 5 },
+        )
+      ).rows,
     ).toEqual([['2023-03-15']]);
   });
 
   it('ignores cells beyond the column limit and reports it', async () => {
-    const bytes = await makeXlsx({ sheet: sheet('<row r="1"><c r="A1"><v>1</v></c><c r="XFD1"><v>2</v></c></row>') });
+    const bytes = await makeXlsx({
+      sheet: sheet('<row r="1"><c r="A1"><v>1</v></c><c r="XFD1"><v>2</v></c></row>'),
+    });
     const result = await readXlsx(bytes, { maxRows: 5, maxColumns: 100 });
     expect(result.rows).toEqual([[1]]);
     expect(result.columnsTruncated).toBe(true);
@@ -261,7 +304,10 @@ describe('readXlsx — hand-made XML', () => {
 
   it('handles rows that arrive split across inflate chunks (large sheet)', async () => {
     const zip = new ZipWriter();
-    await zip.add('xl/workbook.xml', `<workbook ${NS}><sheets><sheet name="Big" sheetId="1" r:id="rId1"/></sheets></workbook>`);
+    await zip.add(
+      'xl/workbook.xml',
+      `<workbook ${NS}><sheets><sheet name="Big" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+    );
     await zip.add(
       'xl/_rels/workbook.xml.rels',
       `<Relationships><Relationship Id="rId1" Type="${REL}/worksheet" Target="/xl/worksheets/sheet1.xml"/></Relationships>`,
@@ -272,7 +318,9 @@ describe('readXlsx — hand-made XML', () => {
     const filler = 'حشو '.repeat(40);
     for (let r = 1; r <= 3000; r++)
       await entry.write(
-        enc.encode(`<row r="${r}"><c r="A${r}"><v>${r}</v></c><c r="B${r}" t="inlineStr"><is><t>${filler}${r}</t></is></c></row>`),
+        enc.encode(
+          `<row r="${r}"><c r="A${r}"><v>${r}</v></c><c r="B${r}" t="inlineStr"><is><t>${filler}${r}</t></is></c></row>`,
+        ),
       );
     await entry.write(enc.encode('</sheetData></worksheet>'));
     await zip.addStream(entry);
@@ -286,21 +334,30 @@ describe('readXlsx — hand-made XML', () => {
 describe('readXlsx — refusals', () => {
   it('refuses legacy .xls / encrypted containers', async () => {
     const cfb = new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0, 0, 0, 0]);
-    await expect(readXlsx(cfb, { maxRows: 5 })).rejects.toMatchObject({ code: 'encrypted_or_legacy' });
+    await expect(readXlsx(cfb, { maxRows: 5 })).rejects.toMatchObject({
+      code: 'encrypted_or_legacy',
+    });
   });
 
   it('refuses files that are not ZIP archives or not workbooks', async () => {
-    await expect(readXlsx(new TextEncoder().encode('a,b\n1,2'), { maxRows: 5 })).rejects.toMatchObject({
+    await expect(
+      readXlsx(new TextEncoder().encode('a,b\n1,2'), { maxRows: 5 }),
+    ).rejects.toMatchObject({
       code: 'not_xlsx',
     });
     const zip = new ZipWriter();
     await zip.add('word/document.xml', '<w:document/>');
-    await expect(readXlsx(join(zip.finish().chunks), { maxRows: 5 })).rejects.toMatchObject({ code: 'not_xlsx' });
+    await expect(readXlsx(join(zip.finish().chunks), { maxRows: 5 })).rejects.toMatchObject({
+      code: 'not_xlsx',
+    });
   });
 
   it('refuses a sheet that inflates beyond the limit (zip bomb)', async () => {
     const zip = new ZipWriter();
-    await zip.add('xl/workbook.xml', `<workbook ${NS}><sheets><sheet name="B" sheetId="1" r:id="rId1"/></sheets></workbook>`);
+    await zip.add(
+      'xl/workbook.xml',
+      `<workbook ${NS}><sheets><sheet name="B" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+    );
     await zip.add(
       'xl/_rels/workbook.xml.rels',
       `<Relationships><Relationship Id="rId1" Type="${REL}/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`,
@@ -311,7 +368,9 @@ describe('readXlsx — refusals', () => {
     await zip.addStream(entry);
     const bytes = join(zip.finish().chunks);
     expect(bytes.byteLength).toBeLessThan(50_000);
-    const error = await readXlsx(bytes, { maxRows: 5, maxSheetBytes: 2_000_000 }).catch((e: unknown) => e);
+    const error = await readXlsx(bytes, { maxRows: 5, maxSheetBytes: 2_000_000 }).catch(
+      (e: unknown) => e,
+    );
     expect(error).toBeInstanceOf(XlsxReadError);
     expect((error as XlsxReadError).code).toBe('too_large');
   });
@@ -319,7 +378,9 @@ describe('readXlsx — refusals', () => {
   it('a crafted "__proto__" sheet or header cannot pollute Object.prototype', async () => {
     const bytes = await makeXlsx({
       workbook: `<workbook ${NS}><sheets><sheet name="__proto__" sheetId="1" r:id="rId1"/></sheets></workbook>`,
-      sheet: sheet('<row r="1"><c r="A1" t="inlineStr"><is><t>__proto__</t></is></c></row><row r="2"><c r="A2" t="inlineStr"><is><t>polluted</t></is></c></row>'),
+      sheet: sheet(
+        '<row r="1"><c r="A1" t="inlineStr"><is><t>__proto__</t></is></c></row><row r="2"><c r="A2" t="inlineStr"><is><t>polluted</t></is></c></row>',
+      ),
     });
     const result = await readXlsx(bytes, { maxRows: 5 });
     expect(result.name).toBe('__proto__');

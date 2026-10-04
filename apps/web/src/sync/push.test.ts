@@ -66,27 +66,44 @@ describe('orderOps', () => {
   });
 
   it('keeps delete-then-insert order inside a table (natural keys, photo limit)', () => {
-    const ordered = orderOps([op(1, 'project_land', 'delete'), op(2, 'project_land'), op(3, 'project_photos', 'delete'), op(4, 'project_photos')], REGISTRY);
+    const ordered = orderOps(
+      [
+        op(1, 'project_land', 'delete'),
+        op(2, 'project_land'),
+        op(3, 'project_photos', 'delete'),
+        op(4, 'project_photos'),
+      ],
+      REGISTRY,
+    );
     expect(ordered.map((o) => o.seq)).toEqual([1, 2, 3, 4]);
   });
 
   it('sends the delete of a parent after the operations on its children', () => {
     const ordered = orderOps(
-      [op(1, 'project_maintenance'), op(2, 'projects', 'delete'), op(3, 'community_sensitive'), op(4, 'persons', 'delete'), op(5, 'project_staff')],
+      [
+        op(1, 'project_maintenance'),
+        op(2, 'projects', 'delete'),
+        op(3, 'community_sensitive'),
+        op(4, 'persons', 'delete'),
+        op(5, 'project_staff'),
+      ],
       REGISTRY,
     );
     expect(ordered.map((o) => o.seq)).toEqual([1, 5, 3, 2, 4]);
   });
 
   it('sends operations on unknown tables last', () => {
-    expect(orderOps([op(1, 'nonsense'), op(2, 'map_packs')], REGISTRY).map((o) => o.seq)).toEqual([2, 1]);
+    expect(orderOps([op(1, 'nonsense'), op(2, 'map_packs')], REGISTRY).map((o) => o.seq)).toEqual([
+      2, 1,
+    ]);
   });
 });
 
 describe('pushOutbox', () => {
   it('accumulates work offline and replays it once the network is back', async () => {
     const ids = [uid(), uid(), uid()];
-    for (const id of ids) await store.mutate('projects', id, { name_ar: `مسجد ${id}`, type: 'mosque' });
+    for (const id of ids)
+      await store.mutate('projects', id, { name_ar: `مسجد ${id}`, type: 'mosque' });
     await store.mutate('projects', ids[0]!, { capacity: 120 }); // coalesced into the insert
 
     server.offline = true;
@@ -115,7 +132,11 @@ describe('pushOutbox', () => {
     await store.mutate('projects', project, { name_ar: 'مدرسة', type: 'school' });
 
     const outcome = await pushOutbox(deps());
-    expect(server.calls.push[0]!.ops.map((o) => o.table)).toEqual(['projects', 'project_land', 'project_photos']);
+    expect(server.calls.push[0]!.ops.map((o) => o.table)).toEqual([
+      'projects',
+      'project_land',
+      'project_photos',
+    ]);
     expect(outcome).toMatchObject({ applied: 3, rejected: 0 });
   });
 
@@ -140,7 +161,9 @@ describe('pushOutbox', () => {
     const outcome = await pushOutbox(deps());
     // The first call was applied by the server; the retry carries the same op ids.
     expect(server.calls.push).toHaveLength(2);
-    expect(server.calls.push[1]!.ops.map((o) => o.op_id)).toEqual(server.calls.push[0]!.ops.map((o) => o.op_id));
+    expect(server.calls.push[1]!.ops.map((o) => o.op_id)).toEqual(
+      server.calls.push[0]!.ops.map((o) => o.op_id),
+    );
     expect(outcome).toMatchObject({ duplicates: 2, applied: 0 });
     expect(server.liveRows('projects')).toHaveLength(2);
     expect(server.row('projects', ids[0]!)?.version).toBe(1);
@@ -201,7 +224,10 @@ describe('pushOutbox', () => {
   it('merges edits of different fields and reports no conflict', async () => {
     const id = uid();
     server.write('projects', id, { name_ar: 'قديم', builder: 'a', capacity: 10 });
-    await store.applyPage({ changes: [{ table: 'projects', rows: [{ ...server.row('projects', id) }] }], meta: [] });
+    await store.applyPage({
+      changes: [{ table: 'projects', rows: [{ ...server.row('projects', id) }] }],
+      meta: [],
+    });
     server.write('projects', id, { builder: 'b' }, 'other-device'); // v2 elsewhere
 
     await store.mutate('projects', id, { capacity: 99 });
@@ -215,16 +241,29 @@ describe('pushOutbox', () => {
   it('on a field conflict keeps the server value locally and still writes the other fields', async () => {
     const id = uid();
     server.write('projects', id, { name_ar: 'قديم', builder: 'a', lon: 39.1, lat: -5.1 });
-    await store.applyPage({ changes: [{ table: 'projects', rows: [{ ...server.row('projects', id) }] }], meta: [] });
+    await store.applyPage({
+      changes: [{ table: 'projects', rows: [{ ...server.row('projects', id) }] }],
+      meta: [],
+    });
     server.write('projects', id, { builder: 'server-side', lon: 39.5, lat: -5.5 }, 'other-device');
 
     await store.mutate('projects', id, { builder: 'mine', name_ar: 'جديد', lon: 39.9, lat: -5.9 });
     const outcome = await pushOutbox(deps());
     expect(outcome).toMatchObject({ conflicts: 1 });
-    expect(server.row('projects', id)).toMatchObject({ builder: 'server-side', name_ar: 'جديد', lon: 39.5 });
+    expect(server.row('projects', id)).toMatchObject({
+      builder: 'server-side',
+      name_ar: 'جديد',
+      lon: 39.5,
+    });
     expect(server.conflicts.map((c) => c.field).sort()).toEqual(['builder', 'geom']);
     const local = await store.getRow('projects', id);
-    expect(local).toMatchObject({ builder: 'server-side', name_ar: 'جديد', lon: 39.5, lat: -5.5, version: 3 });
+    expect(local).toMatchObject({
+      builder: 'server-side',
+      name_ar: 'جديد',
+      lon: 39.5,
+      lat: -5.5,
+      version: 3,
+    });
     expect(local).not.toHaveProperty('_dirty');
     expect(await store.counts()).toEqual({ pendingOps: 0, failedOps: 0 });
   });
@@ -250,7 +289,10 @@ describe('pushOutbox', () => {
 
   it('waits as long as the rate limiter asks, then sends the same batch again', async () => {
     await store.mutate('donors', uid(), { name_ar: 'x' });
-    server.failNext('push', new SyncError('rate_limited', 'slow down', { status: 429, retryAfterMs: 3000 }));
+    server.failNext(
+      'push',
+      new SyncError('rate_limited', 'slow down', { status: 429, retryAfterMs: 3000 }),
+    );
     const started = clock.now();
     const outcome = await pushOutbox(deps());
     expect(outcome.applied).toBe(1);
@@ -261,8 +303,14 @@ describe('pushOutbox', () => {
 
   it('leaves a long rate-limit wait to the engine and requeues the batch', async () => {
     await store.mutate('donors', uid(), { name_ar: 'x' });
-    server.failNext('push', new SyncError('rate_limited', 'slow down', { status: 429, retryAfterMs: 45_000 }));
-    await expect(pushOutbox(deps())).rejects.toMatchObject({ kind: 'rate_limited', retryAfterMs: 45_000 });
+    server.failNext(
+      'push',
+      new SyncError('rate_limited', 'slow down', { status: 429, retryAfterMs: 45_000 }),
+    );
+    await expect(pushOutbox(deps())).rejects.toMatchObject({
+      kind: 'rate_limited',
+      retryAfterMs: 45_000,
+    });
     expect(await store.pendingOps()).toHaveLength(1);
     expect((await store.allOps())[0]!.state).toBe('pending');
   });
@@ -283,8 +331,20 @@ describe('pushOutbox', () => {
   });
 
   it.each([
-    ['session_revoked', new SyncError('session_revoked', 'sync_push: session_revoked', { status: 403, code: 'PT403' })],
-    ['unauthenticated', new SyncError('unauthenticated', 'sync_push: not_authenticated', { status: 401, code: 'PT401' })],
+    [
+      'session_revoked',
+      new SyncError('session_revoked', 'sync_push: session_revoked', {
+        status: 403,
+        code: 'PT403',
+      }),
+    ],
+    [
+      'unauthenticated',
+      new SyncError('unauthenticated', 'sync_push: not_authenticated', {
+        status: 401,
+        code: 'PT401',
+      }),
+    ],
   ])('stops at once on %s without retrying or losing the batch', async (kind, error) => {
     await store.mutate('donors', uid(), { name_ar: 'x' });
     server.failNext('push', error, 5);
@@ -298,11 +358,18 @@ describe('pushOutbox', () => {
     const ids = [uid(), uid(), uid()];
     for (const id of ids) await store.mutate('donors', id, { name_ar: id });
     server.pushGuard = (ops) =>
-      ops.some((o) => o.id === ids[1]) ? new SyncError('invalid', 'sync_push: boom', { status: 400, code: 'P0001' }) : null;
+      ops.some((o) => o.id === ids[1])
+        ? new SyncError('invalid', 'sync_push: boom', { status: 400, code: 'P0001' })
+        : null;
 
     const outcome = await pushOutbox(deps());
     expect(outcome).toMatchObject({ applied: 2, rejected: 1 });
-    expect(server.liveRows('donors').map((r) => r.id).sort()).toEqual([ids[0], ids[2]].sort());
+    expect(
+      server
+        .liveRows('donors')
+        .map((r) => r.id)
+        .sort(),
+    ).toEqual([ids[0], ids[2]].sort());
     const [failed] = await store.failedOps();
     expect(failed).toMatchObject({ id: ids[1], error: { code: 'call_failed', sqlstate: 'P0001' } });
     expect(await store.counts()).toEqual({ pendingOps: 0, failedOps: 1 });
@@ -311,7 +378,8 @@ describe('pushOutbox', () => {
   it('does not park anything when the call is refused because of the device id', async () => {
     await store.mutate('donors', uid(), { name_ar: 'x' });
     await store.mutate('donors', uid(), { name_ar: 'y' });
-    server.pushGuard = () => new SyncError('invalid', 'sync_push: device_mismatch', { status: 422, code: 'PT422' });
+    server.pushGuard = () =>
+      new SyncError('invalid', 'sync_push: device_mismatch', { status: 422, code: 'PT422' });
     await expect(pushOutbox(deps())).rejects.toMatchObject({ kind: 'invalid' });
     expect(await store.counts()).toEqual({ pendingOps: 2, failedOps: 0 });
     expect(server.calls.push).toHaveLength(1);
@@ -351,7 +419,10 @@ describe('pushOutbox', () => {
     const project = uid();
     const sensitive = uid();
     await store.mutate('projects', project, { name_ar: 'x', type: 'mosque' });
-    await store.mutate('community_sensitive', sensitive, { project_id: project, ibadi_families: 12 });
+    await store.mutate('community_sensitive', sensitive, {
+      project_id: project,
+      ibadi_families: 12,
+    });
     expect(await store.restrictedLocal()).toHaveLength(1);
     expect(await store.allRows('community_sensitive')).toHaveLength(0);
 
@@ -366,14 +437,25 @@ describe('pushOutbox', () => {
     const existing = uid();
     server.write('projects', project, { name_ar: 'x' });
     server.write('project_land', existing, { project_id: project, ownership: 'waqf' });
-    await store.applyPage({ changes: [{ table: 'projects', rows: [{ ...server.row('projects', project) }] }], meta: [] });
+    await store.applyPage({
+      changes: [{ table: 'projects', rows: [{ ...server.row('projects', project) }] }],
+      meta: [],
+    });
 
     const mine = uid();
-    await store.mutate('project_land', mine, { project_id: project, ownership: 'waqf', notes: 'قرب السوق' });
+    await store.mutate('project_land', mine, {
+      project_id: project,
+      ownership: 'waqf',
+      notes: 'قرب السوق',
+    });
     const outcome = await pushOutbox(deps());
     expect(outcome).toMatchObject({ merged: 1, rejected: 0 });
     expect(server.row('project_land', mine)).toBeUndefined();
-    expect(server.row('project_land', existing)).toMatchObject({ ownership: 'waqf', notes: 'قرب السوق', version: 2 });
+    expect(server.row('project_land', existing)).toMatchObject({
+      ownership: 'waqf',
+      notes: 'قرب السوق',
+      version: 2,
+    });
     expect(await store.getRow('project_land', mine)).toBeUndefined();
     expect((await store.counts()).pendingOps).toBe(0);
   });
@@ -381,7 +463,10 @@ describe('pushOutbox', () => {
   it('soft-deletes on the server and cancels an insert+delete that was never sent', async () => {
     const kept = uid();
     server.write('projects', kept, { name_ar: 'x' });
-    await store.applyPage({ changes: [{ table: 'projects', rows: [{ ...server.row('projects', kept) }] }], meta: [] });
+    await store.applyPage({
+      changes: [{ table: 'projects', rows: [{ ...server.row('projects', kept) }] }],
+      meta: [],
+    });
     const temp = uid();
     await store.mutate('projects', temp, { name_ar: 'temp', type: 'mosque' });
     await store.softDelete('projects', temp);

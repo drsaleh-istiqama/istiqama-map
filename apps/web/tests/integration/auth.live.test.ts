@@ -5,9 +5,10 @@
  *
  * Covers: e-mail OTP sign-in through `/dev/otp`, the PIN vault around the real supabase-js
  * client (nothing readable at rest, lock / offline unlock), token refresh, `my_context()`,
- * phone OTP, friendly errors, TOTP enrolment + verification for hq.admin (aal2) and sign-out.
+ * phone OTP, friendly errors, TOTP enrolment + verification for hq.admin and manager.tz
+ * (aal2, codes computed here from the returned secret) and sign-out.
  *
- * It uses the seeded staging accounts only and removes the TOTP factor it creates, so the
+ * It uses the seeded staging accounts only and removes the TOTP factors it creates, so the
  * accounts are left as the seed made them. No service-role key is used.
  */
 import { createHmac } from 'node:crypto';
@@ -46,14 +47,17 @@ const PIN = '739153';
 const COLLECTOR = 'collector.pemba@example.org';
 const COLLECTOR_PHONE = '+255700000001';
 const HQ = 'hq.admin@example.org';
+const MANAGER = 'manager.tz@example.org';
 
 /** Where an unfinished run leaves the secret of the factor it created (git-ignored). */
-const TOTP_STATE = path.join(
-  fileURLToPath(new URL('../../../..', import.meta.url)),
-  '.local',
-  'tmp',
-  'auth-live-totp.json',
-);
+function totpStateFile(email: string): string {
+  return path.join(
+    fileURLToPath(new URL('../../../..', import.meta.url)),
+    '.local',
+    'tmp',
+    `auth-live-totp-${email.split('@')[0]}.json`,
+  );
+}
 
 const resets: string[] = [];
 
@@ -258,103 +262,135 @@ describe('field collector — phone OTP', () => {
   });
 });
 
-describe('hq_admin — mandatory TOTP', () => {
-  let factorId: string | null = null;
+interface PrivilegedAccount {
+  email: string;
+  role: 'hq_admin' | 'country_manager';
+  /** Expected UI flags once the session is aal2. */
+  caps: { admin: boolean; manage: boolean; seeRestricted: boolean; review: boolean };
+}
 
-  /** A previous run died between verify and unenrol: finish its factor off with the saved secret. */
-  async function removeLeftoverFactor(verifiedFactorId: string): Promise<void> {
-    const saved = existsSync(TOTP_STATE)
-      ? (JSON.parse(readFileSync(TOTP_STATE, 'utf8')) as { factorId: string; secret: string })
-      : null;
-    if (saved?.factorId !== verifiedFactorId) {
-      throw new Error(
-        `${HQ} already has a verified TOTP factor (${verifiedFactorId}) that this test did not create. ` +
-          'Remove it (Auth admin API: DELETE /auth/v1/admin/users/<id>/factors/<factor id>, or npm run db:reset) and run again.',
-      );
+/**
+ * Brief §3: MFA is mandatory for hq_admin and country_manager. The same journey for both:
+ * held at the gate at aal1 → enrol → wrong code refused → right code → aal2 → app usable.
+ */
+function mandatoryTotp(account: PrivilegedAccount): void {
+  describe(`${account.role} — mandatory TOTP`, () => {
+    const stateFile = totpStateFile(account.email);
+    let factorId: string | null = null;
+
+    /** A previous run died between verify and unenrol: finish its factor off with the saved secret. */
+    async function removeLeftoverFactor(verifiedFactorId: string): Promise<void> {
+      const saved = existsSync(stateFile)
+        ? (JSON.parse(readFileSync(stateFile, 'utf8')) as { factorId: string; secret: string })
+        : null;
+      if (saved?.factorId !== verifiedFactorId) {
+        throw new Error(
+          `${account.email} already has a verified TOTP factor (${verifiedFactorId}) that this test did not create. ` +
+            'Remove it (Auth admin API: DELETE /auth/v1/admin/users/<id>/factors/<factor id>, or npm run db:reset) and run again.',
+        );
+      }
+      await verifyTotp(verifiedFactorId, totp(saved.secret));
+      const { error } = await supabase.auth.mfa.unenroll({ factorId: verifiedFactorId });
+      expect(error).toBeNull();
+      rmSync(stateFile, { force: true });
+      // Removing the factor ends the aal2 session's reason to exist: start again from aal1.
+      await signOut({ force: true });
+      await signInByEmail(account.email);
+      await pin.set(PIN);
+      await refreshContext();
     }
-    await verifyTotp(verifiedFactorId, totp(saved.secret));
-    const { error } = await supabase.auth.mfa.unenroll({ factorId: verifiedFactorId });
-    expect(error).toBeNull();
-    rmSync(TOTP_STATE, { force: true });
-    // Removing the factor ends the aal2 session's reason to exist: start again from aal1.
-    await signOut({ force: true });
-    await signInByEmail(HQ);
-    await pin.set(PIN);
-    await refreshContext();
-  }
 
-  afterAll(async () => {
-    if (factorId && tokenAal(session.value?.access_token) === 'aal2') {
-      const { error } = await supabase.auth.mfa.unenroll({ factorId });
-      if (!error) rmSync(TOTP_STATE, { force: true });
-    }
+    afterAll(async () => {
+      if (factorId && tokenAal(session.value?.access_token) === 'aal2') {
+        const { error } = await supabase.auth.mfa.unenroll({ factorId });
+        if (!error) rmSync(stateFile, { force: true });
+      }
+      if (session.value) await signOut({ force: true });
+    });
+
+    it('is held at the MFA gate after OTP sign-in', async () => {
+      await signInByEmail(account.email);
+      await pin.set(PIN);
+      const ctx = await refreshContext();
+      expect(ctx?.aal).toBe('aal1');
+      expect(ctx?.mfa_required).toBe(true);
+      expect(ctx?.roles).toEqual([]);
+      expect(ctx?.assigned_roles.map((r) => r.role)).toEqual([account.role]);
+      expect(authState.value).toBe('mfa');
+      expect(can.admin.value).toBe(false);
+      expect(can.write.value).toBe(false);
+      expect(can.seeRestricted.value).toBe(false);
+    });
+
+    it('enrols TOTP, rejects a wrong code, reaches aal2 with the right one', async () => {
+      const status = await getMfaStatus();
+      if (status.verifiedFactorId) await removeLeftoverFactor(status.verifiedFactorId);
+      expect((await getMfaStatus()).verifiedFactorId).toBeNull();
+
+      const enrolment = await startTotpEnrolment();
+      factorId = enrolment.factorId;
+      mkdirSync(path.dirname(stateFile), { recursive: true });
+      writeFileSync(stateFile, JSON.stringify({ factorId, secret: enrolment.secret }));
+      expect(enrolment.qrDataUrl.startsWith('data:image/svg+xml;charset=utf-8,%3Csvg')).toBe(true);
+      expect(enrolment.secret).toMatch(/^[A-Z2-7]{16,}$/);
+
+      const good = totp(enrolment.secret);
+      const bad = good === '000000' ? '111111' : '000000';
+      await expect(verifyTotp(factorId, bad)).rejects.toMatchObject({ kind: 'mfa_code_invalid' });
+      expect(authState.value).toBe('mfa');
+
+      await verifyTotp(factorId, totp(enrolment.secret));
+      expect(tokenAal(session.value?.access_token)).toBe('aal2');
+      const ctx = await refreshContext();
+      expect(ctx?.aal).toBe('aal2');
+      expect(ctx?.mfa_required).toBe(false);
+      expect(ctx?.capabilities.is_hq).toBe(account.role === 'hq_admin');
+      expect(ctx?.roles.map((r) => r.role)).toEqual([account.role]);
+      expect(authState.value).toBe('ready');
+      expect(can.admin.value).toBe(account.caps.admin);
+      expect(can.manage.value).toBe(account.caps.manage);
+      expect(can.seeRestricted.value).toBe(account.caps.seeRestricted);
+      expect(can.review.value).toBe(account.caps.review);
+      expect(can.write.value).toBe(true);
+      // Fixture capture: AUTH_LIVE_PRINT_CONTEXT=1 prints the aal2 payload (src/auth/__fixtures__).
+      if (process.env.AUTH_LIVE_PRINT_CONTEXT) console.info(JSON.stringify(ctx));
+
+      // Neither the secret nor the tokens are stored in the clear.
+      await vault.flush();
+      const text = await storedText();
+      expect(text).not.toContain(enrolment.secret);
+      expect(text).not.toContain(session.value!.access_token);
+    });
+
+    it('stays aal2 across lock / unlock and a later challenge is not needed', async () => {
+      pin.lock();
+      expect(authState.value).toBe('locked');
+      expect(await pin.unlock(PIN)).toBe(true);
+      expect(tokenAal(session.value?.access_token)).toBe('aal2');
+      expect(authState.value).toBe('ready');
+      expect((await getMfaStatus()).verifiedFactorId).toBe(factorId);
+    });
+
+    it('removes its factor and signs out', async () => {
+      const { error } = await supabase.auth.mfa.unenroll({ factorId: factorId! });
+      expect(error).toBeNull();
+      rmSync(stateFile, { force: true });
+      factorId = null;
+      await signOut({ force: true });
+      expect(session.value).toBeNull();
+      expect(authState.value).toBe('signed_out');
+    });
   });
+}
 
-  it('is held at the MFA gate after OTP sign-in', async () => {
-    await signInByEmail(HQ);
-    await pin.set(PIN);
-    const ctx = await refreshContext();
-    expect(ctx?.aal).toBe('aal1');
-    expect(ctx?.mfa_required).toBe(true);
-    expect(ctx?.roles).toEqual([]);
-    expect(ctx?.assigned_roles.map((r) => r.role)).toEqual(['hq_admin']);
-    expect(authState.value).toBe('mfa');
-    expect(can.admin.value).toBe(false);
-    expect(can.write.value).toBe(false);
-  });
+mandatoryTotp({
+  email: HQ,
+  role: 'hq_admin',
+  caps: { admin: true, manage: true, seeRestricted: true, review: true },
+});
 
-  it('enrols TOTP, rejects a wrong code, reaches aal2 with the right one', async () => {
-    const status = await getMfaStatus();
-    if (status.verifiedFactorId) await removeLeftoverFactor(status.verifiedFactorId);
-    expect((await getMfaStatus()).verifiedFactorId).toBeNull();
-
-    const enrolment = await startTotpEnrolment();
-    factorId = enrolment.factorId;
-    mkdirSync(path.dirname(TOTP_STATE), { recursive: true });
-    writeFileSync(TOTP_STATE, JSON.stringify({ factorId, secret: enrolment.secret }));
-    expect(enrolment.qrDataUrl.startsWith('data:image/svg+xml;charset=utf-8,%3Csvg')).toBe(true);
-    expect(enrolment.secret).toMatch(/^[A-Z2-7]{16,}$/);
-
-    const good = totp(enrolment.secret);
-    const bad = good === '000000' ? '111111' : '000000';
-    await expect(verifyTotp(factorId, bad)).rejects.toMatchObject({ kind: 'mfa_code_invalid' });
-    expect(authState.value).toBe('mfa');
-
-    await verifyTotp(factorId, totp(enrolment.secret));
-    expect(tokenAal(session.value?.access_token)).toBe('aal2');
-    const ctx = await refreshContext();
-    expect(ctx?.aal).toBe('aal2');
-    expect(ctx?.mfa_required).toBe(false);
-    expect(ctx?.capabilities.is_hq).toBe(true);
-    expect(ctx?.roles.map((r) => r.role)).toEqual(['hq_admin']);
-    expect(authState.value).toBe('ready');
-    expect(can.admin.value).toBe(true);
-    expect(can.seeRestricted.value).toBe(true);
-    if (process.env.AUTH_LIVE_PRINT_CONTEXT) console.info(JSON.stringify(ctx));
-
-    // Neither the secret nor the tokens are stored in the clear.
-    await vault.flush();
-    const text = await storedText();
-    expect(text).not.toContain(enrolment.secret);
-    expect(text).not.toContain(session.value!.access_token);
-  });
-
-  it('stays aal2 across lock / unlock and a later challenge is not needed', async () => {
-    pin.lock();
-    expect(authState.value).toBe('locked');
-    expect(await pin.unlock(PIN)).toBe(true);
-    expect(tokenAal(session.value?.access_token)).toBe('aal2');
-    expect(authState.value).toBe('ready');
-    expect((await getMfaStatus()).verifiedFactorId).toBe(factorId);
-  });
-
-  it('removes its factor and signs out', async () => {
-    const { error } = await supabase.auth.mfa.unenroll({ factorId: factorId! });
-    expect(error).toBeNull();
-    rmSync(TOTP_STATE, { force: true });
-    factorId = null;
-    await signOut({ force: true });
-    expect(session.value).toBeNull();
-    expect(authState.value).toBe('signed_out');
-  });
+mandatoryTotp({
+  email: MANAGER,
+  role: 'country_manager',
+  caps: { admin: false, manage: true, seeRestricted: true, review: true },
 });

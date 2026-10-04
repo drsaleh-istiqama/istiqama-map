@@ -86,7 +86,12 @@ export class SlidingWindowLimiter {
 
     const used = this.estimate(bucket, now);
     if (used + cost > this.limit) {
-      return { ok: false, limit: this.limit, remaining: 0, retryAfter: this.retryAfter(bucket, now, cost) };
+      return {
+        ok: false,
+        limit: this.limit,
+        remaining: 0,
+        retryAfter: this.retryAfter(bucket, now, cost),
+      };
     }
     bucket.current += cost;
     return {

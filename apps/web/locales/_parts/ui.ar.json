@@ -5,6 +5,8 @@
   "cancel": "إلغاء",
   "confirm": "تأكيد",
   "dismiss": "إغلاق الإشعار",
+  "other": "أخرى",
+  "otherPlaceholder": "اكتب إضافة قصيرة",
   "syncOnline": "متصل",
   "syncOffline": "غير متصل",
   "syncPushing": "جارٍ رفع البيانات…",

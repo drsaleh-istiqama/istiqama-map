@@ -11,7 +11,11 @@ export default defineConfig({
         test: {
           name: 'node',
           environment: 'node',
-          include: ['scripts/**/*.test.ts', 'supabase/functions/**/*.test.ts', 'load-tests/**/*.test.ts'],
+          include: [
+            'scripts/**/*.test.ts',
+            'supabase/functions/**/*.test.ts',
+            'load-tests/**/*.test.ts',
+          ],
         },
       },
     ],

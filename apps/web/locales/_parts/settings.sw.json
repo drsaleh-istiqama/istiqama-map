@@ -31,6 +31,8 @@
   "pinErrSame": "Chagua PIN tofauti na ya sasa.",
   "pinErrMismatch": "PIN mbili hazilingani.",
   "pinErrCurrent": "PIN ya sasa si sahihi.",
+  "pinErrCurrentLeft": "PIN ya sasa si sahihi. Majaribio yaliyobaki: {remaining}.",
+  "pinErrThrottled": "Majaribio mengi yasiyo sahihi. Subiri kidogo kisha ujaribu tena.",
   "pinErrSave": "Imeshindikana kuhifadhi PIN. Jaribu tena.",
   "lockNow": "Funga programu sasa",
   "signOut": "Ondoka",
@@ -49,5 +51,5 @@
   "aboutClear": "Futa orodha",
   "envDevelopment": "Uundaji",
   "envStaging": "Majaribio",
-  "envProduction": "Uzalishaji"
+  "envProduction": "Matumizi halisi"
 }

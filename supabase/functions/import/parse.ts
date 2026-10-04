@@ -48,7 +48,13 @@ export interface ParseOptions {
 }
 
 function isLegacyOrEncrypted(bytes: Uint8Array): boolean {
-  return bytes.length >= 4 && bytes[0] === 0xd0 && bytes[1] === 0xcf && bytes[2] === 0x11 && bytes[3] === 0xe0;
+  return (
+    bytes.length >= 4 &&
+    bytes[0] === 0xd0 &&
+    bytes[1] === 0xcf &&
+    bytes[2] === 0x11 &&
+    bytes[3] === 0xe0
+  );
 }
 
 function tooManyRows(max: number, found?: number): HttpError {
@@ -70,8 +76,10 @@ function finish(
 ): ParsedImport {
   const t = tableToObjects(table, rowNumbers);
   if (t.headerRow === 0) throw errors.validation('empty_file', 'The file contains no rows.');
-  if (t.headers.length === 0) throw errors.validation('no_header_row', 'The first row has no column titles.');
-  if (t.rows.length === 0) throw errors.validation('empty_file', 'The file has a header row but no data rows.');
+  if (t.headers.length === 0)
+    throw errors.validation('no_header_row', 'The first row has no column titles.');
+  if (t.rows.length === 0)
+    throw errors.validation('empty_file', 'The file has a header row but no data rows.');
   if (t.rows.length > maxRows) throw tooManyRows(maxRows, t.rows.length);
   if (t.duplicateHeaders.length > 0) warnings.push('duplicate_headers');
   if (t.unnamedColumns > 0) warnings.push('unnamed_columns');
@@ -92,7 +100,10 @@ function finish(
   };
 }
 
-export async function parseImportFile(bytes: Uint8Array, opts: ParseOptions): Promise<ParsedImport> {
+export async function parseImportFile(
+  bytes: Uint8Array,
+  opts: ParseOptions,
+): Promise<ParsedImport> {
   if (bytes.byteLength === 0) throw errors.validation('empty_file', 'The file is empty.');
   if (isLegacyOrEncrypted(bytes))
     throw errors.unsupportedMedia(
@@ -114,7 +125,10 @@ export async function parseImportFile(bytes: Uint8Array, opts: ParseOptions): Pr
           throw errors.tooLarge('file_too_large', 'The workbook is too large when unpacked.');
         case 'not_xlsx':
         case 'encrypted_or_legacy':
-          throw errors.unsupportedMedia('unsupported_file_type', 'Only .xlsx and .csv files can be imported.');
+          throw errors.unsupportedMedia(
+            'unsupported_file_type',
+            'Only .xlsx and .csv files can be imported.',
+          );
         case 'no_sheet':
           throw errors.validation('no_sheet', e.message);
         default:
@@ -125,13 +139,23 @@ export async function parseImportFile(bytes: Uint8Array, opts: ParseOptions): Pr
     if (sheet.formulaCells > 0) warnings.push('formulas_ignored');
     if (sheet.hasMacros) warnings.push('macros_ignored');
     if (sheet.columnsTruncated) warnings.push('columns_truncated');
-    return finish('xlsx', sheet.rows, sheet.rowNumbers, opts.maxRows, { sheet: sheet.name, sheets: sheet.sheetNames }, warnings);
+    return finish(
+      'xlsx',
+      sheet.rows,
+      sheet.rowNumbers,
+      opts.maxRows,
+      { sheet: sheet.name, sheets: sheet.sheetNames },
+      warnings,
+    );
   }
 
   const warnings: string[] = [];
   const decoded = decodeText(bytes);
   if (decoded.text.indexOf(String.fromCharCode(0)) >= 0)
-    throw errors.unsupportedMedia('unsupported_file_type', 'Only .xlsx and .csv files can be imported.');
+    throw errors.unsupportedMedia(
+      'unsupported_file_type',
+      'Only .xlsx and .csv files can be imported.',
+    );
   if (decoded.encoding === 'windows-1256') warnings.push('encoding_windows_1256');
   const csv = parseCsv(decoded.text, { delimiter: opts.delimiter });
   if (csv.rows.length > opts.maxRows * 2 + 1000) throw tooManyRows(opts.maxRows);

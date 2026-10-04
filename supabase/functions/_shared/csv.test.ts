@@ -20,7 +20,15 @@ const CRLF = CR + LF;
 
 describe('formula-injection guard', () => {
   it('prefixes text that starts with = + - @, a tab or a carriage return', () => {
-    for (const text of ['=1+1', '+255700000001', '-5', '@SUM(A1)', `${TAB}=1`, `${CR}=1`, `${TAB}text`]) {
+    for (const text of [
+      '=1+1',
+      '+255700000001',
+      '-5',
+      '@SUM(A1)',
+      `${TAB}=1`,
+      `${CR}=1`,
+      `${TAB}text`,
+    ]) {
       expect(looksLikeFormula(text), text).toBe(true);
       expect(guardFormula(text)).toBe(`'${text}`);
     }
@@ -37,7 +45,15 @@ describe('formula-injection guard', () => {
   });
 
   it('leaves ordinary text alone, Arabic included', () => {
-    for (const text of ['مسجد النور', 'Masjid An-Nur', 'a=b', '5-3', 'x@example.org', '', ' مسجد']) {
+    for (const text of [
+      'مسجد النور',
+      'Masjid An-Nur',
+      'a=b',
+      '5-3',
+      'x@example.org',
+      '',
+      ' مسجد',
+    ]) {
       expect(guardFormula(text)).toBe(text);
     }
   });
@@ -129,23 +145,42 @@ describe('parseCsv', () => {
   });
 
   it('accepts LF, CRLF and bare CR line ends, with or without a final line break', () => {
-    expect(parseCsv(`a,b${LF}1,2`).rows).toEqual([['a', 'b'], ['1', '2']]);
-    expect(parseCsv(`a,b${CR}1,2${CR}`).rows).toEqual([['a', 'b'], ['1', '2']]);
-    expect(parseCsv(`a,b${CRLF}1,2${CRLF}`).rows).toEqual([['a', 'b'], ['1', '2']]);
+    expect(parseCsv(`a,b${LF}1,2`).rows).toEqual([
+      ['a', 'b'],
+      ['1', '2'],
+    ]);
+    expect(parseCsv(`a,b${CR}1,2${CR}`).rows).toEqual([
+      ['a', 'b'],
+      ['1', '2'],
+    ]);
+    expect(parseCsv(`a,b${CRLF}1,2${CRLF}`).rows).toEqual([
+      ['a', 'b'],
+      ['1', '2'],
+    ]);
   });
 
   it('skips completely empty lines but keeps rows of empty cells', () => {
     const { rows, lines } = parseCsv(`a,b${LF}${LF}1,2${LF},${LF}${LF}`);
-    expect(rows).toEqual([['a', 'b'], ['1', '2'], ['', '']]);
+    expect(rows).toEqual([
+      ['a', 'b'],
+      ['1', '2'],
+      ['', ''],
+    ]);
     expect(lines).toEqual([1, 3, 4]);
   });
 
   it('detects semicolon and tab delimiters and honours "sep="', () => {
-    expect(parseCsv(`name;lat${LF}مسجد;-5,05`).rows).toEqual([['name', 'lat'], ['مسجد', '-5,05']]);
+    expect(parseCsv(`name;lat${LF}مسجد;-5,05`).rows).toEqual([
+      ['name', 'lat'],
+      ['مسجد', '-5,05'],
+    ]);
     expect(parseCsv(`name${TAB}lat${LF}x${TAB}1`).delimiter).toBe(TAB);
     const sep = parseCsv(`sep=;${LF}a;b${LF}1;2`);
     expect(sep.delimiter).toBe(';');
-    expect(sep.rows).toEqual([['a', 'b'], ['1', '2']]);
+    expect(sep.rows).toEqual([
+      ['a', 'b'],
+      ['1', '2'],
+    ]);
     expect(sep.lines).toEqual([2, 3]);
     expect(detectDelimiter(`"a;b",c,d${LF}`)).toBe(','); // a delimiter inside quotes does not count
   });
@@ -160,7 +195,9 @@ describe('parseCsv', () => {
   });
 
   it('never evaluates anything: formula-looking cells are plain text', () => {
-    expect(parseCsv(`=1+1,"=HYPERLINK(""http://x"")"${LF}`).rows).toEqual([['=1+1', '=HYPERLINK("http://x")']]);
+    expect(parseCsv(`=1+1,"=HYPERLINK(""http://x"")"${LF}`).rows).toEqual([
+      ['=1+1', '=HYPERLINK("http://x")'],
+    ]);
   });
 
   it('round-trips what toCsv writes (Arabic, quotes, line breaks, guard)', () => {

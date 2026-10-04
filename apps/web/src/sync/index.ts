@@ -57,8 +57,10 @@ let transportOverride: Transport | null = null;
 
 /** supabase-js implementation; `setTransport()` swaps it (tests, demos). */
 export const transport: Transport = {
-  push: (ops, device, options) => (transportOverride ?? supabaseTransport).push(ops, device, options),
-  pull: (cursor, limit, options) => (transportOverride ?? supabaseTransport).pull(cursor, limit, options),
+  push: (ops, device, options) =>
+    (transportOverride ?? supabaseTransport).push(ops, device, options),
+  pull: (cursor, limit, options) =>
+    (transportOverride ?? supabaseTransport).pull(cursor, limit, options),
   rpc: <T>(fn: string, args?: Record<string, unknown>, options?: Parameters<Transport['rpc']>[2]) =>
     (transportOverride ?? supabaseTransport).rpc<T>(fn, args, options),
 };

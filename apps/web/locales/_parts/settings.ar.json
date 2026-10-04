@@ -31,6 +31,8 @@
   "pinErrSame": "اختر رمزًا يختلف عن الرمز الحالي.",
   "pinErrMismatch": "الرمزان غير متطابقين.",
   "pinErrCurrent": "الرمز الحالي غير صحيح.",
+  "pinErrCurrentLeft": "الرمز الحالي غير صحيح. المحاولات المتبقية: {remaining}.",
+  "pinErrThrottled": "محاولات خاطئة كثيرة. انتظر قليلًا ثم أعد المحاولة.",
   "pinErrSave": "تعذّر حفظ الرمز. أعد المحاولة.",
   "lockNow": "قفل التطبيق الآن",
   "signOut": "تسجيل الخروج",
@@ -47,7 +49,7 @@
   "aboutCopied": "تم النسخ",
   "aboutCopyFailed": "تعذّر النسخ.",
   "aboutClear": "مسح السجل",
-  "envDevelopment": "تطوير",
-  "envStaging": "تجريبية",
-  "envProduction": "الإنتاج"
+  "envDevelopment": "التطوير",
+  "envStaging": "التجريب",
+  "envProduction": "التشغيل الفعلي"
 }

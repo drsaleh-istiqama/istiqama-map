@@ -156,7 +156,9 @@ describe('pointInPolygon', () => {
 
   it('degenerate geometry never matches', () => {
     expect(pointInPolygon({ lon: 0, lat: 0 }, { type: 'Polygon', coordinates: [] })).toBe(false);
-    expect(pointInPolygon({ lon: 0, lat: 0 }, { type: 'MultiPolygon', coordinates: [] })).toBe(false);
+    expect(pointInPolygon({ lon: 0, lat: 0 }, { type: 'MultiPolygon', coordinates: [] })).toBe(
+      false,
+    );
   });
 });
 
@@ -186,13 +188,19 @@ describe('bounding boxes', () => {
     for (let bearing = 0; bearing < 360; bearing += 15) {
       const rad = (bearing * Math.PI) / 180;
       const p = {
-        lon: PEMBA.lon + ((radius * Math.sin(rad)) / (111320 * Math.cos((PEMBA.lat * Math.PI) / 180))) * 0.999,
+        lon:
+          PEMBA.lon +
+          ((radius * Math.sin(rad)) / (111320 * Math.cos((PEMBA.lat * Math.PI) / 180))) * 0.999,
         lat: PEMBA.lat + ((radius * Math.cos(rad)) / 111320) * 0.999,
       };
       expect(bboxContains(box, p)).toBe(true);
     }
-    expect(haversineMeters({ lon: box[0], lat: PEMBA.lat }, { lon: box[2], lat: PEMBA.lat })).toBeLessThan(2 * radius * 1.02);
-    expect(haversineMeters({ lon: PEMBA.lon, lat: box[1] }, { lon: PEMBA.lon, lat: box[3] })).toBeLessThan(2 * radius * 1.02);
+    expect(
+      haversineMeters({ lon: box[0], lat: PEMBA.lat }, { lon: box[2], lat: PEMBA.lat }),
+    ).toBeLessThan(2 * radius * 1.02);
+    expect(
+      haversineMeters({ lon: PEMBA.lon, lat: box[1] }, { lon: PEMBA.lon, lat: box[3] }),
+    ).toBeLessThan(2 * radius * 1.02);
   });
 
   it('bboxAround is clamped at the poles and the date line', () => {
@@ -245,12 +253,14 @@ describe('grid for the local spatial index', () => {
       }
     }
     // points outside the box by more than one cell are not covered
-    expect(inRanges(gridCell({ lon: 39.80, lat: -5.05 }))).toBe(false);
-    expect(inRanges(gridCell({ lon: 39.75, lat: -5.10 }))).toBe(false);
+    expect(inRanges(gridCell({ lon: 39.8, lat: -5.05 }))).toBe(false);
+    expect(inRanges(gridCell({ lon: 39.75, lat: -5.1 }))).toBe(false);
   });
 
   it('gridRangesForBBox accepts corners in any order and refuses huge boxes', () => {
-    expect(gridRangesForBBox([39.768, -5.038, 39.741, -5.062])).toEqual(gridRangesForBBox([39.741, -5.062, 39.768, -5.038]));
+    expect(gridRangesForBBox([39.768, -5.038, 39.741, -5.062])).toEqual(
+      gridRangesForBBox([39.741, -5.062, 39.768, -5.038]),
+    );
     expect(gridRangesForBBox([30, -12, 42, 5])).toBeNull();
     expect(gridRangesForBBox([30, -12, 42, 5], 2000)).toHaveLength(1701);
   });

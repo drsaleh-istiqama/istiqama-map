@@ -319,11 +319,14 @@ export type SetViewFilters<T> = (patch: Partial<T> | ((previous: T) => T)) => vo
 /**
  * Filters of one view (`'map'`, `'projects'`, `'maintenance'`, …), kept apart from every
  * other view and remembered on this device. Returns `[filters, set, reset]`; `set` merges a
- * partial update. Pass the same `defaults` object shape on every call.
+ * partial update. `defaults` (optional, `{}` when omitted) are the values of a fresh view and
+ * what `reset` returns to; pass the same shape on every call.
+ *
+ *   const [filters, setFilters, resetFilters] = useViewFilters<ProjectFilter>('projects');
  */
 export function useViewFilters<T extends object>(
   viewKey: string,
-  defaults: T,
+  defaults: T = {} as T,
 ): [T, SetViewFilters<T>, () => void] {
   const store = filterStore(viewKey, defaults);
   const set: SetViewFilters<T> = (patch) => {

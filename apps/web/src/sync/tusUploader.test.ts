@@ -64,7 +64,10 @@ class FakeTusServer implements HttpStack {
       send: (body) =>
         new Promise<HttpResponse>((resolve, reject) => {
           aborted = reject;
-          void this.handle(method, url, headers, body as Buffer | null | undefined).then(resolve, reject);
+          void this.handle(method, url, headers, body as Buffer | null | undefined).then(
+            resolve,
+            reject,
+          );
         }),
     };
     return request;
@@ -86,7 +89,12 @@ class FakeTusServer implements HttpStack {
     headers: Record<string, string>,
     body: Buffer | null | undefined,
   ): Promise<HttpResponse> {
-    const recorded: Recorded = { method, url, headers: { ...headers }, bytes: body ? body.length : 0 };
+    const recorded: Recorded = {
+      method,
+      url,
+      headers: { ...headers },
+      bytes: body ? body.length : 0,
+    };
     this.requests.push(recorded);
     await this.onRequest?.(recorded);
     await new Promise((r) => setTimeout(r, 1));
@@ -105,7 +113,8 @@ class FakeTusServer implements HttpStack {
       }
       upload.chunks.push(Buffer.from(data));
     };
-    const offsetOf = (upload: StoredUpload): number => upload.chunks.reduce((n, c) => n + c.length, 0);
+    const offsetOf = (upload: StoredUpload): number =>
+      upload.chunks.reduce((n, c) => n + c.length, 0);
 
     if (method === 'POST' && url === ENDPOINT) {
       const metadata = Object.fromEntries(
@@ -115,18 +124,30 @@ class FakeTusServer implements HttpStack {
         }),
       );
       const location = `${ENDPOINT}/${++this.seq}`;
-      const upload: StoredUpload = { length: Number(headers['upload-length']), chunks: [], metadata };
+      const upload: StoredUpload = {
+        length: Number(headers['upload-length']),
+        chunks: [],
+        metadata,
+      };
       this.uploads.set(location, upload);
       accept(upload, body);
-      return this.response(201, { Location: location, 'Upload-Offset': String(offsetOf(upload)), 'Tus-Resumable': '1.0.0' });
+      return this.response(201, {
+        Location: location,
+        'Upload-Offset': String(offsetOf(upload)),
+        'Tus-Resumable': '1.0.0',
+      });
     }
     const upload = this.uploads.get(url);
     if (!upload) return this.response(404, {}, 'upload not found');
     if (method === 'HEAD') {
-      return this.response(200, { 'Upload-Offset': String(offsetOf(upload)), 'Upload-Length': String(upload.length) });
+      return this.response(200, {
+        'Upload-Offset': String(offsetOf(upload)),
+        'Upload-Length': String(upload.length),
+      });
     }
     if (method === 'PATCH') {
-      if (Number(headers['upload-offset']) !== offsetOf(upload)) return this.response(409, {}, 'offset mismatch');
+      if (Number(headers['upload-offset']) !== offsetOf(upload))
+        return this.response(409, {}, 'offset mismatch');
       accept(upload, body);
       return this.response(204, { 'Upload-Offset': String(offsetOf(upload)) });
     }
@@ -293,7 +314,10 @@ describe('tus uploader', () => {
       if (r.method === 'POST') tokens.push('tok-2');
     };
     await uploader.upload(request(payload(1500)).req);
-    expect(server.requests.map((r) => r.headers.authorization)).toEqual(['Bearer tok-1', 'Bearer tok-2']);
+    expect(server.requests.map((r) => r.headers.authorization)).toEqual([
+      'Bearer tok-1',
+      'Bearer tok-2',
+    ]);
   });
 
   it('fails as unauthenticated without touching the network when there is no session', async () => {
@@ -318,6 +342,8 @@ describe('tus uploader', () => {
 
     const already = new AbortController();
     already.abort();
-    expect((await failure(uploader.upload(request(payload(5), { signal: already.signal }).req))).kind).toBe('aborted');
+    expect(
+      (await failure(uploader.upload(request(payload(5), { signal: already.signal }).req))).kind,
+    ).toBe('aborted');
   });
 });

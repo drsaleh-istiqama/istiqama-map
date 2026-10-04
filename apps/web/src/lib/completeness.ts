@@ -34,7 +34,14 @@ export interface CompletenessChildren {
 
 export type CompletenessProject = Pick<
   ProjectRow,
-  'name_ar' | 'name_latin' | 'lon' | 'lat' | 'admin_area_id' | 'capacity' | 'build_year' | 'build_date'
+  | 'name_ar'
+  | 'name_latin'
+  | 'lon'
+  | 'lat'
+  | 'admin_area_id'
+  | 'capacity'
+  | 'build_year'
+  | 'build_date'
 >;
 
 /** PostgreSQL `btrim(text)` removes blanks only (not tabs or line breaks). */
@@ -59,7 +66,9 @@ export function completenessParts(
     // The server fills build_year from build_date before it scores the row.
     build_year:
       (project.build_year !== null && project.build_year !== undefined) ||
-      (project.build_date !== null && project.build_date !== undefined && project.build_date !== ''),
+      (project.build_date !== null &&
+        project.build_date !== undefined &&
+        project.build_date !== ''),
     photos: children.photos,
     land: children.land,
     facilities: children.facilities,
@@ -69,7 +78,10 @@ export function completenessParts(
 }
 
 /** Sum of the weights whose condition holds. */
-export function completenessScore(project: CompletenessProject, children: CompletenessChildren): number {
+export function completenessScore(
+  project: CompletenessProject,
+  children: CompletenessChildren,
+): number {
   const parts = completenessParts(project, children);
   let score = 0;
   for (const key of Object.keys(COMPLETENESS_WEIGHTS) as CompletenessKey[]) {
