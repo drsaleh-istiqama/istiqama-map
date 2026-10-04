@@ -1,0 +1,88 @@
+/*
+ * Design tokens — the single source for colours, type and spacing (docs/contracts/web.md §1).
+ * Institutional palette: navy #0f2545 + gold #c8a24a. Every text/background pair used by the
+ * UI kit meets WCAG AA (ratios noted where they are tight).
+ */
+:root {
+  /* Brand */
+  --c-navy: #0f2545;
+  --c-navy-600: #1c3a66;
+  --c-navy-900: #0a1a33;
+  --c-gold: #c8a24a; /* on navy: 6.4:1 — never as text on light surfaces (2.4:1) */
+  --c-gold-ink: #7a5c12; /* gold for text on light surfaces: 6.2:1 on white */
+  --c-gold-soft: #f6efdc;
+
+  /* Surfaces and text */
+  --c-bg: #f6f7f9;
+  --c-surface: #ffffff;
+  --c-surface-2: #eef1f5;
+  --c-text: #1b2433;
+  --c-muted: #5b6676; /* 5.8:1 on white, 5.4:1 on --c-bg */
+  --c-line: #d5dbe4;
+  --c-line-strong: #8a94a6; /* 3:1 on white: borders of inputs */
+  --c-on-navy: #ffffff;
+  --c-on-navy-muted: #c7d0de; /* 9.9:1 on navy */
+
+  /* Project status (contract §1) with soft backgrounds and AA ink for badges */
+  --c-active: #1f7a4d;
+  --c-active-ink: #17603c;
+  --c-active-soft: #e6f3ec;
+  --c-maintenance: #b54708;
+  --c-maintenance-ink: #93370d;
+  --c-maintenance-soft: #fdf0e3;
+  --c-building: #175cd3;
+  --c-building-ink: #1849a9;
+  --c-building-soft: #e8effc;
+  --c-inactive: #667085;
+  --c-inactive-ink: #475467;
+  --c-inactive-soft: #eef0f3;
+
+  /* Feedback */
+  --c-danger: #b42318;
+  --c-danger-soft: #fdecea;
+  --c-success: var(--c-active);
+  --c-success-soft: var(--c-active-soft);
+  --c-warning-bg: #8a4b08; /* offline banner: white text 6.8:1 */
+  --c-info-soft: var(--c-building-soft);
+
+  /* Focus ring: navy on light surfaces, gold on navy ones (see .on-navy in base.css) */
+  --c-focus: var(--c-navy);
+
+  /* Type */
+  --font: 'Tajawal', 'Segoe UI', Tahoma, system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Mono', 'Roboto Mono', Menlo, Consolas, monospace;
+  --fs-xs: 0.8125rem;
+  --fs-sm: 0.875rem;
+  --fs-md: 1rem;
+  --fs-lg: 1.125rem;
+  --fs-xl: 1.375rem;
+  --lh: 1.6;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-bold: 700;
+
+  /* Space, shape */
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 0.75rem;
+  --sp-4: 1rem;
+  --sp-5: 1.5rem;
+  --sp-6: 2rem;
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --tap: 44px; /* minimum touch target */
+
+  /* Layout */
+  --sidebar-w: 15.5rem;
+  --topbar-h: 3.5rem;
+  --bottomnav-h: 3.75rem;
+  --content-max: 72rem;
+  --z-nav: 20;
+  --z-banner: 30;
+  --z-modal: 100;
+  --z-toast: 200;
+
+  /* One light, cheap elevation — no blur-heavy shadows on low-end phones */
+  --elev: 0 1px 2px rgba(15, 37, 69, 0.12);
+}

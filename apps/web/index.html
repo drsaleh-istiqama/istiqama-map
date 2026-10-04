@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <!-- Content-Security-Policy: filled in from the environment by vite.config.ts (docs/SECURITY_HEADERS.md) -->
+    <!--csp-->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0f2545" />
+    <meta name="color-scheme" content="light" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <meta
+      name="description"
+      content="حصر المساجد ومدارس القرآن التابعة لجمعية الاستقامة ومتابعتها على خارطة رقمية"
+    />
+    <meta name="application-name" content="خارطة الاستقامة" />
+    <meta name="apple-mobile-web-app-title" content="خارطة الاستقامة" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <title>خارطة مشاريع الاستقامة</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+  </head>
+  <body>
+    <div id="app">
+      <!-- Shown until the application renders; styled by src/ui/base.css (no inline styles: strict CSP) -->
+      <div class="boot" aria-hidden="true">
+        <svg width="72" height="72" viewBox="0 0 512 512">
+          <rect width="512" height="512" rx="112" fill="#0f2545" />
+          <path
+            d="M256 424C256 424 134 300 134 214A122 122 0 0 1 378 214C378 300 256 424 256 424Z"
+            fill="#c8a24a"
+          />
+          <circle cx="256" cy="212" r="74" fill="#0f2545" />
+          <circle cx="256" cy="212" r="50" fill="#c8a24a" />
+          <circle cx="274" cy="200" r="42" fill="#0f2545" />
+        </svg>
+      </div>
+    </div>
+    <noscript>
+      <p>
+        يتطلب هذا التطبيق تفعيل JavaScript في المتصفح. — Programu hii inahitaji JavaScript. — This
+        application requires JavaScript.
+      </p>
+    </noscript>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

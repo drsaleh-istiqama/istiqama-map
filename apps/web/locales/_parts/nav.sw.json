@@ -1,0 +1,23 @@
+{
+  "main": "Urambazaji mkuu",
+  "map": "Ramani",
+  "projects": "Orodha ya miradi",
+  "projectsShort": "Miradi",
+  "add": "Ongeza mradi",
+  "addShort": "Ongeza",
+  "maintenance": "Matengenezo",
+  "reports": "Ripoti",
+  "more": "Zaidi",
+  "incomplete": "Rekodi pungufu",
+  "review": "Mapitio na uidhinishaji",
+  "people": "Watu",
+  "import": "Kuingiza data",
+  "admin": "Usimamizi",
+  "settings": "Mipangilio",
+  "account": "Akaunti",
+  "login": "Kuingia",
+  "editProject": "Hariri mradi",
+  "projectDetails": "Maelezo ya mradi",
+  "print": "Chapisha ripoti",
+  "maintenanceOpen": "Matengenezo yaliyo wazi: {count}"
+}

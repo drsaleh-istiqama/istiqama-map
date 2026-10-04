@@ -1,0 +1,335 @@
+/* Application shell. Mobile first: top bar, content, bottom navigation. ≥ 900 px: sidebar. */
+
+.shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    'banners'
+    'topbar'
+    'main'
+    'nav';
+  block-size: 100vh;
+  block-size: 100dvh;
+}
+.shell--desktop {
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-areas:
+    'sidebar banners'
+    'sidebar topbar'
+    'sidebar main';
+}
+.shell__banners {
+  grid-area: banners;
+}
+.shell__main {
+  grid-area: main;
+  min-block-size: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.shell__main:focus-visible {
+  outline: none; /* focus is moved here on navigation for screen readers; no ring around the page */
+}
+.shell-bare {
+  min-block-size: 100vh;
+  min-block-size: 100dvh;
+}
+
+/* ---------- Banners ---------- */
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  padding-block: var(--sp-2);
+  padding-inline: var(--sp-4);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+.banner--offline {
+  flex-wrap: nowrap;
+  background: var(--c-warning-bg);
+  color: #fff;
+  line-height: 1.45;
+  text-align: start;
+}
+.banner--update {
+  background: var(--c-navy);
+  color: var(--c-on-navy);
+}
+.banner__actions {
+  display: inline-flex;
+  gap: var(--sp-2);
+}
+
+/* ---------- Top bar ---------- */
+.topbar {
+  grid-area: topbar;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-block-size: var(--topbar-h);
+  padding-block: var(--sp-1);
+  padding-inline: var(--sp-3);
+  border-block-end: 1px solid var(--c-line);
+  background: var(--c-surface);
+}
+/* Title (+ demo badge): takes the free space; on phones the badge sits under the title. */
+.topbar__heading {
+  display: grid;
+  justify-items: start;
+  flex: 1 1 0;
+  min-inline-size: 0;
+}
+.topbar__heading .badge {
+  font-size: 0.6875rem;
+  line-height: 1.35;
+}
+.topbar__title {
+  max-inline-size: 100%;
+  overflow: hidden;
+  font-size: var(--fs-lg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.topbar__actions {
+  display: flex;
+  align-items: center;
+  flex: 0 1 auto;
+  gap: var(--sp-2);
+  min-inline-size: 0;
+}
+.brand-mark {
+  flex: none;
+  border-radius: 22%;
+}
+.shell--desktop .topbar {
+  gap: var(--sp-4);
+  padding-inline: var(--sp-5);
+}
+.shell--desktop .topbar__heading {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  /* The page title never gives way to the sync details: those shrink first. */
+  flex: 0 0 auto;
+  max-inline-size: 45%;
+}
+.shell--desktop .topbar__heading .badge {
+  flex: none;
+  font-size: var(--fs-xs);
+}
+.shell--desktop .topbar__title {
+  font-size: var(--fs-xl);
+}
+.shell--desktop .topbar__actions {
+  flex: 1 1 0;
+  justify-content: flex-end;
+}
+
+/* ---------- Sidebar (desktop) ---------- */
+.sidebar {
+  grid-area: sidebar;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-block-size: 0;
+  padding: var(--sp-4) var(--sp-3);
+  overflow-y: auto;
+  background: var(--c-navy);
+  color: var(--c-on-navy);
+}
+.sidebar__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding-block-end: var(--sp-4);
+  border-block-end: 1px solid rgba(255, 255, 255, 0.14);
+}
+.sidebar__brand strong,
+.sidebar__brand small {
+  display: block;
+}
+.sidebar__brand small {
+  color: var(--c-on-navy-muted);
+  font-size: var(--fs-xs);
+}
+.sidebar .nav {
+  flex: 1;
+}
+
+/* ---------- Navigation links ---------- */
+.nav ul {
+  display: grid;
+  gap: var(--sp-1);
+}
+.nav__link {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-block-size: var(--tap);
+  padding-block: var(--sp-2);
+  padding-inline: var(--sp-3);
+  border-radius: var(--radius);
+  color: inherit;
+  text-decoration: none;
+}
+.nav__icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.nav__count {
+  margin-inline-start: auto;
+  min-inline-size: 1.5rem;
+  padding-inline: var(--sp-1);
+  border-radius: 999px;
+  background: var(--c-gold);
+  color: var(--c-navy);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  text-align: center;
+}
+
+.nav--side .nav__link {
+  color: var(--c-on-navy-muted);
+}
+.nav--side .nav__link:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--c-on-navy);
+}
+.nav--side .nav__link--active,
+.nav--side .nav__link--active:hover {
+  background: var(--c-surface);
+  color: var(--c-navy);
+  font-weight: var(--fw-bold);
+}
+
+.nav--sheet {
+  margin-block: var(--sp-3);
+}
+.nav--sheet .nav__link {
+  border: 1px solid var(--c-line);
+}
+.nav--sheet .nav__link--active {
+  border-color: var(--c-navy);
+  background: var(--c-surface-2);
+  font-weight: var(--fw-bold);
+}
+
+/* ---------- Bottom navigation (phones) ---------- */
+.nav--bottom {
+  grid-area: nav;
+  z-index: var(--z-nav);
+  padding-block-end: env(safe-area-inset-bottom);
+  border-block-start: 1px solid var(--c-line);
+  background: var(--c-surface);
+}
+.nav--bottom ul {
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 0;
+}
+.nav--bottom .nav__link {
+  position: relative;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0;
+  min-block-size: var(--bottomnav-h);
+  padding: var(--sp-1);
+  border-radius: 0;
+  color: var(--c-muted);
+  font-size: var(--fs-xs);
+  line-height: 1.3;
+  text-align: center;
+}
+.nav--bottom .nav__label {
+  max-inline-size: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nav--bottom .nav__link--active {
+  color: var(--c-navy);
+  font-weight: var(--fw-bold);
+  box-shadow: inset 0 3px 0 var(--c-gold);
+}
+.nav--bottom .nav__link--add .nav__icon {
+  inline-size: 2.5rem;
+  block-size: 2.5rem;
+  border-radius: 50%;
+  background: var(--c-gold);
+  color: var(--c-navy);
+}
+.nav--bottom .nav__link--add {
+  color: var(--c-navy);
+}
+.nav--bottom .nav__count {
+  position: absolute;
+  inset-block-start: var(--sp-1);
+  inset-inline-end: 18%;
+  margin: 0;
+}
+
+/* ---------- Account card ---------- */
+.account {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-block-size: var(--tap);
+  padding: var(--sp-2);
+  border-radius: var(--radius);
+  color: inherit;
+  text-decoration: none;
+}
+.account__avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  inline-size: 2.5rem;
+  block-size: 2.5rem;
+  border-radius: 50%;
+  background: var(--c-gold);
+  color: var(--c-navy);
+  font-weight: var(--fw-bold);
+}
+.account__text {
+  display: grid;
+  min-inline-size: 0;
+}
+.account__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.account__role {
+  font-size: var(--fs-xs);
+  color: var(--c-muted);
+}
+.sidebar .account {
+  border-block-start: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 0;
+  padding-block-start: var(--sp-4);
+}
+.sidebar .account__role {
+  color: var(--c-on-navy-muted);
+}
+
+@media print {
+  .sidebar,
+  .topbar,
+  .nav--bottom,
+  .shell__banners {
+    display: none !important;
+  }
+  .shell {
+    display: block;
+    block-size: auto;
+  }
+  .shell__main {
+    overflow: visible;
+  }
+}

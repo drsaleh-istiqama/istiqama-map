@@ -1,0 +1,26 @@
+# Security and caching headers — Netlify / Cloudflare Pages format (brief §11).
+# The value of Content-Security-Policy below is a placeholder: vite.config.ts replaces it at
+# build time with the policy computed from the environment (Supabase origin, tiles origin,
+# optional Sentry ingest origin). Other hosts (nginx, Caddy): see docs/SECURITY_HEADERS.md.
+
+/*
+  Content-Security-Policy: __CSP__
+  Strict-Transport-Security: max-age=63072000; includeSubDomains
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Permissions-Policy: geolocation=(self), camera=(self), microphone=(), payment=(), usb=(), bluetooth=()
+  Cross-Origin-Opener-Policy: same-origin
+
+# Hashed build output never changes under the same name.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# The entry points must always be revalidated, or updates would never be seen.
+/index.html
+  Cache-Control: no-cache
+/sw.js
+  Cache-Control: no-cache
+/manifest.webmanifest
+  Cache-Control: no-cache
+  Content-Type: application/manifest+json; charset=utf-8

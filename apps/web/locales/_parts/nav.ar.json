@@ -1,0 +1,23 @@
+{
+  "main": "التنقل الرئيسي",
+  "map": "الخارطة",
+  "projects": "سجل المشاريع",
+  "projectsShort": "المشاريع",
+  "add": "إضافة مشروع",
+  "addShort": "إضافة",
+  "maintenance": "الصيانة",
+  "reports": "التقارير",
+  "more": "المزيد",
+  "incomplete": "سجلات ناقصة",
+  "review": "المراجعة والاعتماد",
+  "people": "الأشخاص",
+  "import": "الاستيراد",
+  "admin": "الإدارة",
+  "settings": "الإعدادات",
+  "account": "الحساب",
+  "login": "تسجيل الدخول",
+  "editProject": "تعديل مشروع",
+  "projectDetails": "تفاصيل المشروع",
+  "print": "طباعة تقرير",
+  "maintenanceOpen": "صيانة مفتوحة: {count}"
+}

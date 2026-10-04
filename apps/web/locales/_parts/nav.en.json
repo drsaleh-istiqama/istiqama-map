@@ -1,0 +1,23 @@
+{
+  "main": "Main navigation",
+  "map": "Map",
+  "projects": "Project register",
+  "projectsShort": "Projects",
+  "add": "Add project",
+  "addShort": "Add",
+  "maintenance": "Maintenance",
+  "reports": "Reports",
+  "more": "More",
+  "incomplete": "Incomplete records",
+  "review": "Review and approval",
+  "people": "People",
+  "import": "Import",
+  "admin": "Administration",
+  "settings": "Settings",
+  "account": "Account",
+  "login": "Sign in",
+  "editProject": "Edit project",
+  "projectDetails": "Project details",
+  "print": "Print report",
+  "maintenanceOpen": "Open maintenance: {count}"
+}
