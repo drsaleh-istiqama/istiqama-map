@@ -95,8 +95,10 @@ export function createTusUploader(deps: TusUploaderDeps): ResumableUploader {
           uploadDataDuringCreation: true,
           storeFingerprintForResuming: false,
           removeFingerprintOnSuccess: true,
+          // NOTE: no `authorization` here. It is set once per request in onBeforeRequest: in the
+          // browser tus-js-client uses XMLHttpRequest, whose setRequestHeader APPENDS a second
+          // value ("Bearer a, Bearer b") instead of replacing it, and the server rejects that.
           headers: {
-            authorization: `Bearer ${token}`,
             apikey: deps.anonKey,
             'x-device-id': deps.deviceId(),
             // Re-sending an object whose upload finished but was not recorded must not fail.
@@ -111,7 +113,7 @@ export function createTusUploader(deps: TusUploaderDeps): ResumableUploader {
           // Every TUS request is authenticated; long uploads outlive the access token.
           onBeforeRequest: async (request) => {
             const fresh = await deps.accessToken();
-            if (fresh) request.setHeader('authorization', `Bearer ${fresh}`);
+            request.setHeader('authorization', `Bearer ${fresh ?? token}`);
           },
           onUploadUrlAvailable: () => {
             if (upload.url) req.onUploadUrl(upload.url);

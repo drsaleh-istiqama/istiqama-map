@@ -165,8 +165,19 @@ async function importCountry(
 ): Promise<void> {
   const sources: SourceRecord[] = [];
   for (const input of inputs) {
+    // Short codes already used by live level-1 rows. When the whole level is replaced, rows the
+    // file does not mention are about to be retired (e.g. the staging seed's FALLBACK squares,
+    // which hold codes such as PN): their codes must not block the real areas, otherwise North
+    // Pemba falls back to its ISO suffix and projects get "TZ-06-…" instead of "TZ-PN-…".
+    const inFile = new Set(input.features.map((f) => f.code));
     const shortCodesInDb =
-      input.level === 1 ? await existingShortCodes(client, country.id) : new Map<string, string>();
+      input.level === 1
+        ? new Map(
+            [...(await existingShortCodes(client, country.id))].filter(
+              ([code]) => opts.file !== null || inFile.has(code),
+            ),
+          )
+        : new Map<string, string>();
     const prepared = prepareFeatures(names, country, input.level, input.features, shortCodesInDb);
     const result = await loadLevel(client, country, input.level, prepared, {
       overwriteNames: opts.overwriteNames,

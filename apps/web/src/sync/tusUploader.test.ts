@@ -52,8 +52,12 @@ class FakeTusServer implements HttpStack {
     const request: HttpRequest = {
       getMethod: () => method,
       getURL: () => url,
+      // XMLHttpRequest semantics (the browser stack of tus-js-client): setting a header twice
+      // APPENDS the value ("a, b") instead of replacing it. A Node-style replace here hid a real
+      // bug once (double Authorization → 403 "Invalid Compact JWS" in every browser upload).
       setHeader: (name, value) => {
-        headers[name.toLowerCase()] = value;
+        const key = name.toLowerCase();
+        headers[key] = key in headers ? `${headers[key]}, ${value}` : value;
       },
       getHeader: (name) => headers[name.toLowerCase()],
       setProgressHandler: () => undefined,
