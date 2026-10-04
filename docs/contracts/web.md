@@ -280,3 +280,29 @@ The mobile bottom bar shows: map, projects, add, maintenance, reports.
 `sync-pending-photos`, `conflict-row`,
 `conflict-keep-server`, `conflict-keep-client`, `review-approve`, `review-return`,
 `v2-migrate-accept`, `v2-import-file`, `lang-ar`, `lang-sw`, `lang-en`.
+
+## 5. Unit 3 shared pieces (feature modules)
+
+- **Enumerated values** are translated with `t('enum.<enum_key>.<code>')`, generated from the
+  database dictionary `private.enum_labels` by `scripts/gen-enum-locales.ts` (never retype them).
+  Keys: `project_type`, `project_status`, `record_state`, `staff_role`, `land_ownership`,
+  `student_transport`, `students_origin`, `maintenance_priority`, `maintenance_state`,
+  `guest_financial_capacity`, `location_source`, `boolean`, plus UI-only `photo_category`,
+  `gender`, `currency`.
+- **Option lists** (community multi-select) come from the synced `option_values` rows and are
+  shown with `pickName()`; the "other" code reveals the `<list>_other` free-text input.
+- `src/people/PersonPicker.tsx` (default export):
+  `<PersonPicker value={personId|null} onChange={(sel: { personId: string } | { newPerson: { name_ar: string; name_latin?: string; phone_e164?: string } }) => void} adminAreaId? role? testId? />`
+  — typing a name shows "possible matching people" (local `findLocalPersonCandidates`, plus
+  server `person_candidates` when online); the user explicitly chooses "same person" or "new
+  person". It never merges.
+- `src/map/MapView.tsx` default export, `src/map/index.ts` exports `pickLocation`,
+  `flyToProject`, `fitToFilter` (§3.8). MapLibre, PMTiles and the basemap style are loaded
+  only inside the lazy map chunk.
+- `src/photos/index.ts` exports §3.7; `PhotoEditor` keeps v2's flow (multi-select, camera with
+  preview → accept / retake / cancel, category + caption, delete, retake keeps the old photo
+  until the new one is accepted), max 10 photos, one cover.
+- `src/projects/labels.ts`: `typeLabel(code)`, `statusLabel(code)`, `recordStateLabel(code)`,
+  `StatusBadge`, `TypeIcon` — shared by list, details, map popups and reports.
+- Feature modules never edit `src/db` or `src/sync`; queries they need that do not exist yet go
+  in `src/<feature>/queries.ts` on top of the exported `db` (Dexie) instance, read-only.
