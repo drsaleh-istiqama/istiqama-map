@@ -3,7 +3,9 @@
 --
 --   photos   projects/{ISO2}/{project_id}/{photo_id}_{full|thumb}.{webp|jpg|jpeg}
 --            read  = whoever can read the project
---            write = whoever can write to the project (never viewer)
+--            write = whoever may edit the live project_photos row the object
+--                    belongs to (its creator with write scope, or a reviewer);
+--                    no object without a row (never viewer)
 --   exports / imports   only objects under a first folder = auth.uid()
 --   tiles    read for every signed-in user, write for hq_admin
 --   anon     nothing
@@ -11,10 +13,48 @@
 begin;
 set local search_path = public, extensions, tests;
 
-select plan(55);
+select plan(70);
 
 select tests.fixture_extra();
 select tests.fixture_storage();
+
+-- Photo rows whose objects the tests below upload (objects need a live row).
+insert into public.project_photos (id, created_by, project_id, storage_path_full, storage_path_thumb)
+select tests._uuid(x.k), tests.id(x.u), tests.id(x.p),
+       'projects/' || x.iso2 || '/' || tests.id(x.p)::text || '/' || tests._uuid(x.k)::text || '_full.webp',
+       'projects/' || x.iso2 || '/' || tests.id(x.p)::text || '/' || tests._uuid(x.k)::text || '_thumb.webp'
+from (values
+  ('new-photo-1', 'u_col_pemba',  'p_pemba_1', 'TZ'),
+  ('new-photo-2', 'u_col_tanga',  'p_tanga_1', 'TZ'),
+  ('new-photo-3', 'u_col_ke',     'p_ke_1',    'KE'),
+  ('new-photo-5', 'u_col_pemba',  'p_pemba_1', 'TZ'),
+  ('new-photo-6', 'u_col_tanga',  'p_tanga_1', 'TZ'),
+  ('new-photo-7', 'u_col_ke',     'p_ke_1',    'KE'),
+  ('pemba2-photo', 'u_col_pemba2', 'p_pemba_1', 'TZ'),
+  ('deleted-photo', 'u_col_pemba', 'p_pemba_1', 'TZ')
+) as x (k, u, p, iso2);
+update public.project_photos set deleted_at = now() where id = tests._uuid('deleted-photo');
+
+-- object name of a photo: (photo key or uuid, project key, kind.ext, iso2)
+create temporary table _names on commit drop as
+select 'fixture_full' as k,
+       (select storage_path_full from public.project_photos where id = tests.id('photo:p_pemba_1')) as name
+union all
+select 'fixture_jpg',
+       'projects/TZ/' || tests.id('p_pemba_1')::text || '/' || tests.id('photo:p_pemba_1')::text || '_full.jpg'
+union all
+select 'pemba2_full',
+       'projects/TZ/' || tests.id('p_pemba_1')::text || '/' || tests._uuid('pemba2-photo')::text || '_full.webp'
+union all
+select 'no_row',
+       'projects/TZ/' || tests.id('p_pemba_1')::text || '/' || tests._uuid('photo-without-row')::text || '_full.webp'
+union all
+select 'own_wrong_iso2',
+       'projects/KE/' || tests.id('p_pemba_1')::text || '/' || tests._uuid('new-photo-5')::text || '_full.webp'
+union all
+select 'own_deleted',
+       'projects/TZ/' || tests.id('p_pemba_1')::text || '/' || tests._uuid('deleted-photo')::text || '_full.webp';
+grant select on _names to public;
 
 -- Buckets ----------------------------------------------------------------------
 select results_eq(
@@ -129,6 +169,76 @@ select throws_ok(
 select is_empty(
   $$ delete from storage.objects where bucket_id = 'photos' returning 1 $$,
   'Pemba collector: cannot delete photo objects (retention is a server job)');
+select isnt_empty(
+  format($f$ update storage.objects set name = name where bucket_id = 'photos' and name = %L returning 1 $f$,
+         (select name from _names where k = 'fixture_full')),
+  'Pemba collector: can overwrite the object of its own photo of an approved project');
+select lives_ok(
+  format($f$ insert into storage.objects (bucket_id, name, owner) values ('photos', %L, auth.uid())
+             on conflict (bucket_id, name) do update set owner = excluded.owner $f$,
+         (select name from _names where k = 'fixture_full')),
+  'Pemba collector: upsert (TUS x-upsert) of the own photo object');
+select throws_ok(
+  format($f$ insert into storage.objects (bucket_id, name) values ('photos', %L) $f$,
+         (select name from _names where k = 'own_wrong_iso2')),
+  '42501', null, 'Pemba collector: the ISO2 segment must be the one of the row or of the project');
+select throws_ok(
+  format($f$ insert into storage.objects (bucket_id, name) values ('photos', %L) $f$,
+         (select name from _names where k = 'own_deleted')),
+  '42501', null, 'Pemba collector: no upload for a soft-deleted photo row');
+
+-- Another collector of the same branch: may add own photos to the project, but
+-- never write the objects of a photo row it may not edit (registry class "creator").
+select tests.login_as(tests.id('u_col_pemba2'), 'aal1');
+select is_empty(
+  format($f$ update storage.objects set name = name where bucket_id = 'photos' and name = %L returning 1 $f$,
+         (select name from _names where k = 'fixture_full')),
+  'second collector: cannot overwrite the photo object of another user''s (approved) project');
+select throws_ok(
+  format($f$ insert into storage.objects (bucket_id, name, owner) values ('photos', %L, auth.uid())
+             on conflict (bucket_id, name) do update set owner = excluded.owner $f$,
+         (select name from _names where k = 'fixture_full')),
+  '42501', null, 'second collector: cannot upsert over the photo object of another user');
+select throws_ok(
+  format($f$ insert into storage.objects (bucket_id, name) values ('photos', %L) $f$,
+         (select name from _names where k = 'fixture_jpg')),
+  '42501', null, 'second collector: cannot plant an object under another user''s photo row');
+select throws_ok(
+  format($f$ insert into storage.objects (bucket_id, name) values ('photos', %L) $f$,
+         (select name from _names where k = 'no_row')),
+  '42501', null, 'second collector: no object for a photo id without a live photo row');
+select lives_ok(
+  format($f$ insert into storage.objects (bucket_id, name) values ('photos', %L) $f$,
+         (select name from _names where k = 'pemba2_full')),
+  'second collector: can upload the object of its own photo row in a project of another user');
+select throws_ok(
+  format($f$ update storage.objects set name = %L where bucket_id = 'photos' and name = %L $f$,
+         (select name from _names where k = 'fixture_jpg'), (select name from _names where k = 'pemba2_full')),
+  '42501', null, 'second collector: cannot move an own object onto another user''s photo');
+select is_empty(
+  format($f$ update storage.objects set name = %L where bucket_id = 'photos' and name = %L returning 1 $f$,
+         replace((select name from _names where k = 'pemba2_full'), '_full.webp', '_full.jpg'),
+         (select name from _names where k = 'fixture_full')),
+  'second collector: cannot move another user''s photo object away');
+select is(
+  (select count(*)::int from storage.objects
+    where bucket_id = 'photos' and name = (select name from _names where k = 'fixture_full')),
+  1, 'the other user''s photo object is still in place');
+select tests.logout();
+select is(
+  (select record_state from public.projects where id = tests.id('p_pemba_1')), 'approved',
+  'the approved project is untouched');
+
+-- A reviewer may edit every photo row of its branch, so also its objects.
+select tests.login_as(tests.id('u_sup_pemba'), 'aal1');
+select isnt_empty(
+  format($f$ update storage.objects set name = name where bucket_id = 'photos' and name = %L returning 1 $f$,
+         (select name from _names where k = 'fixture_full')),
+  'branch_supervisor: can replace the photo object of a collector of the branch');
+select throws_ok(
+  format($f$ insert into storage.objects (bucket_id, name) values ('photos', %L) $f$,
+         (select name from _names where k = 'no_row')),
+  '42501', null, 'branch_supervisor: no object without a photo row either');
 
 select tests.login_as(tests.id('u_viewer_tz'), 'aal1');
 select throws_ok(

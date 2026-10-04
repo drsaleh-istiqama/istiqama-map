@@ -15,6 +15,8 @@
 --       INSERT/UPDATE  hq_admin; additionally a user may update the columns
 --               full_name / phone / preferred_language of the own profile
 --               (enforced by private.tg_profiles_guard)
+--       user_roles/profiles: no direct UPDATE may remove the last effective
+--               hq_admin (private.tg_keep_hq_admin, PT409 last_hq_admin)
 --
 -- All policies are for role `authenticated`; anon has neither privileges nor
 -- policies; service_role and the migration role bypass RLS.
@@ -191,6 +193,70 @@ drop trigger if exists t05_guard on public.profiles;
 create trigger t05_guard
   before update on public.profiles
   for each row execute function private.tg_profiles_guard();
+
+-- -----------------------------------------------------------------------------
+-- At least one effective hq_admin must remain: a live global hq_admin grant
+-- whose profile is active and not soft-deleted. admin_remove_role and
+-- admin_set_user_active refuse to remove the last one (PT409 last_hq_admin);
+-- the same rule applies to direct DML of hq_admin through the policies above
+-- (soft-deleting / re-scoping / re-assigning grants, deactivating or deleting
+-- profiles), otherwise the organisation could lock itself out of all
+-- administration with one UPDATE.
+--
+-- The triggers fire only for statements run by the API roles (the WHEN clause
+-- sees the role of the statement): SECURITY DEFINER code runs as the migration
+-- role and enforces its own rules; service_role and the migration role stay
+-- the break-glass path. They are AFTER ROW triggers, so the check runs after
+-- the whole statement and sees all of its rows. The function is SECURITY
+-- DEFINER because the caller may no longer see every grant once its own
+-- hq_admin grant is gone.
+-- -----------------------------------------------------------------------------
+create or replace function private.tg_keep_hq_admin()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, extensions, private, pg_temp
+as $$
+begin
+  if not exists (
+    select 1
+    from public.user_roles ur
+    join public.profiles p on p.id = ur.user_id
+    where ur.role = 'hq_admin'
+      and ur.scope_type = 'global'
+      and ur.deleted_at is null
+      and p.active
+      and p.deleted_at is null
+  ) then
+    raise exception 'last_hq_admin' using errcode = 'PT409',
+      detail = 'The last active hq_admin cannot be removed or deactivated.',
+      hint = 'Grant hq_admin to another active user first.';
+  end if;
+  return null;
+end;
+$$;
+
+comment on function private.tg_keep_hq_admin() is
+  'AFTER UPDATE trigger on user_roles/profiles for API roles: refuses a change that leaves no live global hq_admin grant with an active profile (PT409 last_hq_admin).';
+
+revoke execute on function private.tg_keep_hq_admin() from public, anon, authenticated;
+
+drop trigger if exists t85_keep_hq_admin on public.user_roles;
+create trigger t85_keep_hq_admin
+  after update on public.user_roles
+  for each row
+  when (current_user in ('authenticated', 'anon')
+        and old.role = 'hq_admin' and old.scope_type = 'global' and old.deleted_at is null)
+  execute function private.tg_keep_hq_admin();
+
+drop trigger if exists t85_keep_hq_admin on public.profiles;
+create trigger t85_keep_hq_admin
+  after update on public.profiles
+  for each row
+  when (current_user in ('authenticated', 'anon')
+        and old.active and old.deleted_at is null
+        and (not new.active or new.deleted_at is not null or new.id is distinct from old.id))
+  execute function private.tg_keep_hq_admin();
 
 -- -----------------------------------------------------------------------------
 -- devices (registration and heartbeat go through register_device / sync RPCs)

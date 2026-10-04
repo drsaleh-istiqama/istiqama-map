@@ -8,12 +8,12 @@ Read this instead of the SQL. Source files:
 |---|---|
 | `20261003001000_authz_helpers.sql` | `private.*` helpers (Appendix A.3) |
 | `20261003001100_rls_baseline_grants.sql` | RLS on + forced everywhere, all grants/revokes |
-| `20261003001200_rls_reference_admin.sql` | policies: reference tables, `profiles`, `user_roles`, `devices`; profile column guard |
+| `20261003001200_rls_reference_admin.sql` | policies: reference tables, `profiles`, `user_roles`, `devices`; profile column guard; last-hq_admin guard |
 | `20261003001300_rls_field_data.sql` | policies: projects, children, people, localities, donors, conflicts, notifications |
 | `20261003001400_rls_logs_jobs_restricted.sql` | policies: logs, job tables; restricted tables (none) |
 | `20261003001500_storage_buckets_policies.sql` | buckets + `storage.objects` policies |
 | `supabase/tests/00_helpers.test.sql` | `tests.*` harness and fixtures (Appendix A.4) |
-| `supabase/tests/10…16_*.test.sql` | 837 assertions proving the matrix below (isolation, roles, restricted + logs, admin tables, session/MFA, storage, catalog) |
+| `supabase/tests/10…16_*.test.sql` | 886 assertions proving the matrix below (isolation, roles, restricted + logs, admin tables, session/MFA, storage, catalog) |
 
 ## 1. Model in one page
 
@@ -71,7 +71,9 @@ private.project_scope(p_project uuid)
 
 -- added by this area (not in Appendix A.3)
 private.photo_object_project(p_name text) returns uuid   -- project id of a photos object name, NULL if malformed
+private.photo_object_writable(p_name text) returns boolean -- may the caller create/replace this photos object (§4.4)
 private.tg_profiles_guard()                              -- trigger t05_guard on profiles
+private.tg_keep_hq_admin()                               -- triggers t85_keep_hq_admin on user_roles, profiles (§4.1)
 private.authz_scope_all(text[]) / authz_scope_ids(text[], text) / authz_can(text[], uuid, uuid)  -- internal
 ```
 
@@ -171,8 +173,8 @@ of the *reference* rows only (valid session) and see nothing else.
 |---|---|---|---|---|---|---|
 | `countries`, `admin_areas`, `branches`, `option_values`, `fx_rates`, `map_packs` | S all | S all | S all | S I U all | S all | `<t>_select` (`session_ok`), `<t>_insert_hq`, `<t>_update_hq` |
 | `app_settings` | S `is_public` | S `is_public` | S `is_public` | S I U all | S `is_public` | `app_settings_select`, `_insert_hq`, `_update_hq` |
-| `profiles` | S own; U own¹ | S own; U own¹ | S own + users of own country²; U own¹ | S I U all | S own; U own¹ | `profiles_select_own/_hq/_manager`, `profiles_insert_hq`, `profiles_update_hq/_own` + trigger `t05_guard` |
-| `user_roles` | S own | S own | S own + grants scoped to own country² | S I U all | S own | `user_roles_select_own/_hq/_manager`, `_insert_hq`, `_update_hq` |
+| `profiles` | S own; U own¹ | S own; U own¹ | S own + users of own country²; U own¹ | S I U all | S own; U own¹ | `profiles_select_own/_hq/_manager`, `profiles_insert_hq`, `profiles_update_hq/_own` + triggers `t05_guard`, `t85_keep_hq_admin` |
+| `user_roles` | S own | S own | S own + grants scoped to own country² | S I U all | S own | `user_roles_select_own/_hq/_manager`, `_insert_hq`, `_update_hq` + trigger `t85_keep_hq_admin` |
 | `devices` | S own | S own | S own + devices of users of own country² | S I U all | S own | `devices_select_own/_hq/_manager`, `_insert_hq`, `_update_hq` |
 
 ¹ Only `full_name`, `phone`, `preferred_language` (trigger `t05_guard`, SQLSTATE `PT403`
@@ -184,6 +186,17 @@ that country, or `scope_type = 'branch'` and a branch of that country. Read-only
 Nobody can grant a role to themselves or anybody else by direct SQL except `hq_admin` at AAL2
 (`user_roles_insert_hq` / `_update_hq`). Device registration and heartbeat go through
 `register_device` (RPC), not direct DML.
+
+**At least one effective `hq_admin` remains** (a live `global` `hq_admin` grant whose profile
+is `active` and not soft-deleted). `admin_remove_role` / `admin_set_user_active` refuse to
+remove the last one, and so does direct DML: the AFTER UPDATE row triggers
+`t85_keep_hq_admin` on `user_roles` (old row = live global `hq_admin` grant: soft delete,
+re-scope, change of `role` or `user_id`) and on `profiles` (old row active and live: deactivate,
+soft delete, change of `id`) raise `PT409 last_hq_admin` when, after the whole statement, no
+effective `hq_admin` is left. They fire only for statements run by `authenticated`/`anon`
+(the trigger's `WHEN` sees the role of the statement): SECURITY DEFINER code checks for itself,
+and `service_role` / the migration role remain the break-glass path. Two administrators
+removing each other in concurrent transactions can still both succeed (same as the RPCs).
 
 ### 4.2 Field data (SELECT only; writes through RPC)
 
@@ -227,15 +240,30 @@ the client query.
 
 | Bucket | Read (select / signed URL) | Write (insert / update) | Delete |
 |---|---|---|---|
-| `photos` (private) `projects/{ISO2}/{project_id}/{photo_id}_{full\|thumb}.{webp\|jpg\|jpeg}` | caller can read the project (viewer included) | caller has write scope on the (live) project; name must match the layout exactly | nobody (service role: `purge-photos`) |
+| `photos` (private) `projects/{ISO2}/{project_id}/{photo_id}_{full\|thumb}.{webp\|jpg\|jpeg}` | caller can read the project (viewer included) | caller may edit the photo **row**: `{project_id}/{photo_id}` is a live `project_photos` row of a live project, and the caller is its creator with write scope on the project or a reviewer of the project (`private.photo_object_writable`; applies to insert, upsert/TUS overwrite and move — old and new name) | nobody (service role: `purge-photos`) |
 | `exports`, `imports` (private) `{auth.uid()}/…` | own folder | own folder | nobody |
 | `tiles` (public) | every signed-in user with a valid session; anonymous HTTP through the public endpoint | `hq_admin` | `hq_admin` |
 
-Notes: the project row must exist on the server before its photos are uploaded (push the
-outbox first). The ISO2 segment is checked for shape only, not against the project's country
-(a point near a border may be assigned to another country by the server). The `photos` bucket
-is limited to 5 MB and `image/webp`, `image/jpeg`; `imports` to 25 MB. `exports` objects may
-be written by the owner's JWT or by the service role.
+Notes: the project row **and the `project_photos` row** must exist on the server before the
+photo's objects are uploaded (push the outbox first; the photo queue already waits for both
+acknowledgements). A photo object is the content of its row, so it follows the row's edit
+rule (sync registry class `creator`): another collector of the branch can add own photos to
+any project in scope but cannot overwrite, plant or move the objects of somebody else's photo
+row; reviewers can. The object name's ISO2 segment must be the one of the row's
+`storage_path_full`/`storage_path_thumb` or the project's current country (the client may
+upload before its corrected path reaches the server: JPEG fallback, country assigned by the
+server); the extension may be any of the three. The `photos` bucket is limited to 5 MB and
+`image/webp`, `image/jpeg`; `imports` to 25 MB. `exports` objects may be written by the owner's
+JWT or by the service role.
+
+**Upload rate limiting (brief §11) — which layer.** The database bounds the *number* of photo
+objects: no object without a live photo row, at most 3 × 3 × 2 names per row, at most 10 live
+rows per project, and rows are written only through `sync_push` (rate limited, 120 calls/min).
+The *request rate* of uploads is not limited in the database: Storage evaluates these policies
+in a permission test that it rolls back (the local gateway does the same dry run), so a
+`private.rate_limit` counter inside a policy would not persist. It is limited in front of
+Storage — the local gateway (600 object uploads per user per minute, `local-gateway.md` §3.3)
+and, in production, an edge rule (see `local-gateway.md` "known gaps" item 2).
 
 ## 5. Table privileges of `authenticated` (pgTAP file 16 pins these lists)
 

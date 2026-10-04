@@ -121,11 +121,18 @@ missing indexes, regenerates `private.sync_changed_tables`).
 
 ## 3. `register_device(...)` → jsonb
 
-`{ "device_id": "…", "revoked": false, "revoked_at": null, "server_time": "…" }`
+`{ "device_id": "…", "revoked": false, "revoked_at": null, "session_ok": true, "server_time": "…" }`
 
 Upserts `devices(user_id, device_id)`: label, app version, user agent, `last_seen_at`.
 Call it after sign-in (and when the label or app version changes). A revoked device stays
-revoked: on `revoked: true` wipe local data and sign out. Errors: `PT422 invalid_device_id`,
+revoked: on `revoked: true` **or** `session_ok: false` wipe local data and sign out.
+**Nothing is written** when the session is not valid (`private.session_ok()` false: inactive
+account, revoked sessions, revoked `x-device-id` device) or when the named device row is
+revoked (also when the header is missing); the answer then only reports `revoked` /
+`revoked_at` of the existing row (if any) and `session_ok`. A valid caller re-registering a
+device row that an administrator soft-deleted (not revoked) brings it back
+(`deleted_at = null`): the device is in use and belongs on the sync-status board; blocking a
+device is `revoked_at`. Errors: `PT422 invalid_device_id`,
 `PT422 device_mismatch`, `PT429` (60 / minute). The per-cycle heartbeat with the pending
 counters is `report_device_status()` (see `people-admin.md` §7); `sync_push` stamps
 `devices.last_push_at`, a completed pull round stamps `devices.last_pull_at`.
@@ -243,9 +250,11 @@ Whole-call errors (HTTP error, nothing applied — retry the same batch later, i
      values → one `sync_conflicts` row per field (`state: open`), that field is left
      untouched, the remaining fields are written (`conflict`).
 7. **Delete** = soft delete (`deleted_at`). Unknown or already deleted row → `applied`
-   (no-op). A delete on a stale base still deletes (`merged`). Children of a deleted
-   project are **not** deleted on the server; the client drops them locally when the
-   project tombstone arrives.
+   (no-op). Otherwise: role class of `delete`, then the **workflow rules of §4.3** for the
+   row's current state (a delete is a state change: e.g. a collector cannot delete his
+   approved project or an approved locality). A delete on a stale base still deletes
+   (`merged`). Children of a deleted project are **not** deleted on the server; the client
+   drops them locally when the project tombstone arrives.
 8. One sub-transaction per op: a rejected op leaves no trace and does not affect the
    others. The audit trigger records the calling device for every row written.
 
@@ -255,19 +264,25 @@ Whole-call errors (HTTP error, nothing applied — retry the same batch later, i
 
 | Caller                        | Allowed                                                                                                                                                                                                                                                                                                                                                    |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| creator without review rights | insert as `draft` (default) or `submitted`; `draft → submitted`, `returned → submitted`, `approved → submitted`. Any edit of an `approved` record (or of its land, facilities, donors, staff, community profile) sets it back to `submitted`. `→ approved` / `→ returned` → `rejected/forbidden_transition`; anything else → `rejected/invalid_transition` |
-| reviewer in scope             | additionally `draft/submitted/returned → approved`, `submitted/approved → returned`; `reviewed_by`, `reviewed_at` are stamped by the server, `review_note` is stored                                                                                                                                                                                       |
+| creator without review rights | insert as `draft` (default) or `submitted`; `draft → submitted`, `returned → submitted`, `approved → submitted`. Any edit of an `approved` record (or of its land, facilities, donors, staff, community profile) sets it back to `submitted`. `→ approved` / `→ returned` → `rejected/forbidden_transition`; anything else → `rejected/invalid_transition`. **Delete** only while the record is `draft` or `returned`; a `submitted` or `approved` record → `rejected/forbidden_transition` (a reviewer deletes it, or returns it first) |
+| reviewer in scope             | additionally `draft/submitted/returned → approved`, `submitted/approved → returned`; `reviewed_by`, `reviewed_at` are stamped by the server, `review_note` is stored; may delete in any state                                                                                                                                                             |
 
 A record cannot leave `draft` without a location (`check_violation`, constraint
 `projects_geom_required_ck`). Adding maintenance entries or photos never changes the state.
 
-**`localities.status`** — collectors insert `proposed` only and may edit their own row while
-it is `proposed` (`locality_locked` afterwards); reviewers set `approved` (stamped) or back
-to `proposed`.
+**`localities.status`** — collectors insert `proposed` only and may edit or delete their own
+row while it is `proposed` (`locality_locked` afterwards); reviewers set `approved` (stamped)
+or back to `proposed`, and may change or delete any locality in scope.
 
 **`person_merge_requests`** — reviewers only; both persons must be in the reviewer's scope;
 insert as `pending`, `pending → rejected` (stamped). `merged` / `reverted` only through
-`merge_persons()` / `revert_person_merge()`. Persons are never merged by `sync_push`.
+`merge_persons()` / `revert_person_merge()`. Persons are never merged by `sync_push`. Only a
+`pending` request can be deleted (withdrawn); a decided one (`rejected`, `merged`,
+`reverted`) is the trace of the decision → `rejected/invalid_transition` — a merged request
+holds the undo data `revert_person_merge()` needs.
+
+A collector's client should therefore offer "delete" only for his `draft` / `returned`
+projects and his `proposed` localities; other deletes come back `rejected`.
 
 **`notifications`** — only the owner, only `read_at`.
 

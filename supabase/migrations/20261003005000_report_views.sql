@@ -45,6 +45,31 @@ $$;
 revoke execute on function private.require_service_role() from public, anon, authenticated;
 grant execute on function private.require_service_role() to service_role;
 
+-- Session gate of every user-facing RPC of migrations 0050-0059 (authz.md §3 rule 1). Called
+-- first, before any rate limit or read: no JWT user -> PT401; a revoked session, a deactivated
+-- or deleted account, or a revoked device (x-device-id) -> PT403 'session_revoked', the same
+-- error sync_pull / sync_push raise, so the client signs out. Several of these RPCs (own import
+-- batches, own export jobs, the template) use no authorisation helper and would otherwise keep
+-- working for a lost phone after admin_revoke_sessions / deactivation.
+create or replace function private.require_session()
+returns void
+language plpgsql
+stable
+set search_path = public, extensions, private, pg_temp
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'authentication required' using errcode = 'PT401';
+  end if;
+  if not coalesce(private.session_ok(), false) then
+    raise exception 'session_revoked' using errcode = 'PT403',
+      detail = 'The session, the account or this device has been revoked.';
+  end if;
+end;
+$$;
+
+revoke execute on function private.require_session() from public, anon, authenticated;
+
 -- Single-row bookkeeping table: when the report views were last refreshed.
 create table if not exists private.report_meta (
   id boolean primary key default true check (id),

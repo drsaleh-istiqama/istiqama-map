@@ -3,7 +3,7 @@
 begin;
 set local search_path = public, extensions, tests;
 
-select plan(45);
+select plan(50);
 
 select tests.fixture_extra();
 
@@ -145,6 +145,23 @@ select tests.login_as(tests.id('u_col_ke'), 'aal1');
 select throws_ok(format('select public.export_rows(%L, null, 10)', current_setting('t.job_ke')), 'PT409', null,
                  'export_rows: a finished job yields no more rows');
 select tests.logout();
+
+-- Session gate (authz.md §3 rule 1): a revoked session can neither page through nor cancel its own job.
+-- export_rows must fail (PT403) rather than return an empty "done" page that would finish the job
+-- as an empty file.
+update public.profiles set sessions_revoked_at = now() + interval '1 minute' where id = tests.id('u_mgr_tz');
+select tests.login_as(tests.id('u_mgr_tz'));
+select throws_ok(format('select public.export_rows(%L, null, 10)', current_setting('t.job_f')), 'PT403', 'session_revoked',
+                 'revoked session: export_rows fails');
+select throws_ok(format('select public.export_cancel(%L)', current_setting('t.job_f')), 'PT403', 'session_revoked',
+                 'revoked session: export_cancel refused');
+select throws_ok($$select public.export_columns('en')$$, 'PT403', 'session_revoked', 'revoked session: export_columns refused');
+select throws_ok($$select public.export_request('csv', 'en', '{}'::jsonb)$$, 'PT403', 'session_revoked',
+                 'revoked session: export_request refused');
+select tests.logout();
+update public.profiles set sessions_revoked_at = null where id = tests.id('u_mgr_tz');
+select is((select j.state from public.export_jobs j where j.id = current_setting('t.job_f')::uuid), 'running',
+          'revoked session: the job is untouched');
 
 select tests.login_as(tests.id('u_mgr_tz'));
 select is(public.export_cancel(current_setting('t.job_f')::uuid) ->> 'state', 'cancelled', 'export_cancel: the owner can cancel a running job');

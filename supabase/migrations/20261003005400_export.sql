@@ -29,9 +29,7 @@ declare
   v_columns jsonb;
   v_enums jsonb;
 begin
-  if auth.uid() is null then
-    raise exception 'authentication required' using errcode = 'PT401';
-  end if;
+  perform private.require_session();   -- PT401 no user, PT403 session_revoked
   if v_lang not in ('ar', 'sw', 'en') then
     raise exception 'unsupported language: %', v_lang using errcode = 'PT422';
   end if;
@@ -95,9 +93,7 @@ declare
   v_active integer;
   v_job public.export_jobs%rowtype;
 begin
-  if v_uid is null then
-    raise exception 'authentication required' using errcode = 'PT401';
-  end if;
+  perform private.require_session();   -- PT401 no user, PT403 session_revoked
   if v_format not in ('csv', 'xlsx') then
     raise exception 'unsupported export format: %', v_format using errcode = 'PT422';
   end if;
@@ -145,9 +141,8 @@ as $$
 declare
   v_job public.export_jobs%rowtype;
 begin
-  if auth.uid() is null then
-    raise exception 'authentication required' using errcode = 'PT401';
-  end if;
+  -- an "own rows" RPC that uses no scope helper: the session gate is the only check
+  perform private.require_session();   -- PT401 no user, PT403 session_revoked
 
   update public.export_jobs j
   set state = 'cancelled', finished_at = now()
@@ -223,9 +218,8 @@ declare
   v_comp_ids uuid[];
   v_sens_ids uuid[];
 begin
-  if v_uid is null then
-    raise exception 'authentication required' using errcode = 'PT401';
-  end if;
+  -- A revoked session must fail the job (PT403), not page through an empty scope as "done".
+  perform private.require_session();   -- PT401 no user, PT403 session_revoked
 
   select * into v_job
   from public.export_jobs j

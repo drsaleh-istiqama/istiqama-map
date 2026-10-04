@@ -69,7 +69,8 @@ create table private.sync_tables (
   protected_cols text[]  not null default '{}',   -- server-managed, dropped from client payloads
   immutable_cols text[]  not null default '{}',   -- set on insert, never changed afterwards
   writable_cols  text[],                          -- when set: the only columns a client may write
-  guard          text,                            -- private.<guard>(ctx, op, old, fields, reviewer)
+  guard          text,                            -- private.<guard>(ctx, op, old, fields, reviewer);
+                                                  -- runs on insert, update and delete (migration 0023)
 
   constraint sync_tables_scope_kind_ck check (
     scope_kind in ('global', 'country', 'row', 'project', 'staff', 'person', 'own', 'conflict', 'donor')),

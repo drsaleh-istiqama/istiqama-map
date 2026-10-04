@@ -50,9 +50,7 @@ declare
   v_sensitive_id uuid;
   v_entered_by jsonb;
 begin
-  if auth.uid() is null then
-    raise exception 'authentication required' using errcode = 'PT401';
-  end if;
+  perform private.require_session();   -- PT401 no user, PT403 session_revoked
   perform private.rate_limit('report:' || auth.uid()::text, 120, interval '1 minute');
 
   select * into v_p from public.projects p where p.id = p_id and p.deleted_at is null;
@@ -268,9 +266,7 @@ declare
   v_projects jsonb;
   v_total bigint;
 begin
-  if auth.uid() is null then
-    raise exception 'authentication required' using errcode = 'PT401';
-  end if;
+  perform private.require_session();   -- PT401 no user, PT403 session_revoked
   perform private.rate_limit('report:' || auth.uid()::text, 120, interval '1 minute');
 
   v_all := private.read_all();
@@ -405,9 +401,7 @@ declare
   v_result jsonb;
   v_branches jsonb;
 begin
-  if auth.uid() is null then
-    raise exception 'authentication required' using errcode = 'PT401';
-  end if;
+  perform private.require_session();   -- PT401 no user, PT403 session_revoked
   perform private.rate_limit('report:' || auth.uid()::text, 120, interval '1 minute');
 
   select * into v_chk from private.report_scope_check('country', p_id);

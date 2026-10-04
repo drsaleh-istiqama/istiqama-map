@@ -11,7 +11,8 @@
 -- The implementation is generic: it is driven by private.sync_tables and the
 -- system catalog (jsonb_populate_record for type coercion, format('%I') for
 -- identifiers). Table-specific workflow rules live in small guard functions
--- (private.sync_guard_<table>) named by the registry.
+-- (private.sync_guard_<table>) named by the registry; they run for inserts,
+-- updates AND deletes.
 --
 -- Field-level merge (brief §4.3):
 --   * base_version = current version          -> apply                    (applied)
@@ -192,20 +193,28 @@ $$;
 
 -- -----------------------------------------------------------------------------
 -- Guards. Signature (binding for new guards):
---   private.sync_guard_<table>(p_ctx, p_op 'insert'|'update', p_old jsonb, p_fields jsonb, p_reviewer boolean)
+--   private.sync_guard_<table>(p_ctx, p_op 'insert'|'update'|'delete', p_old jsonb, p_fields jsonb, p_reviewer boolean)
 -- returns {"fields": <client fields that take part in the field merge>,
 --          "force": <server-decided values, always applied>,
 --          "on_change": <applied only when at least one client field is applied>}
 -- and raises PT403/PT422 with a machine-readable message for forbidden input.
 -- Workflow columns never take part in the field merge: a transition is
 -- validated against the CURRENT server state.
+--
+-- 'delete' (soft delete) is called after the role-class check with p_old = the
+-- current row and p_fields = '{}'. The guard raises to refuse a delete that the
+-- workflow does not allow in the row's current state (a delete is a state
+-- change too: without this, a collector could remove a record he may no
+-- longer edit); its result is ignored. A guard without a delete rule returns.
 -- -----------------------------------------------------------------------------
 
 -- projects: record_state workflow (brief §3, ARCHITECTURE §2.3)
 --   collector : draft|returned -> submitted (may keep draft); any edit of a
---               submitted/approved record leaves it "submitted"
+--               submitted/approved record leaves it "submitted"; deletes his
+--               record only while it is draft or returned
 --   reviewer  : submitted -> approved|returned, approved -> returned (and may
---               approve a draft/returned record directly); stamps reviewed_by/at
+--               approve a draft/returned record directly); stamps reviewed_by/at;
+--               may delete in any state
 --   nobody else may set "approved"; review_note is a reviewer field
 create or replace function private.sync_guard_projects(
   p_ctx private.sync_ctx, p_op text, p_old jsonb, p_fields jsonb, p_reviewer boolean)
@@ -222,6 +231,19 @@ declare
   v_on_change jsonb := '{}'::jsonb;
   v_ok        boolean;
 begin
+  if p_op = 'delete' then
+    -- brief §3: a collector creates and edits his drafts. A record he submitted
+    -- waits for a reviewer, an approved one has been accepted by a reviewer:
+    -- removing either is a review decision (a collector cannot even move a
+    -- submitted record back to draft). Checking the current state also closes
+    -- the two-step path "edit approved (-> submitted), then delete".
+    if not p_reviewer and v_old is distinct from 'draft' and v_old is distinct from 'returned' then
+      raise exception 'forbidden_transition' using errcode = 'PT403',
+        detail = format('Only a reviewer may delete a record that is %s.', v_old);
+    end if;
+    return jsonb_build_object('fields', '{}'::jsonb, 'force', '{}'::jsonb, 'on_change', '{}'::jsonb);
+  end if;
+
   if v_req is not null and v_req not in ('draft', 'submitted', 'approved', 'returned') then
     raise exception 'invalid_record_state' using errcode = 'PT422';
   end if;
@@ -277,7 +299,8 @@ begin
 end;
 $$;
 
--- localities: collectors create/edit only "proposed" rows; reviewers approve.
+-- localities: collectors create/edit/delete only "proposed" rows; reviewers
+-- approve (and may change or delete any locality in scope).
 create or replace function private.sync_guard_localities(
   p_ctx private.sync_ctx, p_op text, p_old jsonb, p_fields jsonb, p_reviewer boolean)
 returns jsonb
@@ -291,6 +314,15 @@ declare
   v_fields jsonb := p_fields - 'status';
   v_force  jsonb := '{}'::jsonb;
 begin
+  if p_op = 'delete' then
+    -- same lock as for an edit (brief §2.1: a supervisor approves localities)
+    if not p_reviewer and v_old is distinct from 'proposed' then
+      raise exception 'locality_locked' using errcode = 'PT403',
+        detail = 'An approved locality can only be deleted by a reviewer.';
+    end if;
+    return jsonb_build_object('fields', '{}'::jsonb, 'force', '{}'::jsonb, 'on_change', '{}'::jsonb);
+  end if;
+
   if v_req is not null and v_req not in ('proposed', 'approved') then
     raise exception 'invalid_status' using errcode = 'PT422';
   end if;
@@ -399,8 +431,12 @@ begin
 end;
 $$;
 
--- person_merge_requests: a reviewer may file a pending request and reject it.
--- Merging / reverting happens only through merge_persons / revert_person_merge.
+-- person_merge_requests: a reviewer may file a pending request, reject it, or
+-- withdraw (delete) it while it is pending. Merging / reverting happens only
+-- through merge_persons / revert_person_merge. A decided request is the trace
+-- of the decision and cannot be deleted: a merged one holds the undo data that
+-- revert_person_merge needs (it ignores soft-deleted requests), so deleting it
+-- would make the merge irreversible (brief §2.4).
 create or replace function private.sync_guard_person_merge_requests(
   p_ctx private.sync_ctx, p_op text, p_old jsonb, p_fields jsonb, p_reviewer boolean)
 returns jsonb
@@ -417,6 +453,14 @@ declare
   v_country uuid;
   v_branch  uuid;
 begin
+  if p_op = 'delete' then
+    if v_old is distinct from 'pending' then
+      raise exception 'invalid_transition' using errcode = 'PT422',
+        detail = format('A merge request that is %s is kept as the trace of the decision; only a pending request can be withdrawn.', v_old);
+    end if;
+    return jsonb_build_object('fields', '{}'::jsonb, 'force', '{}'::jsonb, 'on_change', '{}'::jsonb);
+  end if;
+
   if p_op = 'insert' then
     if coalesce(v_req, 'pending') <> 'pending' then
       raise exception 'invalid_transition' using errcode = 'PT422',
@@ -603,6 +647,14 @@ begin
       (v_cur ->> 'created_by')::uuid = p_ctx.uid,
       v_scope.project_creator = p_ctx.uid,
       v_scope.owner_id = p_ctx.uid);
+
+    -- The workflow rules apply to a delete as to an edit, validated against the
+    -- current server state (sync.md §4.3): e.g. a collector cannot delete his
+    -- approved project or a locality that has been approved.
+    if reg.guard is not null then
+      execute format('select private.%I($1, $2, $3, $4, $5)', reg.guard)
+        using p_ctx, 'delete'::text, v_cur, '{}'::jsonb, v_reviewer;
+    end if;
 
     if v_base < v_cur_version then
       select count(*) > 0 into v_others_any

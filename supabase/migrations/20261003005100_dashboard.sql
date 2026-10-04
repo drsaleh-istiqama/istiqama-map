@@ -463,9 +463,7 @@ as $$
 declare
   v_chk record;
 begin
-  if auth.uid() is null then
-    raise exception 'authentication required' using errcode = 'PT401';
-  end if;
+  perform private.require_session();   -- PT401 no user, PT403 session_revoked
   if p_scope_type is null or p_scope_type not in ('global', 'country', 'branch') then
     raise exception 'invalid scope type: %', coalesce(p_scope_type, 'null') using errcode = 'PT422';
   end if;

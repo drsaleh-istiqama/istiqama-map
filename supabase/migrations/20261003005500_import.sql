@@ -1316,9 +1316,7 @@ declare
   v_lang text := coalesce(nullif(btrim(p_lang), ''), 'ar');
   v_columns jsonb;
 begin
-  if auth.uid() is null then
-    raise exception 'authentication required' using errcode = 'PT401';
-  end if;
+  perform private.require_session();   -- PT401 no user, PT403 session_revoked
   if v_lang not in ('ar', 'sw', 'en') then
     raise exception 'unsupported language: %', v_lang using errcode = 'PT422';
   end if;
@@ -1386,9 +1384,7 @@ declare
   v_path text;
   v_batch_id uuid := private.uuid_v7();
 begin
-  if v_uid is null then
-    raise exception 'authentication required' using errcode = 'PT401';
-  end if;
+  perform private.require_session();   -- PT401 no user, PT403 session_revoked
   if not (private.write_all()
           or cardinality(private.write_countries()) > 0
           or cardinality(private.write_branches()) > 0) then
@@ -1475,9 +1471,8 @@ declare
   v_last integer;
   v_more boolean;
 begin
-  if auth.uid() is null then
-    raise exception 'authentication required' using errcode = 'PT401';
-  end if;
+  -- "own rows" RPC: the owner check uses no scope helper, so the session gate is explicit
+  perform private.require_session();   -- PT401 no user, PT403 session_revoked
   if p_only is not null and p_only not in ('invalid', 'duplicate', 'valid', 'warnings', 'create', 'update', 'skip') then
     raise exception 'invalid filter: %', p_only using errcode = 'PT422';
   end if;
@@ -1545,9 +1540,7 @@ declare
   v_row public.import_rows%rowtype;
   v_target uuid;
 begin
-  if auth.uid() is null then
-    raise exception 'authentication required' using errcode = 'PT401';
-  end if;
+  perform private.require_session();   -- PT401 no user, PT403 session_revoked
   if p_action is null or p_action not in ('create', 'update', 'skip') then
     raise exception 'invalid action: %', coalesce(p_action, 'null') using errcode = 'PT422';
   end if;
@@ -1658,9 +1651,7 @@ declare
   v_detail text;
   v_sqlstate text;
 begin
-  if v_uid is null then
-    raise exception 'authentication required' using errcode = 'PT401';
-  end if;
+  perform private.require_session();   -- PT401 no user, PT403 session_revoked
 
   select * into v_batch
   from public.import_batches b
@@ -1921,6 +1912,13 @@ $$;
 
 -- ---------------------------------------------------------------------------------------------
 -- import_rollback(p_batch_id): undo the whole batch
+--
+-- Permissions are re-checked NOW, for every record, with the same rule as the commit
+-- (private.import_can_update: reviewers of the record's scope, or its creator inside the
+-- write scope while it is not approved). The rights the importer had at commit time do not
+-- carry over: a user who has since lost the role, whose record moved to another branch, or a
+-- collector whose record has been approved meanwhile cannot change it through a rollback.
+-- Such rows are left as they are ("applied"), counted in `kept` and in `no_access`.
 -- ---------------------------------------------------------------------------------------------
 
 create or replace function public.import_rollback(p_batch_id uuid)
@@ -1939,12 +1937,21 @@ declare
   v_id text;
   v_reverted integer := 0;
   v_kept integer := 0;
+  v_no_access integer := 0;
   v_conflicts integer := 0;
   v_del uuid[];
+  v_live boolean;
+  -- caller's capabilities, fetched once (authz.md §3 b)
+  v_r_all boolean;
+  v_r_countries uuid[];
+  v_r_branches uuid[];
+  v_w_all boolean;
+  v_w_countries uuid[];
+  v_w_branches uuid[];
 begin
-  if v_uid is null then
-    raise exception 'authentication required' using errcode = 'PT401';
-  end if;
+  -- The owner check below uses no scope helper: without this gate a revoked session, a
+  -- deactivated account or a revoked device could still undo (soft-delete / restore) records.
+  perform private.require_session();   -- PT401 no user, PT403 session_revoked
 
   select * into v_batch
   from public.import_batches b
@@ -1959,21 +1966,48 @@ begin
 
   perform private.rate_limit('import_rollback', 30, interval '1 hour');
 
+  v_r_all := private.review_all();
+  v_r_countries := private.review_countries();
+  v_r_branches := private.review_branches();
+  v_w_all := private.write_all();
+  v_w_countries := private.write_countries();
+  v_w_branches := private.write_branches();
+
   -- 1. Projects created by the batch (set-based: a handful of statements for the whole batch).
-  --    Still drafts -> soft-deleted with their children. Submitted / approved since the import
-  --    -> somebody's work now: kept, the row stays "applied" and is reported.
-  select coalesce(array_agg(p.id) filter (where p.record_state = 'draft'), '{}'::uuid[]),
-         count(*) filter (where p.record_state <> 'draft')
-    into v_del, v_kept
-  from public.import_rows ir
-  join public.projects p on p.id = ir.target_id and p.deleted_at is null
-  where ir.batch_id = p_batch_id and ir.deleted_at is null
-    and ir.state = 'applied' and ir.action = 'create';
+  --    Lock them first so that nobody submits or moves them halfway through.
+  perform 1
+  from public.projects p
+  where p.id in (select ir.target_id
+                 from public.import_rows ir
+                 where ir.batch_id = p_batch_id and ir.deleted_at is null
+                   and ir.state = 'applied' and ir.action = 'create')
+    and p.deleted_at is null
+  order by p.id
+  for update;
+
+  --    Still drafts that the caller may change -> soft-deleted with their children.
+  --    Submitted / approved since the import -> somebody's work now: kept, the row stays
+  --    "applied" and is reported. Drafts the caller may no longer change (outside its current
+  --    scope) -> kept as well, and counted in no_access.
+  --    Same rule as private.import_can_update(), evaluated with the triples (no helper per row).
+  select coalesce(array_agg(x.id) filter (where x.record_state = 'draft' and x.may), '{}'::uuid[]),
+         count(*) filter (where x.record_state <> 'draft' or not x.may),
+         count(*) filter (where x.record_state = 'draft' and not x.may)
+    into v_del, v_kept, v_no_access
+  from (
+    select p.id, p.record_state,
+           coalesce(
+             v_r_all or p.country_id = any (v_r_countries) or p.branch_id = any (v_r_branches)
+             or ((v_w_all or p.country_id = any (v_w_countries) or p.branch_id = any (v_w_branches))
+                 and p.created_by = v_uid and p.record_state <> 'approved'),
+             false) as may
+    from public.import_rows ir
+    join public.projects p on p.id = ir.target_id and p.deleted_at is null
+    where ir.batch_id = p_batch_id and ir.deleted_at is null
+      and ir.state = 'applied' and ir.action = 'create'
+  ) x;
 
   if cardinality(v_del) > 0 then
-    -- lock the projects first so that nobody submits them halfway through
-    perform 1 from public.projects p where p.id = any (v_del) order by p.id for update;
-
     foreach v_tbl in array array['project_land', 'project_facilities', 'community_profiles',
                                  'community_sensitive', 'project_donors', 'project_maintenance',
                                  'project_photos'] loop
@@ -2008,6 +2042,22 @@ begin
       and ir.state = 'applied' and ir.action = 'update'
     order by ir.row_no desc
   loop
+    -- lock the record, then re-check the caller's right to change it (as the commit did)
+    select p.deleted_at is null into v_live
+    from public.projects p
+    where p.id = r.target_id
+    for update;
+    if not found or not v_live then
+      -- deleted since the import: nothing is restored on a tombstone; the row stays "applied"
+      v_kept := v_kept + 1;
+      continue;
+    end if;
+    if not private.import_can_update(r.target_id) then
+      v_kept := v_kept + 1;
+      v_no_access := v_no_access + 1;
+      continue;
+    end if;
+
     -- rows created next to the updated project
     for v_tbl in select jsonb_object_keys(coalesce(r.pre_image -> 'created', '{}'::jsonb)) loop
       if v_tbl in ('project_donors', 'project_maintenance') then
@@ -2047,7 +2097,8 @@ begin
       rolled_back_at = now(),
       rolled_back_by = v_uid,
       stats = b.stats || jsonb_build_object('rollback', jsonb_build_object(
-                'reverted', v_reverted, 'kept', v_kept, 'conflicting_fields', v_conflicts))
+                'reverted', v_reverted, 'kept', v_kept, 'no_access', v_no_access,
+                'conflicting_fields', v_conflicts))
   where b.id = p_batch_id;
 
   perform private.import_refresh_stats(p_batch_id);
@@ -2055,6 +2106,7 @@ begin
     'rolled_back', true,
     'reverted', v_reverted,
     'kept', v_kept,
+    'no_access', v_no_access,
     'conflicting_fields', v_conflicts);
 end;
 $$;
@@ -2086,4 +2138,4 @@ comment on function public.import_set_action(uuid, integer, text, uuid) is
 comment on function public.import_commit(uuid) is
   'Applies a validated batch atomically: merges by external_id, creates new projects as drafts, stores pre-images.';
 comment on function public.import_rollback(uuid) is
-  'Undoes a committed batch: created drafts are soft-deleted, updated rows are restored from their pre-images.';
+  'Undoes a committed batch: created drafts are soft-deleted, updated rows are restored from their pre-images; records the caller may no longer change are kept (no_access).';

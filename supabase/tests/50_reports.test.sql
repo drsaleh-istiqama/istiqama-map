@@ -3,7 +3,7 @@
 begin;
 set local search_path = public, extensions, tests;
 
-select plan(67);
+select plan(71);
 
 select tests.fixture_extra();
 
@@ -208,6 +208,20 @@ select tests.login_as(tests.id('u_col_pemba'), 'aal1');
 select throws_ok(format('select public.report_country(%L)', tests.id('tz')), 'PT403', null,
                  'report_country: a branch user cannot read the country report');
 select tests.logout();
+
+-- Session gate: every report RPC refuses a revoked session with the sync error (the client signs out)
+update public.profiles set sessions_revoked_at = now() + interval '1 minute' where id = tests.id('u_mgr_tz');
+select tests.login_as(tests.id('u_mgr_tz'));
+select throws_ok(format('select public.dashboard(%L, %L)', 'branch', tests.id('br_pemba')), 'PT403', 'session_revoked',
+                 'revoked session: dashboard refused');
+select throws_ok(format('select public.report_project(%L)', tests.id('p_pemba_1')), 'PT403', 'session_revoked',
+                 'revoked session: report_project refused');
+select throws_ok(format('select public.report_donor(%L)', tests.id('donor:p_pemba_1')), 'PT403', 'session_revoked',
+                 'revoked session: report_donor refused');
+select throws_ok(format('select public.report_country(%L)', tests.id('tz')), 'PT403', 'session_revoked',
+                 'revoked session: report_country refused');
+select tests.logout();
+update public.profiles set sessions_revoked_at = null where id = tests.id('u_mgr_tz');
 
 select * from finish();
 rollback;

@@ -7,6 +7,16 @@ Spec: `docs/BRIEF.md` §5 (materialized views), §9 (dashboard, export, PDF), §
 All RPCs are `SECURITY DEFINER` with their own authorisation, pinned `search_path`, no `anon`
 access. Errors use the project codes: `PT401` no user, `PT403` forbidden, `PT404` not found /
 not yours, `PT409` wrong state, `PT422` validation, `PT429` rate limit.
+
+**Session gate.** Every RPC called with a user JWT (all rows below except the service-role ones)
+starts with `private.require_session()`: no JWT user → `PT401`; a revoked session
+(`profiles.sessions_revoked_at`), a deactivated / deleted account or a revoked device
+(`x-device-id`) → `PT403` with message `session_revoked` — the same error as `sync_pull` /
+`sync_push`, so the client signs out. The check runs before any rate limit, read or write; it
+also covers the owner-only RPCs (`import_preview`, `import_set_action`, `import_commit`,
+`import_rollback`, `export_rows`, `export_cancel`) whose owner check uses no scope helper. A
+revoked session in the middle of an export makes `export_rows` fail (the job ends `failed`), it
+never returns an empty "done" page.
 Functions that write (rate limit, access log, jobs) are `VOLATILE` → call them with **POST**
 (`supabase.rpc()` default). `export_columns`, `import_template`, `import_preview` are `STABLE`.
 
@@ -409,15 +419,26 @@ summary + `{ "committed": false, "failed_row": 17, "error": { "code": "<sqlstate
 
 ### `import_rollback(p_batch_id)`
 Only for a `committed` batch (owner or hq_admin).
+- **Rights are re-checked at rollback time, per record**, with the commit's rule
+  (`private.import_can_update`): reviewers of the record's scope (hq_admin: every record), or its
+  creator inside the caller's *current* write scope while the record is not approved. The rights the
+  importer had at commit time do not carry over. A row whose record the caller may no longer change
+  (role removed, record moved to another branch, or — for a collector — record approved since) is
+  left as it is: the row stays `applied` and is counted in `kept` **and** in `no_access`. The batch
+  still becomes `rolled_back` (such rows cannot be rolled back later by somebody else; hq_admin
+  should roll back instead of the owner when that matters).
 - Created projects that are still **drafts** are soft-deleted together with their children, and their
   `external_id` is released (so the corrected file can be imported again). Created projects that
   have meanwhile been submitted / approved are **kept** and counted in `kept`.
 - Updated rows are restored field by field from the pre-image; a field that somebody changed after
   the import is left alone and counted in `conflicting_fields`. Child rows created by the batch are
-  soft-deleted. Proposed localities and donors created by the batch are soft-deleted when nothing
-  else uses them.
+  soft-deleted. A target project that has been soft-deleted since the import is not touched (row
+  stays `applied`, counted in `kept`). Proposed localities and donors created by the batch are
+  soft-deleted when nothing else uses them.
 
-Response: summary (`state: "rolled_back"`) + `{ "rolled_back": true, "reverted": n, "kept": n, "conflicting_fields": n }`.
+Response: summary (`state: "rolled_back"`) + `{ "rolled_back": true, "reverted": n, "kept": n, "no_access": n, "conflicting_fields": n }`
+(`kept` = applied rows left in place for any reason; `no_access` = the part of `kept` due to the
+caller's current rights — the UI can suggest asking an administrator).
 
 v2 migration: a v2 JSON file may be sent through `import_stage` with `source_kind: "v2_json"` /
 `"v2_local"` after mapping each v2 project to template keys; people and salaries of v2 must go
@@ -443,6 +464,8 @@ hard-deleted.
 ## 7. Private helpers other migrations may use
 
 - `private.require_service_role()` — raises `PT403` unless there is no JWT or its role is `service_role`.
+- `private.require_session()` — the session gate above (`PT401` no user, `PT403 session_revoked`);
+  not executable by API roles, call it from SECURITY DEFINER code.
 - `private.nil_uuid()`, `private.enum_label(enum_key, code, lang)`.
 - `private.enum_labels(enum_key, code, sort_order, ar, sw, en)` — single source of the ar / sw / en
   labels of enumerated values (the web locale files should stay in sync with it).

@@ -7,11 +7,12 @@
 --   never hard-deleted.
 --   profiles, user_roles, devices: own rows; hq_admin everything;
 --   country_manager the users of the own country (read-only).
+--   No direct UPDATE may remove the last effective hq_admin.
 -- =============================================================================
 begin;
 set local search_path = public, extensions, tests;
 
-select plan(117);
+select plan(127);
 
 select tests.fixture_extra();
 -- A signed-in user with a profile but without any role.
@@ -303,6 +304,65 @@ select is(tests.visible('devices', tests.kind_ids('device')),
 select lives_ok(
   $$ update public.devices set revoked_at = now() where id = tests.id('device:u_col_ke') $$,
   'hq_admin: can revoke a device');
+
+-- -----------------------------------------------------------------------------
+-- F. The last effective hq_admin (live global grant + active profile) cannot be
+--    removed by direct DML either (admin_remove_role / admin_set_user_active
+--    refuse it too; trigger t85_keep_hq_admin on user_roles and profiles)
+-- -----------------------------------------------------------------------------
+select tests.logout();
+-- u_hq is the only effective hq_admin from here on (seed data may hold others)
+update public.user_roles set deleted_at = now()
+where role = 'hq_admin' and deleted_at is null and user_id <> tests.id('u_hq');
+select tests.create_user('u_t13_inactive@example.org', null, null, null);
+update public.profiles set active = false where id = tests._uuid('user:u_t13_inactive@example.org');
+
+select tests.login_as(tests.id('u_hq'), 'aal2');
+select throws_ok(
+  $$ update public.user_roles set deleted_at = now() where role = 'hq_admin' and deleted_at is null $$,
+  'PT409', 'last_hq_admin', 'hq_admin: cannot soft-delete the last hq_admin grant by direct UPDATE');
+select throws_ok(
+  format($f$ update public.user_roles set role = 'country_manager', scope_type = 'country', scope_id = %L
+             where user_id = auth.uid() and role = 'hq_admin' $f$, tests.id('tz')),
+  'PT409', 'last_hq_admin', 'hq_admin: cannot re-scope the last hq_admin grant');
+select throws_ok(
+  format($f$ update public.user_roles set user_id = %L where user_id = auth.uid() and role = 'hq_admin' $f$,
+         tests._uuid('user:u_t13_inactive@example.org')),
+  'PT409', 'last_hq_admin', 'hq_admin: cannot hand the last hq_admin grant to an inactive user');
+select throws_ok(
+  $$ update public.profiles set active = false where id = auth.uid() $$,
+  'PT409', 'last_hq_admin', 'hq_admin: cannot deactivate the profile of the last hq_admin');
+select throws_ok(
+  $$ update public.profiles set deleted_at = now() where id = auth.uid() $$,
+  'PT409', 'last_hq_admin', 'hq_admin: cannot soft-delete the profile of the last hq_admin');
+select lives_ok(
+  $$ update public.profiles set full_name = 'Head office' where id = auth.uid() $$,
+  'hq_admin: other changes of the own profile are not affected');
+select tests.logout();
+select is(
+  (select count(*)::int
+     from public.user_roles ur
+     join public.profiles p on p.id = ur.user_id
+    where ur.user_id = tests.id('u_hq') and ur.role = 'hq_admin' and ur.scope_type = 'global'
+      and ur.deleted_at is null and p.active and p.deleted_at is null),
+  1, 'the last hq_admin is still in place after the refused statements');
+
+-- With a second hq_admin the handover works by direct DML (the check must see the
+-- other grant although the caller is no longer hq_admin after its own change).
+select tests.create_user('u_t13_hq2@example.org', 'hq_admin', 'global', null);
+select tests.login_as(tests.id('u_hq'), 'aal2');
+select lives_ok(
+  $$ update public.user_roles set deleted_at = now() where user_id = auth.uid() and role = 'hq_admin' $$,
+  'hq_admin: can remove the own grant while another hq_admin remains');
+select tests.login_as(tests._uuid('user:u_t13_hq2@example.org'), 'aal2');
+select throws_ok(
+  $$ update public.profiles set active = false where id = auth.uid() $$,
+  'PT409', 'last_hq_admin', 'the remaining hq_admin is now the last one');
+select tests.logout();
+select lives_ok(
+  format($f$ update public.user_roles set deleted_at = now() where user_id = %L and role = 'hq_admin' $f$,
+         tests._uuid('user:u_t13_hq2@example.org')),
+  'migration role (break-glass) and SECURITY DEFINER code are not restricted by the trigger');
 
 select tests.logout();
 select * from finish();

@@ -5,7 +5,7 @@
 begin;
 set local search_path = public, extensions, tests;
 
-select plan(45);
+select plan(51);
 
 do $$ begin perform tests.fixture(); end $$;
 
@@ -358,6 +358,49 @@ select throws_ok(
   format('select pg_temp.reg(%L::uuid, %L, %L)', tests.id('u_col_pemba'), 'dev-header', 'dev-argument'),
   'PT422', 'device_mismatch',
   'register_device: x-device-id header and argument must match');
+
+select is(
+  pg_temp.reg(tests.id('u_col_pemba'), 'dev-reg-ok', 'dev-reg-ok') - 'server_time',
+  '{"device_id": "dev-reg-ok", "revoked": false, "revoked_at": null, "session_ok": true}'::jsonb,
+  'register_device: a valid session gets {revoked: false, session_ok: true}');
+
+-- No helper is used, so register_device checks session_ok() itself (authz.md
+-- §3 rule 1): an inactive account, revoked sessions or a revoked device write
+-- nothing; the answer only tells the client to wipe and sign out.
+update public.profiles set active = false where id = tests.id('u_col_ke');
+select is(
+  pg_temp.reg(tests.id('u_col_ke'), 'dev-reg-ke', 'dev-reg-ke') - 'server_time',
+  '{"device_id": "dev-reg-ke", "revoked": false, "revoked_at": null, "session_ok": false}'::jsonb,
+  'register_device for an inactive account answers session_ok = false ...');
+select is(
+  (select count(*)::int from public.devices d where d.user_id = tests.id('u_col_ke') and d.device_id = 'dev-reg-ke'),
+  0, '... and stores no device row');
+update public.profiles set active = true where id = tests.id('u_col_ke');
+
+-- a revoked device that an administrator also removed from the board, named
+-- without the x-device-id header (session_ok() cannot see it then)
+update public.devices
+set label = 'Lost phone', app_version = '2.0.0', last_seen_at = '2026-01-01T00:00:00Z', deleted_at = now()
+where user_id = tests.id('u_col_pemba') and device_id = 'dev-reg-1';
+select is(
+  (pg_temp.reg(tests.id('u_col_pemba'), null, 'dev-reg-1') ->> 'revoked')::boolean, true,
+  'register_device without the header still reports the revoked device ...');
+select is(
+  (select row(d.label, d.app_version, d.last_seen_at, d.deleted_at is not null, d.revoked_at is not null)::text
+   from public.devices d where d.user_id = tests.id('u_col_pemba') and d.device_id = 'dev-reg-1'),
+  row('Lost phone'::text, '2.0.0'::text, '2026-01-01T00:00:00Z'::timestamptz, true, true)::text,
+  '... and does not touch its row (no new label / version / heartbeat, not brought back to the board)');
+
+-- a device in use that is not revoked comes back to the board when it registers
+update public.devices set deleted_at = now()
+where user_id = tests.id('u_col_pemba') and device_id = 'dev-reg-ok';
+do $$ begin
+  perform pg_temp.reg(tests.id('u_col_pemba'), 'dev-reg-ok', 'dev-reg-ok');
+end $$;
+select is(
+  (select d.deleted_at from public.devices d where d.user_id = tests.id('u_col_pemba') and d.device_id = 'dev-reg-ok'),
+  null::timestamptz,
+  'register_device from a valid session brings back a device row an administrator soft-deleted (not revoked)');
 
 select * from finish();
 rollback;

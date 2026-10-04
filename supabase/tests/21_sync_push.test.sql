@@ -1,11 +1,12 @@
 -- =============================================================================
 -- 21  sync_push: idempotency, insert/update/delete, authorisation, workflow
+--     (workflow rules also govern deletes: sections E, F, J)
 --     (docs/contracts/sync.md; migration 0023)
 -- =============================================================================
 begin;
 set local search_path = public, extensions, tests;
 
-select plan(109);
+select plan(119);
 
 do $$ begin perform tests.fixture(); end $$;
 
@@ -567,6 +568,41 @@ select is(pg_temp.st('e10'), array['rejected', 'applied'],
 select is(pg_temp.r('e10', 0) #>> '{error,constraint}', 'projects_geom_required_ck',
   'the violated rule is named in the error');
 
+-- deleting is a workflow decision as well (the delete path runs the guard):
+-- a collector deletes his record only while it is draft or returned
+insert into res
+select 'e11', pg_temp.push(tests.id('u_col_pemba'), 'dev-a', jsonb_build_array(
+  pg_temp.op(93, 'projects', tests.id('p_pemba_1'), 0, null, 'delete'),
+  pg_temp.op(94, 'projects', pg_temp.nid(1), pg_temp.ver('projects', pg_temp.nid(1)), null, 'delete'),
+  pg_temp.op(95, 'projects', pg_temp.nid(92), pg_temp.ver('projects', pg_temp.nid(92)), null, 'delete')));
+select is(pg_temp.st('e11'), array['rejected', 'rejected', 'applied'],
+  'collector delete: his approved and his submitted record are refused, his draft is deleted');
+select ok(
+  pg_temp.err('e11', 0) = 'forbidden_transition' and pg_temp.err('e11', 1) = 'forbidden_transition'
+  and (select p.record_state = 'approved' and p.deleted_at is null from public.projects p where p.id = tests.id('p_pemba_1'))
+  and (select p.record_state = 'submitted' and p.deleted_at is null from public.projects p where p.id = pg_temp.nid(1))
+  and (select p.deleted_at is not null from public.projects p where p.id = pg_temp.nid(92)),
+  'deleting a submitted or approved record needs a reviewer (forbidden_transition) and leaves it untouched');
+
+insert into res
+select 'e12', pg_temp.push(tests.id('u_col_pemba'), 'dev-a', jsonb_build_array(
+  pg_temp.op(96, 'projects', pg_temp.nid(96), 0, jsonb_build_object(
+    'name_ar', 'مكرر', 'type', 'school', 'lon', 39.73, 'lat', -5.03, 'record_state', 'submitted'))));
+insert into res
+select 'e13', pg_temp.push(tests.id('u_sup_pemba'), 'dev-s', jsonb_build_array(
+  pg_temp.op(97, 'projects', pg_temp.nid(96), pg_temp.ver('projects', pg_temp.nid(96)),
+             jsonb_build_object('record_state', 'returned', 'review_note', 'duplicate')),
+  pg_temp.op(98, 'projects', tests.id('p_pemba_1'), pg_temp.ver('projects', tests.id('p_pemba_1')), null, 'delete')));
+insert into res
+select 'e14', pg_temp.push(tests.id('u_col_pemba'), 'dev-a', jsonb_build_array(
+  pg_temp.op(99, 'projects', pg_temp.nid(96), pg_temp.ver('projects', pg_temp.nid(96)), null, 'delete')));
+select is(pg_temp.st('e12') || pg_temp.st('e13') || pg_temp.st('e14'), array['applied', 'applied', 'applied', 'applied'],
+  'a record returned to its collector may be withdrawn by him; a reviewer deletes an approved record');
+select ok(
+  (select p.deleted_at is not null and p.record_state = 'returned' from public.projects p where p.id = pg_temp.nid(96))
+  and (select p.deleted_at is not null and p.record_state = 'approved' from public.projects p where p.id = tests.id('p_pemba_1')),
+  'both deletes are stored (soft)');
+
 -- =============================================================================
 -- F. Localities: collectors propose, reviewers approve
 -- =============================================================================
@@ -604,6 +640,29 @@ select 'f4', pg_temp.push(tests.id('u_col_ke'), 'dev-k', jsonb_build_array(
   pg_temp.op(104, 'localities', pg_temp.nid(104), 0, jsonb_build_object(
     'name_latin', 'X', 'country_id', tests.id('tz')))));
 select is(pg_temp.err('f4', 0), 'out_of_scope', 'a locality cannot be proposed in another country');
+
+-- deleting follows the same lock as editing
+insert into res
+select 'f5', pg_temp.push(tests.id('u_col_pemba'), 'dev-a', jsonb_build_array(
+  pg_temp.op(105, 'localities', pg_temp.nid(101), 0, null, 'delete'),
+  pg_temp.op(106, 'localities', pg_temp.nid(106), 0, jsonb_build_object(
+    'name_latin', 'Kijiji D', 'lon', 39.74, 'lat', -5.01)),
+  pg_temp.op(107, 'localities', pg_temp.nid(106), 1, null, 'delete')));
+select is(pg_temp.st('f5'), array['rejected', 'applied', 'applied'],
+  'a collector deletes his proposed locality, not an approved one');
+select ok(
+  pg_temp.err('f5', 0) = 'locality_locked'
+  and (select l.status = 'approved' and l.deleted_at is null from public.localities l where l.id = pg_temp.nid(101))
+  and (select l.deleted_at is not null from public.localities l where l.id = pg_temp.nid(106)),
+  'deleting an approved locality: locality_locked, the locality stays');
+
+insert into res
+select 'f6', pg_temp.push(tests.id('u_sup_pemba'), 'dev-s', jsonb_build_array(
+  pg_temp.op(108, 'localities', pg_temp.nid(101), pg_temp.ver('localities', pg_temp.nid(101)), null, 'delete')));
+select ok(
+  pg_temp.st('f6') = array['applied']
+  and (select l.deleted_at is not null from public.localities l where l.id = pg_temp.nid(101)),
+  'a reviewer may delete an approved locality');
 
 -- =============================================================================
 -- G. Restricted tables: blind writes
@@ -731,6 +790,52 @@ select is(
 select ok(
   (select pe.deleted_at is null and pe.merged_into_id is null from public.persons pe where pe.id = pg_temp.nid(120)),
   'filing or rejecting a merge request never changes the persons');
+
+-- a pending request may be withdrawn (deleted); a decided one is the trace of
+-- the decision
+insert into res
+select 'j3', pg_temp.push(tests.id('u_sup_pemba'), 'dev-s', jsonb_build_array(
+  pg_temp.op(145, 'person_merge_requests', pg_temp.nid(145), 0, jsonb_build_object(
+    'source_person_id', pg_temp.nid(121), 'target_person_id', pg_temp.nid(120))),
+  pg_temp.op(146, 'person_merge_requests', pg_temp.nid(145), 1, null, 'delete'),
+  pg_temp.op(147, 'person_merge_requests', pg_temp.nid(141),
+             pg_temp.ver('person_merge_requests', pg_temp.nid(141)), null, 'delete')));
+select is(pg_temp.st('j3'), array['applied', 'applied', 'rejected'],
+  'a pending merge request can be withdrawn, a rejected one cannot be deleted');
+select is(pg_temp.err('j3', 2), 'invalid_transition', 'deleting a decided merge request: invalid_transition');
+
+-- a merged request holds the undo data: deleting it would make the merge
+-- irreversible (revert_person_merge ignores soft-deleted requests)
+create function pg_temp.as_sup(p_sql text) returns jsonb language plpgsql as
+$fn$
+declare
+  r jsonb;
+begin
+  begin
+    perform tests.login_as(tests.id('u_sup_pemba'), 'aal1', 'dev-s');
+    execute p_sql into r;
+    perform tests.logout();
+  exception when others then
+    r := jsonb_build_object('error', sqlerrm);   -- the login is rolled back with the block
+  end;
+  return r;
+end;
+$fn$;
+
+insert into res
+select 'j4', pg_temp.as_sup(format('select public.merge_persons(%L::uuid, %L::uuid, %L)',
+                                   pg_temp.nid(120), pg_temp.nid(121), 'same person'));
+insert into res
+select 'j5', pg_temp.push(tests.id('u_sup_pemba'), 'dev-s', jsonb_build_array(
+  pg_temp.op(148, 'person_merge_requests', (select (v ->> 'request_id')::uuid from res where k = 'j4'), 0, null, 'delete')));
+insert into res
+select 'j6', pg_temp.as_sup(format('select public.revert_person_merge(%L::uuid)',
+                                   (select v ->> 'request_id' from res where k = 'j4')));
+select ok(
+  (select v ->> 'state' from res where k = 'j4') = 'merged'
+  and pg_temp.err('j5', 0) = 'invalid_transition'
+  and (select v ->> 'state' from res where k = 'j6') = 'reverted',
+  'a merged request cannot be deleted through push, so the merge can still be reverted');
 
 -- =============================================================================
 -- L. created_at: the offline entry time is kept on insert, immutable afterwards

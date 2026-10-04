@@ -3,7 +3,7 @@
 begin;
 set local search_path = public, extensions, tests;
 
-select plan(62);
+select plan(78);
 
 select tests.fixture_extra();
 
@@ -224,6 +224,101 @@ select is(public.import_stage('{}'::jsonb,
             '[{"external_id": "T-IMP-1", "name_ar": "مسجد الاستيراد", "type": "mosque", "lat": "-5.01", "lon": "39.71"}]'::jsonb)
             -> 'counts' -> 'create', '1'::jsonb, 'after a rollback the same external_id can be imported again (country derived from the point)');
 select tests.logout();
+
+-- Session gate (authz.md §3 rule 1): the owner-only RPCs use no scope helper, so they check the
+-- session themselves. A revoked session, a deactivated account or a revoked device (lost phone,
+-- brief §3) can neither read nor change its batches. ----------------------------------------------------
+update public.projects set external_id = 'T-P2' where id = tests.id('p_pemba_2');
+select tests.login_as(tests.id('u_col_pemba'), 'aal1');
+select set_config('t.b4', public.import_stage('{}'::jsonb,
+  '[{"external_id": "T-IMP-4", "name_ar": "مسجد الجلسة", "type": "mosque", "lat": "-5.1500", "lon": "39.6500"}]'::jsonb) ->> 'batch_id', true);
+select set_config('t.c4', public.import_commit(current_setting('t.b4')::uuid)::text, true);
+select set_config('t.b5', public.import_stage('{}'::jsonb, '[{"external_id": "T-P2", "capacity": "555"}]'::jsonb) ->> 'batch_id', true);
+select set_config('t.c5', public.import_commit(current_setting('t.b5')::uuid)::text, true);
+select set_config('t.b6', public.import_stage('{}'::jsonb,
+  '[{"external_id": "T-IMP-6", "name_ar": "مسجد معلق", "type": "mosque", "lat": "-5.1200", "lon": "39.6200"}]'::jsonb) ->> 'batch_id', true);
+select tests.logout();
+select ok((current_setting('t.c4')::jsonb ->> 'committed')::boolean and (current_setting('t.c5')::jsonb ->> 'committed')::boolean
+          and (select b.state from public.import_batches b where b.id = current_setting('t.b6')::uuid) = 'validated'
+          and (select p.capacity from public.projects p where p.id = tests.id('p_pemba_2')) = 555,
+          'session gate: setup (one created draft, one update of an own draft, one validated batch)');
+
+-- what admin_revoke_sessions does
+update public.profiles set sessions_revoked_at = now() + interval '1 minute' where id = tests.id('u_col_pemba');
+select tests.login_as(tests.id('u_col_pemba'), 'aal1');
+select throws_ok(format('select public.import_preview(%L)', current_setting('t.b4')), 'PT403', 'session_revoked',
+                 'revoked session: import_preview refused');
+select throws_ok(format('select public.import_set_action(%L, 1, %L)', current_setting('t.b6'), 'skip'), 'PT403', 'session_revoked',
+                 'revoked session: import_set_action refused');
+select throws_ok(format('select public.import_commit(%L)', current_setting('t.b6')), 'PT403', 'session_revoked',
+                 'revoked session: import_commit refused');
+select throws_ok(format('select public.import_rollback(%L)', current_setting('t.b4')), 'PT403', 'session_revoked',
+                 'revoked session: import_rollback refused');
+select throws_ok($$select public.import_template('en')$$, 'PT403', 'session_revoked', 'revoked session: import_template refused');
+select throws_ok($$select public.import_stage('{}'::jsonb, '[{"name_ar": "x"}]'::jsonb)$$, 'PT403', 'session_revoked',
+                 'revoked session: import_stage refused');
+select tests.logout();
+update public.profiles set sessions_revoked_at = null where id = tests.id('u_col_pemba');
+
+update public.profiles set active = false where id = tests.id('u_col_pemba');
+select tests.login_as(tests.id('u_col_pemba'), 'aal1');
+select throws_ok(format('select public.import_rollback(%L)', current_setting('t.b4')), 'PT403', 'session_revoked',
+                 'deactivated account: import_rollback refused');
+select tests.logout();
+update public.profiles set active = true where id = tests.id('u_col_pemba');
+
+update public.devices set revoked_at = now() where id = tests.id('device:u_col_pemba');
+select tests.login_as(tests.id('u_col_pemba'), 'aal1', 'dev-u_col_pemba');
+select throws_ok(format('select public.import_rollback(%L)', current_setting('t.b4')), 'PT403', 'session_revoked',
+                 'revoked device: import_rollback refused');
+select tests.logout();
+update public.devices set revoked_at = null where id = tests.id('device:u_col_pemba');
+
+select ok((select p.deleted_at is null and p.external_id = 'T-IMP-4' from public.projects p
+           where p.import_batch_id = current_setting('t.b4')::uuid)
+          and (select b.state from public.import_batches b where b.id = current_setting('t.b4')::uuid) = 'committed'
+          and (select b.state from public.import_batches b where b.id = current_setting('t.b6')::uuid) = 'validated'
+          and (select r.action from public.import_rows r where r.batch_id = current_setting('t.b6')::uuid) = 'create',
+          'session gate: the refused calls changed nothing');
+
+-- Rollback re-checks the caller's rights NOW (private.import_can_update), not those it had at commit time.
+-- The supervisor approves p_pemba_2 and moves the imported draft to the Tanga branch.
+update public.projects set record_state = 'approved' where id = tests.id('p_pemba_2');
+update public.projects set branch_id = tests.id('br_tanga') where import_batch_id = current_setting('t.b4')::uuid;
+
+select tests.login_as(tests.id('u_col_pemba'), 'aal1');
+select set_config('t.r5', public.import_rollback(current_setting('t.b5')::uuid)::text, true);
+select set_config('t.r4', public.import_rollback(current_setting('t.b4')::uuid)::text, true);
+select tests.logout();
+
+select is(jsonb_build_object('reverted', current_setting('t.r5')::jsonb -> 'reverted', 'kept', current_setting('t.r5')::jsonb -> 'kept',
+                             'no_access', current_setting('t.r5')::jsonb -> 'no_access'),
+          '{"reverted": 0, "kept": 1, "no_access": 1}'::jsonb,
+          'rollback by a collector: an update of a record approved since is kept (no_access)');
+select is((select p.capacity || '/' || p.record_state || '/' || r.state
+           from public.projects p join public.import_rows r on r.target_id = p.id
+           where p.id = tests.id('p_pemba_2') and r.batch_id = current_setting('t.b5')::uuid),
+          '555/approved/applied', 'rollback by a collector: the approved record is not touched');
+select is(jsonb_build_object('reverted', current_setting('t.r4')::jsonb -> 'reverted', 'kept', current_setting('t.r4')::jsonb -> 'kept',
+                             'no_access', current_setting('t.r4')::jsonb -> 'no_access'),
+          '{"reverted": 0, "kept": 1, "no_access": 1}'::jsonb,
+          'rollback by a collector: a draft moved outside its scope is kept (no_access)');
+select ok((select p.deleted_at is null and p.external_id = 'T-IMP-4' and p.branch_id = tests.id('br_tanga')
+           from public.projects p where p.import_batch_id = current_setting('t.b4')::uuid),
+          'rollback by a collector: the moved draft is neither deleted nor stripped of its merge key');
+
+-- hq_admin may still roll back another user's batch on the approved record (reviewer of every scope);
+-- the capacity written later by batch 5 is somebody else's change and is kept (conflicting field).
+select tests.login_as(tests.id('u_hq'));
+select set_config('t.r3', public.import_rollback((current_setting('t.b3')::jsonb ->> 'batch_id')::uuid)::text, true);
+select tests.logout();
+select ok((current_setting('t.r3')::jsonb ->> 'reverted')::int = 1 and (current_setting('t.r3')::jsonb ->> 'no_access')::int = 0
+          and (current_setting('t.r3')::jsonb ->> 'conflicting_fields')::int >= 1,
+          'rollback by hq_admin: the merge into the approved record is reverted');
+select is((select p.name_ar || '/' || p.capacity || '/' || p.record_state from public.projects p where p.id = tests.id('p_pemba_2')),
+          (select (r.pre_image #>> '{projects,before,name_ar}') || '/555/approved' from public.import_rows r
+           where r.batch_id = (current_setting('t.b3')::jsonb ->> 'batch_id')::uuid),
+          'rollback by hq_admin: the name is restored, the later capacity change is kept, the record stays approved');
 
 select * from finish();
 rollback;
