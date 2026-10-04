@@ -29,6 +29,12 @@
 -- Donors (registry scope kind "donor") have no country or branch: any writer
 -- may add one, but changing, deleting or linking an existing donor requires
 -- that the caller can see it (private.sync_donor_visible = the RLS rule).
+--
+-- Restricted tables (staff_compensation, community_sensitive): a writer who
+-- cannot see the restricted data of the row's country writes BLIND. His
+-- operation is addressed by its natural key, validated as an insert before an
+-- existing row is touched, and answered with a constant result, so that the
+-- answer never depends on the stored values (brief §3, acceptance criterion 5).
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
@@ -145,6 +151,59 @@ begin
     join public.projects p on p.id = pd.project_id
     where pd.donor_id = p_donor_id
       and (p.country_id = any (p_ctx.read_c) or p.branch_id = any (p_ctx.read_b)));
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Restricted tables (staff_compensation, community_sensitive): may the caller
+-- see restricted data of this country? (country_manager of the country or
+-- hq_admin, both effective only at aal2 — the same rule as sync_pull and
+-- restricted_read.) Everybody else who writes such a row writes BLIND.
+-- -----------------------------------------------------------------------------
+create or replace function private.sync_sees_restricted(p_ctx private.sync_ctx, p_country uuid)
+returns boolean
+language sql
+immutable
+set search_path = public, extensions, private, pg_temp
+as $$
+  select coalesce(p_ctx.restricted_all, false)
+      or coalesce(p_country = any (p_ctx.restricted_c), false);
+$$;
+
+-- -----------------------------------------------------------------------------
+-- Blind writes: prove that the client's values are insertable as a NEW row,
+-- without keeping that row. A blind write that lands on an existing row (the
+-- natural key already has a live row) must be refused for exactly the same
+-- reasons as a real insert (missing NOT NULL column, check constraint, type,
+-- foreign key), otherwise the outcome would tell the caller whether a row
+-- exists and which of his values the stored row already has.
+--
+-- The probe row is inserted soft-deleted (the natural-key unique indexes only
+-- cover live rows) inside a sub-transaction that is always rolled back; a
+-- constraint error propagates to the caller unchanged.
+-- -----------------------------------------------------------------------------
+create or replace function private.sync_probe_insert(p_table text, p_values jsonb)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, private, pg_temp
+as $$
+declare
+  v_values jsonb := coalesce(p_values, '{}'::jsonb) - 'id' - 'deleted_at';
+begin
+  begin
+    execute format(
+      'insert into public.%1$I (id, deleted_at%2$s) select private.uuid_v7(), now()%3$s'
+      || ' from jsonb_populate_record(null::public.%1$I, $1) r',
+      p_table,
+      (select coalesce(string_agg(format(', %I', k), ''), '') from jsonb_object_keys(v_values) as k),
+      (select coalesce(string_agg(format(', r.%I', k), ''), '') from jsonb_object_keys(v_values) as k))
+      using v_values;
+    raise exception 'sync_probe_insert' using errcode = 'PTPRB';
+  exception when sqlstate 'PTPRB' then
+    null;   -- probe passed; the probe row (and its audit row) is rolled back
+  end;
 end;
 $$;
 
@@ -578,6 +637,10 @@ declare
   v_c2          uuid;
   v_b2          uuid;
   v_wrote       boolean := false;
+  v_blind       boolean := false;
+  v_id_taken    boolean := false;
+  v_def         text;
+  v_defval      jsonb;
   v_result      jsonb;
 begin
   -- ---------------------------------------------------------------------------
@@ -631,11 +694,15 @@ begin
       return jsonb_build_object('op_id', v_op_id, 'status', 'applied', 'version', null);
     end if;
     v_cur_version := (v_cur ->> 'version')::integer;
+    v_scope       := private.sync_row_scope(reg, v_cur, v_id);
+    -- restricted row of a country whose restricted data the caller cannot see:
+    -- the answer is the same constant as for a blind upsert (see 8.)
+    v_blind := v_restricted and not private.sync_sees_restricted(p_ctx, v_scope.country_id);
     if (v_cur ->> 'deleted_at') is not null then
-      return jsonb_build_object('op_id', v_op_id, 'status', 'applied', 'version', v_cur_version);
+      return jsonb_build_object('op_id', v_op_id, 'status', 'applied',
+                                'version', case when v_blind then null else v_cur_version end);
     end if;
 
-    v_scope    := private.sync_row_scope(reg, v_cur, v_id);
     v_writer   := private.sync_can(p_ctx, 'write',  reg.scope_kind, v_scope.country_id, v_scope.branch_id);
     v_reviewer := private.sync_can(p_ctx, 'review', reg.scope_kind, v_scope.country_id, v_scope.branch_id);
     if reg.scope_kind = 'donor'
@@ -673,8 +740,8 @@ begin
 
     return jsonb_build_object(
       'op_id', v_op_id,
-      'status', case when v_others_any then 'merged' else 'applied' end,
-      'version', v_version);
+      'status', case when v_others_any and not v_blind then 'merged' else 'applied' end,
+      'version', case when v_blind then null else v_version end);
   end if;
 
   -- ---------------------------------------------------------------------------
@@ -712,6 +779,69 @@ begin
     v_has_geom := true;
   end if;
 
+  -- Blind writes (sync.md §4.4). A caller who cannot see the restricted data of
+  -- the row's country (field collector, branch supervisor, ...) must get an
+  -- answer that depends on his own input and scope only — never on what is
+  -- stored (brief §3: no salary, no restricted data of others; acceptance
+  -- criterion 5). Therefore such an operation
+  --   * always names its parent (as an insert must), so it is addressed by its
+  --     natural key and never by the row id: whether the op's id exists, holds
+  --     the same key or was redirected earlier cannot change the outcome;
+  --   * is validated as an insert of a new row before an existing row is
+  --     touched (private.sync_probe_insert, step 6);
+  --   * is answered with a constant result (step 8): whether the values were
+  --     written, already equal or stored as conflicts for a country manager
+  --     is not disclosed.
+  -- The parent itself (project / project_staff) is data the caller may see.
+  if v_restricted then
+    if (v_clean ->> reg.scope_col) is not null then
+      v_scope := private.sync_row_scope(reg, v_clean, v_id);
+      v_blind := not private.sync_sees_restricted(p_ctx, v_scope.country_id);
+    elsif v_cur is not null then
+      v_scope := private.sync_row_scope(reg, v_cur, v_id);
+      v_blind := not private.sync_sees_restricted(p_ctx, v_scope.country_id);
+      if v_blind then
+        -- the same answer, in the same order of checks, as for an insert
+        -- without its parent (created_at first, see below)
+        if nullif(btrim(v_fields ->> 'created_at'), '') is not null then
+          v_created := (v_fields ->> 'created_at')::timestamptz;
+        end if;
+        raise exception 'parent_required' using errcode = 'PT422',
+          detail = format('%s.%s is required', reg.table_name, reg.scope_col);
+      end if;
+    end if;
+    if v_blind then
+      v_id_taken := v_cur is not null;
+      v_cur := null;
+    end if;
+  end if;
+
+  -- The client's id is unknown on the server: from the client's point of view
+  -- this is an insert. created_at is validated now, before the natural-key
+  -- lookup, so that an insert redirected to an existing row refuses the same
+  -- values as a real insert (the value itself is used by a real insert only).
+  if v_cur is null and nullif(btrim(v_fields ->> 'created_at'), '') is not null then
+    v_created := (v_fields ->> 'created_at')::timestamptz;
+  end if;
+
+  -- A natural-key column the client left out takes its column default, as it
+  -- would in the insert (staff_compensation.effective_from = today): the
+  -- lookup below must find the row that the insert would collide with.
+  if v_cur is null and reg.natural_key is not null then
+    foreach v_k in array reg.natural_key loop
+      if not (v_clean ? v_k) then
+        select pg_get_expr(d.adbin, d.adrelid) into v_def
+        from pg_attrdef d
+        join pg_attribute a on a.attrelid = d.adrelid and a.attnum = d.adnum
+        where d.adrelid = format('public.%I', v_table)::regclass and a.attname = v_k;
+        if v_def is not null then
+          execute format('select to_jsonb(%s)', v_def) into v_defval;
+          v_clean := v_clean || jsonb_build_object(v_k, v_defval);
+        end if;
+      end if;
+    end loop;
+  end if;
+
   -- Natural key: an insert for a parent that already has a live row (two devices
   -- created the same 1:1 child offline, or a restricted row is re-entered blind)
   -- is applied to the existing row. base_version 0 means "I have never seen the
@@ -729,6 +859,12 @@ begin
       v_id := (v_cur ->> 'id')::uuid;
       v_base := 0;
     end if;
+  end if;
+
+  if v_cur is null and v_id_taken then
+    -- blind write whose id names another row (deleted, or with another natural
+    -- key): the new row gets its own id (results of blind writes carry no id)
+    v_id := private.uuid_v7();
   end if;
 
   if v_cur is null then
@@ -790,12 +926,10 @@ begin
     -- at which the row was created on the device. private.tg_std replaces a
     -- value more than 5 minutes in the future by now(); a missing, blank or
     -- infinite value falls back to now() as well; a value that is not a
-    -- timestamp rejects the operation (invalid_value), like any other field.
-    if nullif(btrim(v_fields ->> 'created_at'), '') is not null then
-      v_created := (v_fields ->> 'created_at')::timestamptz;
-      if isfinite(v_created) then
-        v_apply := v_apply || jsonb_build_object('created_at', v_created);
-      end if;
+    -- timestamp has already rejected the operation (invalid_value, parsed
+    -- above before the natural-key lookup), like any other field.
+    if isfinite(v_created) then
+      v_apply := v_apply || jsonb_build_object('created_at', v_created);
     end if;
 
     if v_apply = '{}'::jsonb then
@@ -827,6 +961,12 @@ begin
     end if;
 
     v_scope    := private.sync_row_scope(reg, v_cur, v_id);
+    if v_redirected and v_scope.parent_deleted then
+      -- a redirected insert is still an insert: same rule (and same order of
+      -- checks) as in 5., whether or not the natural key had a live row
+      raise exception 'parent_deleted' using errcode = 'PT409',
+        detail = 'The parent record was deleted on the server.';
+    end if;
     v_writer   := private.sync_can(p_ctx, 'write',  reg.scope_kind, v_scope.country_id, v_scope.branch_id);
     v_reviewer := private.sync_can(p_ctx, 'review', reg.scope_kind, v_scope.country_id, v_scope.branch_id);
     if reg.scope_kind = 'donor'
@@ -839,6 +979,14 @@ begin
       (v_cur ->> 'created_by')::uuid = p_ctx.uid,
       v_scope.project_creator = p_ctx.uid,
       v_scope.owner_id = p_ctx.uid);
+
+    if v_blind then
+      -- refuse exactly what the insert of 5. would refuse (the natural key had
+      -- no live row): the outcome must not depend on the stored row
+      perform private.sync_probe_insert(v_table,
+        v_clean || case when isfinite(v_created) then jsonb_build_object('created_at', v_created)
+                        else '{}'::jsonb end);
+    end if;
 
     -- the parent link (and other immutable columns) cannot change
     foreach v_k in array reg.immutable_cols loop
@@ -978,6 +1126,21 @@ begin
     end if;
   end if;
 
+  -- A project names a locality of its own country only (the locality's names
+  -- are copied into search_norm and shown with the project; a locality of
+  -- another country is outside the caller's read scope). Checked on the stored
+  -- row, because country_id is derived from the location.
+  if v_wrote and v_table = 'projects'
+     and (v_is_insert or v_apply ?| array['locality_id', 'country_id', 'geom']) then
+    if exists (select 1
+               from public.projects p
+               join public.localities l on l.id = p.locality_id
+               where p.id = v_id and l.country_id is distinct from p.country_id) then
+      raise exception 'locality_country_mismatch' using errcode = 'PT422',
+        detail = 'The locality belongs to another country than the record.';
+    end if;
+  end if;
+
   -- A collector changing a child that describes an approved project sends the
   -- project back to review (same rule as editing the project itself).
   if v_wrote and not v_reviewer and v_table <> 'projects' and v_scope.project_state = 'approved'
@@ -986,8 +1149,22 @@ begin
     where p.id = v_scope.project_id and p.record_state = 'approved';
   end if;
 
-  -- Result. Optional keys are added one by one (jsonb_strip_nulls would also
-  -- drop a null inside server_values, i.e. "the server value is empty").
+  -- ---------------------------------------------------------------------------
+  -- 8. Result. A blind write gets a constant answer: no version, no row id, no
+  --    conflict ids or fields — what was written, already equal or left for a
+  --    country manager (open sync_conflicts rows) is not disclosed.
+  --    ignored_fields depends on the input only.
+  -- ---------------------------------------------------------------------------
+  if v_blind then
+    v_result := jsonb_build_object('op_id', v_op_id, 'status', 'applied', 'version', null);
+    if cardinality(v_ignored) > 0 then
+      v_result := v_result || jsonb_build_object('ignored_fields', to_jsonb(v_ignored));
+    end if;
+    return v_result;
+  end if;
+
+  -- Optional keys are added one by one (jsonb_strip_nulls would also drop a
+  -- null inside server_values, i.e. "the server value is empty").
   v_result := jsonb_build_object('op_id', v_op_id, 'status', v_status, 'version', v_version);
   if v_redirected then
     v_result := v_result || jsonb_build_object('row_id', v_id);
@@ -1171,6 +1348,8 @@ comment on function public.sync_push(jsonb, text) is
 revoke execute on function
   private.sync_row_scope(private.sync_tables, jsonb, uuid),
   private.sync_donor_visible(private.sync_ctx, uuid, uuid),
+  private.sync_sees_restricted(private.sync_ctx, uuid),
+  private.sync_probe_insert(text, jsonb),
   private.sync_authorise(text, boolean, boolean, boolean, boolean, boolean),
   private.sync_guard_projects(private.sync_ctx, text, jsonb, jsonb, boolean),
   private.sync_guard_localities(private.sync_ctx, text, jsonb, jsonb, boolean),

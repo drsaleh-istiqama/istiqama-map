@@ -16,6 +16,39 @@ $$;
 
 revoke execute on function private.report_strip(jsonb) from public, anon, authenticated;
 
+-- Is a donor visible to the caller? Exactly the rule of the RLS policy donors_select (migration
+-- 0013), sync_pull and sync_push (private.sync_donor_visible): a global reader sees every donor,
+-- everybody else the donors he created and the donors linked by a project_donors row (live or
+-- soft-deleted) to a project (live or soft-deleted) in his read scope. Donors have no country of
+-- their own, so this is the only thing that keeps a donor known only in Tanzania away from a
+-- Kenyan user (brief §14.5). The caller passes its read triple (fetched once, authz.md §3 b);
+-- used by report_donor and by the import (donor look-up and link, migration 0055).
+create or replace function private.donor_visible(
+  p_donor_id uuid,
+  p_created_by uuid,
+  p_uid uuid,
+  p_read_all boolean,
+  p_read_countries uuid[],
+  p_read_branches uuid[]
+)
+returns boolean
+language sql
+stable
+set search_path = public, extensions, private, pg_temp
+as $$
+  select coalesce(p_read_all, false)
+      or coalesce(p_created_by = p_uid, false)
+      or exists (
+           select 1
+           from public.project_donors pd
+           join public.projects p on p.id = pd.project_id
+           where pd.donor_id = p_donor_id
+             and (p.country_id = any (p_read_countries) or p.branch_id = any (p_read_branches)))
+$$;
+
+revoke execute on function private.donor_visible(uuid, uuid, uuid, boolean, uuid[], uuid[])
+  from public, anon, authenticated;
+
 -- ---------------------------------------------------------------------------------------------
 -- report_project(p_id): illustrated project card
 -- ---------------------------------------------------------------------------------------------
@@ -30,6 +63,9 @@ as $$
 declare
   v_p public.projects%rowtype;
   v_people boolean;
+  v_p_all boolean;
+  v_p_countries uuid[];
+  v_p_branches uuid[];
   v_restricted boolean;
   v_result jsonb;
   v_country jsonb;
@@ -162,13 +198,25 @@ begin
     and (s.end_date is null or s.end_date >= current_date);
 
   if v_people then
+    -- The assignment (project_staff) follows the project, the person row follows its own scope:
+    -- persons keep their country / branch when a project moves (sync.md §5.3, known limit 2), so
+    -- the persons_select rule is applied per person. A person outside the caller's people scope
+    -- is listed without any person column (person_visible = false), as RLS and sync_pull show it.
+    v_p_all := private.people_all();
+    v_p_countries := private.people_countries();
+    v_p_branches := private.people_branches();
+
     select coalesce(jsonb_agg(
                jsonb_build_object(
-                 'project_staff_id', s.id, 'person_id', pe.id,
-                 'name_ar', pe.name_ar, 'name_latin', pe.name_latin,
+                 'project_staff_id', s.id, 'person_id', pe.id, 'person_visible', pv.ok,
+                 'name_ar', case when pv.ok then pe.name_ar end,
+                 'name_latin', case when pv.ok then pe.name_latin end,
                  'role', s.role, 'start_date', s.start_date, 'end_date', s.end_date,
-                 'phone', pe.phone_e164, 'gender', pe.gender, 'birth_year', pe.birth_year,
-                 'education_level', pe.education_level, 'graduated_from', pe.graduated_from)
+                 'phone', case when pv.ok then pe.phone_e164 end,
+                 'gender', case when pv.ok then pe.gender end,
+                 'birth_year', case when pv.ok then pe.birth_year end,
+                 'education_level', case when pv.ok then pe.education_level end,
+                 'graduated_from', case when pv.ok then pe.graduated_from end)
                || case when v_restricted then jsonb_build_object(
                     'monthly_amount', comp.monthly_amount,
                     'currency', comp.currency,
@@ -176,11 +224,15 @@ begin
                   else '{}'::jsonb end
              order by case s.role when 'manager' then 1 when 'imam' then 2 when 'teacher' then 3
                         when 'agent' then 4 when 'administrator' then 5 else 6 end,
-                      pe.name_ar), '[]'::jsonb),
+                      case when pv.ok then pe.name_ar end nulls last, s.id), '[]'::jsonb),
            array_agg(comp.id) filter (where comp.id is not null)
       into v_staff, v_comp_ids
     from public.project_staff s
     join public.persons pe on pe.id = s.person_id and pe.deleted_at is null
+    cross join lateral (
+      select coalesce(v_p_all or pe.country_id = any (v_p_countries)
+                      or pe.branch_id = any (v_p_branches), false) as ok
+    ) pv
     left join lateral (
       select c.id, c.monthly_amount, c.currency, c.effective_from
       from public.staff_compensation c
@@ -261,6 +313,7 @@ declare
   v_countries uuid[];
   v_branches uuid[];
   v_donor jsonb;
+  v_creator uuid;
   v_summary jsonb;
   v_contrib jsonb;
   v_projects jsonb;
@@ -277,10 +330,14 @@ begin
   end if;
 
   select jsonb_build_object('id', d.id, 'name_ar', d.name_ar, 'name_latin', d.name_latin,
-           'notes', d.notes)
-    into v_donor
+           'notes', d.notes),
+         d.created_by
+    into v_donor, v_creator
   from public.donors d where d.id = p_id and d.deleted_at is null;
-  if v_donor is null then
+  -- Same answer for "does not exist" and "not visible to you" (never reveal existence): the
+  -- donor must be one the caller can see (donors_select / sync_pull rule, brief §14.5).
+  if v_donor is null
+     or not private.donor_visible(p_id, v_creator, auth.uid(), v_all, v_countries, v_branches) then
     raise exception 'donor not found' using errcode = 'PT404';
   end if;
 
@@ -511,8 +568,8 @@ revoke execute on function public.report_country(uuid) from public, anon;
 grant execute on function public.report_country(uuid) to authenticated;
 
 comment on function public.report_project(uuid) is
-  'Project card for print/PDF. Staff only for callers who may see people; salaries and sensitive community data only with restricted access (logged).';
+  'Project card for print/PDF. Staff only for callers who may see people (person columns only for persons inside the caller''s people scope); salaries and sensitive community data only with restricted access (logged).';
 comment on function public.report_donor(uuid) is
-  'Donor report: donor, summary and up to 500 of its projects inside the caller''s read scope, with photo paths and status.';
+  'Donor report for a donor visible to the caller (donors_select rule, PT404 otherwise): donor, summary and up to 500 of its projects inside the caller''s read scope, with photo paths and status.';
 comment on function public.report_country(uuid) is
   'Periodic country report: dashboard sections for the country plus a per-branch table.';

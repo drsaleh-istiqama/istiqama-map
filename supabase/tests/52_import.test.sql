@@ -3,7 +3,7 @@
 begin;
 set local search_path = public, extensions, tests;
 
-select plan(78);
+select plan(91);
 
 select tests.fixture_extra();
 
@@ -319,6 +319,108 @@ select is((select p.name_ar || '/' || p.capacity || '/' || p.record_state from p
           (select (r.pre_image #>> '{projects,before,name_ar}') || '/555/approved' from public.import_rows r
            where r.batch_id = (current_setting('t.b3')::jsonb ->> 'batch_id')::uuid),
           'rollback by hq_admin: the name is restored, the later capacity change is kept, the record stays approved');
+
+-- Look-ups stay inside the caller's read scope (brief §14.5): preview rows and errors never reveal a
+-- record the caller could not read himself, and a commit never links a donor he cannot see. ----------
+
+-- Donors: a Kenya collector naming a donor that is linked only to Tanzania projects neither learns its
+-- id nor links it (linking would make it, and its notes, visible); a donor he can see is reused.
+update public.donors set notes = 'TZ-ONLY NOTES' where id = tests.id('donor:p_pemba_1');
+select tests.login_as(tests.id('u_col_ke'), 'aal1');
+select set_config('t.b7', public.import_stage('{}'::jsonb, jsonb_build_array(
+    jsonb_build_object('name_ar', 'مسجد كيني', 'type', 'mosque', 'lat', '-4.10', 'lon', '39.70', 'country', 'KE',
+                       'donor', 'Donor p_pemba_1', 'donor_year', '2021'),
+    jsonb_build_object('name_ar', 'مدرسة كينية', 'type', 'school', 'lat', '-4.15', 'lon', '39.75', 'country', 'KE',
+                       'donor', 'Donor p_ke_1', 'donor_year', '2021'))) ->> 'batch_id', true);
+select set_config('t.pv7', public.import_preview(current_setting('t.b7')::uuid)::text, true);
+select ok(current_setting('t.pv7')::jsonb #>> '{rows,0,state}' = 'valid'
+          and current_setting('t.pv7')::jsonb #>> '{rows,0,parsed,donor,name}' = 'Donor p_pemba_1'
+          and current_setting('t.pv7')::jsonb #> '{rows,0,parsed,donor,donor_id}' = 'null'::jsonb,
+          'donor look-up: a donor linked only to Tanzania projects is not matched for a Kenya collector');
+select is((current_setting('t.pv7')::jsonb #>> '{rows,1,parsed,donor,donor_id}')::uuid, tests.id('donor:p_ke_1'),
+          'donor look-up: a donor the caller can see is reused');
+select ok((public.import_commit(current_setting('t.b7')::uuid) ->> 'committed')::boolean, 'donor look-up: batch committed');
+select is(tests.visible('donors', array[tests.id('donor:p_pemba_1')]), '{}'::uuid[],
+          'donor link: the Tanzania donor is still invisible to the Kenya collector after the commit');
+select tests.logout();
+select is((select count(*)::int from public.project_donors pd join public.projects p on p.id = pd.project_id
+           where p.import_batch_id = current_setting('t.b7')::uuid and pd.donor_id = tests.id('donor:p_pemba_1')), 0,
+          'donor link: the foreign donor is not linked to the Kenya project');
+select ok((select d.created_by = tests.id('u_col_ke') and d.name_latin = 'Donor p_pemba_1' and d.notes is null
+           from public.project_donors pd join public.projects p on p.id = pd.project_id
+           join public.donors d on d.id = pd.donor_id
+           where p.import_batch_id = current_setting('t.b7')::uuid and p.type = 'mosque'),
+          'donor link: a new donor of that name is created by the importer instead');
+select is((select count(*)::int from public.project_donors pd join public.projects p on p.id = pd.project_id
+           where p.import_batch_id = current_setting('t.b7')::uuid and pd.donor_id = tests.id('donor:p_ke_1')), 1,
+          'donor link: the visible donor is linked');
+
+-- The donor is re-checked at commit time: visible at preview (linked to a Tanga project), invisible
+-- at commit (that project moved to Pemba) -> not linked, a new donor is created.
+insert into public.donors (id, created_by, name_ar, name_latin)
+values (tests._uuid('imp:donor_hq'), tests.id('u_hq'), 'متبرع المقر', 'HQ Donor');
+insert into public.project_donors (id, created_by, project_id, donor_id, amount, currency, year)
+values (tests._uuid('imp:pdonor_hq'), tests.id('u_hq'), tests.id('p_tanga_1'), tests._uuid('imp:donor_hq'), 100, 'USD', 2019);
+select tests.login_as(tests.id('u_col_tanga'), 'aal1');
+select set_config('t.b8', public.import_stage('{}'::jsonb, jsonb_build_array(
+    jsonb_build_object('name_ar', 'مسجد تانغا', 'type', 'mosque', 'lat', '-5.30', 'lon', '39.00', 'country', 'TZ',
+                       'donor', 'HQ Donor'))) ->> 'batch_id', true);
+select is((public.import_preview(current_setting('t.b8')::uuid) #>> '{rows,0,parsed,donor,donor_id}')::uuid,
+          tests._uuid('imp:donor_hq'), 'commit re-check: the donor of a project in scope is matched at preview');
+select tests.logout();
+update public.projects set branch_id = tests.id('br_pemba') where id = tests.id('p_tanga_1');
+select tests.login_as(tests.id('u_col_tanga'), 'aal1');
+select ok((public.import_commit(current_setting('t.b8')::uuid) ->> 'committed')::boolean, 'commit re-check: committed');
+select tests.logout();
+update public.projects set branch_id = tests.id('br_tanga') where id = tests.id('p_tanga_1');
+select ok((select d.id <> tests._uuid('imp:donor_hq') and d.created_by = tests.id('u_col_tanga') and d.name_latin = 'HQ Donor'
+           from public.project_donors pd join public.projects p on p.id = pd.project_id
+           join public.donors d on d.id = pd.donor_id
+           where p.import_batch_id = current_setting('t.b8')::uuid),
+          'commit re-check: a donor that left the caller''s visibility since the preview is not linked (a new one is created)');
+
+-- Localities: a row in a country whose localities the caller cannot read gets no locality answer at all
+-- (neither the id of an existing one nor "locality_new" for an unknown name).
+select tests.login_as(tests.id('u_col_ke'), 'aal1');
+select set_config('t.b9', public.import_stage('{}'::jsonb, jsonb_build_array(
+    jsonb_build_object('name_ar', 'مسجد أ', 'type', 'mosque', 'lat', '-5.10', 'lon', '39.05', 'locality', 'Village tz_tanga'),
+    jsonb_build_object('name_ar', 'مسجد ب', 'type', 'mosque', 'lat', '-5.12', 'lon', '39.07', 'locality', 'Kijiji Hakipo')))
+  ->> 'batch_id', true);
+select set_config('t.pv9', public.import_preview(current_setting('t.b9')::uuid)::text, true);
+select tests.logout();
+select ok(current_setting('t.pv9')::jsonb #> '{rows,0,errors}' @> '[{"code": "out_of_scope"}]'::jsonb
+          and current_setting('t.pv9')::jsonb #> '{rows,1,errors}' @> '[{"code": "out_of_scope"}]'::jsonb
+          and not (current_setting('t.pv9')::jsonb #> '{rows,0,parsed,project}' ? 'locality_id')
+          and not (current_setting('t.pv9')::jsonb #> '{rows,0,parsed}' ? 'locality_new')
+          and not (current_setting('t.pv9')::jsonb #> '{rows,1,parsed}' ? 'locality_new')
+          and not jsonb_path_exists(current_setting('t.pv9')::jsonb, '$.rows[*].warnings[*] ? (@.code == "locality_new")'),
+          'locality look-up: rows in another country neither resolve nor propose a locality');
+
+-- external_id held by a record outside the caller's read scope: one neutral answer whether that record
+-- is live or deleted (the key itself is globally unique); a deleted record in scope still says so.
+update public.projects set external_id = 'T-TZ-LIVE' where id = tests.id('p_tanga_1');
+insert into public.projects
+  (id, created_by, name_ar, type, status, geom, location_source, country_id, branch_id, record_state, external_id, deleted_at)
+values
+  (tests._uuid('imp:deleted_tz'), tests.id('u_col_tanga'), 'مشروع محذوف', 'mosque', 'active',
+   st_setsrid(st_makepoint(39.20, -5.20), 4326), 'gps', tests.id('tz'), tests.id('br_tanga'), 'draft', 'T-TZ-DELETED', now()),
+  (tests._uuid('imp:deleted_ke'), tests.id('u_col_ke'), 'مشروع محذوف كيني', 'mosque', 'active',
+   st_setsrid(st_makepoint(39.55, -3.95), 4326), 'gps', tests.id('ke'), tests.id('br_mombasa'), 'draft', 'T-KE-DELETED', now());
+select tests.login_as(tests.id('u_col_ke'), 'aal1');
+select set_config('t.b10', public.import_stage('{}'::jsonb, jsonb_build_array(
+    jsonb_build_object('external_id', 'T-TZ-LIVE', 'name_ar', 'مسجد ج', 'type', 'mosque', 'lat', '-4.12', 'lon', '39.62'),
+    jsonb_build_object('external_id', 'T-TZ-DELETED', 'name_ar', 'مسجد د', 'type', 'mosque', 'lat', '-4.14', 'lon', '39.64'),
+    jsonb_build_object('external_id', 'T-TZ-FREE', 'name_ar', 'مسجد ه', 'type', 'mosque', 'lat', '-4.16', 'lon', '39.66'),
+    jsonb_build_object('external_id', 'T-KE-DELETED', 'name_ar', 'مسجد و', 'type', 'mosque', 'lat', '-4.18', 'lon', '39.68')))
+  ->> 'batch_id', true);
+select set_config('t.pv10', public.import_preview(current_setting('t.b10')::uuid)::text, true);
+select tests.logout();
+select ok(current_setting('t.pv10')::jsonb #> '{rows,0,errors}' = current_setting('t.pv10')::jsonb #> '{rows,1,errors}'
+          and current_setting('t.pv10')::jsonb #> '{rows,0,errors}' @> '[{"field": "external_id", "code": "no_write_access"}]'::jsonb
+          and current_setting('t.pv10')::jsonb #>> '{rows,2,state}' = 'valid',
+          'external_id: a key held by a live or a deleted record of another country gets the same answer');
+select ok(current_setting('t.pv10')::jsonb #> '{rows,3,errors}' @> '[{"field": "external_id", "code": "external_id_deleted"}]'::jsonb,
+          'external_id: a key held by a deleted record inside the caller''s scope is reported as deleted');
 
 select * from finish();
 rollback;

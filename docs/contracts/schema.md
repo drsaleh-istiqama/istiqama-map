@@ -202,6 +202,13 @@ Indexes: GiST `geom`; GIN trgm on `name_ar`, `name_latin`, `search_norm`;
 **`project_land`** (S, 1:1) — `project_id` → projects (not null), `ownership text`
 (`association|waqf|person|government|other`), `owner_name text`, `area_m2 numeric(14,2)` ≥ 0,
 `utilization_pct numeric(5,2)` 0..100, `expandable boolean`, `notes text`.
+`owner_name` is **people data** whatever `ownership` says: with `ownership = 'person'` it is a
+private individual's name, and a `viewer` sees no names of persons (brief §3). The row is a
+public child (every reader of the project gets it), but `owner_name` must not reach a caller
+without people scope on the project: no column privilege for direct SELECT, `null` on the wire
+of `sync_pull`, key absent from `report_project`, export column class `people`. This layer does
+not enforce it; the RLS/grants, sync and report/export layers do (authz.md §5, sync.md §5.4,
+reports-import-export.md).
 
 **`project_facilities`** (S, 1:1) — `project_id`, `teacher_housing`, `imam_housing`,
 `guest_housing`, `library`, `hall` (`boolean`, nullable = unknown), `quran_count`, `quran_need`,

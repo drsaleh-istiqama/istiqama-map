@@ -24,7 +24,7 @@ Functions that write (rate limit, access log, jobs) are `VOLATILE` → call them
 |---|---|---|
 | `dashboard(p_scope_type text, p_scope_id uuid default null)` → jsonb | any role with read scope | yes |
 | `report_project(p_id uuid)` → jsonb | read scope of the project | yes |
-| `report_donor(p_id uuid)` → jsonb | any role | yes |
+| `report_donor(p_id uuid)` → jsonb | any role; the donor must be visible to the caller | yes |
 | `report_country(p_id uuid)` → jsonb | read scope of the country | yes |
 | `export_request(p_format text, p_lang text default 'ar', p_filters jsonb default '{}')` → jsonb | any role | yes |
 | `export_columns(p_lang text default 'ar')` → jsonb | any role | no |
@@ -174,7 +174,7 @@ In `by_area` / `by_country` / `by_branch`, `maintenance` = projects whose **stat
   "donors": [ { "id", "donor_id", "name_ar", "name_latin", "amount", "currency", "year" } ],
   "maintenance": [ { "id", "reported_on", "description", "priority", "state", "estimated_cost", "currency", "resolved_on" } ],   // newest first
   "staff_count": 2,                                    // current assignments, for everybody
-  "staff": [ { "project_staff_id", "person_id", "name_ar", "name_latin", "role", "start_date", "end_date", "phone",
+  "staff": [ { "project_staff_id", "person_id", "person_visible": true, "name_ar", "name_latin", "role", "start_date", "end_date", "phone",
                "gender", "birth_year", "education_level", "graduated_from",
                "monthly_amount", "currency", "effective_from" } ],     // key ABSENT for viewers; the 3 salary keys only with restricted access
   "entered_by": { "id", "full_name" },                 // absent for viewers
@@ -184,9 +184,24 @@ In `by_area` / `by_country` / `by_branch`, `maintenance` = projects whose **stat
 Photos are paths in bucket `photos`; lists must show the thumbnail and sign the full path on demand.
 Restricted reads are logged (`context = 'report_project:<id>'`).
 
+`staff` follows two rules, exactly like RLS / `sync_pull`: the assignments are listed when the
+**project** is in the caller's people scope (`project_staff_select`), and the person columns
+(`name_ar`, `name_latin`, `phone`, `gender`, `birth_year`, `education_level`, `graduated_from`) are
+filled only when the **person** is in the caller's people scope (`persons_select`). Persons keep
+their own country / branch when a project moves (sync.md §5.3, known limit 2), so after a move the
+new branch sees the assignment of a person it cannot see: that entry has `person_visible: false`
+and `null` in every person column (role, dates, `person_id` and — with restricted access — the
+salary of the assignment stay). Render it as "hidden person". `staff_count` counts all assignments.
+
 ### `report_donor(p_id)`
-`PT404` unknown donor, `PT403` caller without any role. Only the donor's projects inside the caller's
-read scope are counted and listed (max 500, ordered by first contribution year, then code).
+`PT404` when the donor does not exist, is deleted, **or is not visible to the caller** — the rule of
+the RLS policy `donors_select`, `sync_pull` and `sync_push` (sync.md §5.5): global readers see every
+donor, everybody else the donors he created and the donors linked by a `project_donors` row to a
+project in his read scope. A hidden donor and an unknown id give the same error (brief §14.5: a
+Kenyan user never receives a donor known only in Tanzania, not even its name). `PT403` caller
+without any role. Only the donor's projects inside the caller's read scope are counted and listed
+(max 500, ordered by first contribution year, then code); a visible donor without such a project
+(e.g. one the caller created) returns `projects_total: 0`.
 
 ```jsonc
 {
@@ -298,6 +313,10 @@ Column keys in order (the list returned to a caller contains only the groups it 
   inside composite cells are already in the job language.
 - People keys exist only when the caller has a non-viewer role somewhere; restricted keys only with
   restricted access somewhere. Inside a mixed scope, rows outside that capability carry `null`.
+- Person names and phones also follow the **person's** own scope (`persons_select`, as in
+  `report_project`): a current staff member whose person row is outside the caller's people scope
+  (persons stay put when a project moves) appears in `staff_list` as `?` with the role, and is never
+  used for `manager_name` / `manager_phone` (those come from the first visible manager, or `null`).
 - `PT404` unknown job or not the caller's; `PT409` job not `queued`/`running`. The first call moves
   the job to `running`; every call stores `next` in `export_jobs.cursor` (resume point).
 - Restricted pages are logged (`context = 'export:<job id>'`, ids of the compensation / sensitive rows read).
@@ -353,11 +372,21 @@ Validation per row:
 - `branch`: the cell, else the batch default, else the caller's only branch in that country, else
   the only branch whose `admin_area_ids` cover the area;
 - `locality`: matched by name inside the country, otherwise a *proposed* locality is created on commit
-  (warning `locality_new`);
+  (warning `locality_new`). Only done in a country whose localities the caller may read
+  (`localities_select`); a row in any other country is `out_of_scope` anyway and gets neither a
+  `locality_id` nor `locality_new`;
 - every row must be inside the caller's **write scope** (`out_of_scope`);
 - `external_id` already present → the row becomes an **update** of that project (only if the caller
   may update it: reviewers of its scope, or its creator while it is not approved; otherwise
-  `no_write_access`); twice in the file → `duplicate_external_id_in_file`;
+  `no_write_access`); twice in the file → `duplicate_external_id_in_file`. `external_id_deleted`
+  only for a deleted record the caller can read; a key held by a record **outside the caller's read
+  scope**, live or deleted, always answers `no_write_access` (same text). The merge key is unique
+  across all countries (`projects_external_id_key`), so a foreign key cannot be reused: that the
+  key is taken stays observable (also through `sync_push` → `unique_violation`), nothing else;
+- `donor`: matched by name among the donors **the caller can see** (rule of `donors_select` /
+  `sync_push`, sync.md §5.5); a same-named donor known only in another scope is neither returned in
+  `parsed.donor.donor_id` nor linked — the commit creates a new donor (created by the importer),
+  exactly what `sync_push` lets this user do;
 - duplicates (brief §7.3) for new rows: `project_duplicates()` (same type within 150 m, or similar
   name in the same locality / level-3 area) against existing projects, and between rows of the
   file itself (compatible type within 150 m, or the same normalised name in the same locality /
@@ -404,6 +433,9 @@ Returns the row (`row_no`, `state`, `action`, `errors`, `warnings`, `duplicate_o
 All-or-nothing. New projects: `record_state = 'draft'`, `location_source = 'import'`,
 `import_batch_id = batch`, created by the caller; child rows (`project_land`, `project_facilities`,
 `community_profiles`), donor link and maintenance entry are created when the row has such cells.
+The donor of `parsed.donor` is re-checked at commit time: if it is no longer visible to the caller
+(rights or project scope changed since the preview) it is not linked; the name is looked up again
+among the visible donors, else a new donor is created.
 Updates write **only the cells present in the file** (per field), never touch `record_state`, and
 store `import_rows.pre_image`:
 ```jsonc
@@ -467,6 +499,9 @@ hard-deleted.
 - `private.require_session()` — the session gate above (`PT401` no user, `PT403 session_revoked`);
   not executable by API roles, call it from SECURITY DEFINER code.
 - `private.nil_uuid()`, `private.enum_label(enum_key, code, lang)`.
+- `private.donor_visible(donor_id, created_by, uid, read_all, read_countries, read_branches)` →
+  boolean — the `donors_select` rule for a caller whose read triple is passed in (fetch the triple
+  once per call, authz.md §3 b); not executable by API roles.
 - `private.enum_labels(enum_key, code, sort_order, ar, sw, en)` — single source of the ar / sw / en
   labels of enumerated values (the web locale files should stay in sync with it).
 - `private.dashboard_data(scope_type, scope_id, with_payroll, with_names)` — builder without

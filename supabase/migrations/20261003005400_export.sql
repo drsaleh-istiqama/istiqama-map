@@ -555,23 +555,33 @@ begin
       where s.project_id = p.id and s.deleted_at is null
         and (s.end_date is null or s.end_date >= current_date)
     ) stc on true
-    -- people columns: only for rows inside the caller's people scope
+    -- people columns: only for rows inside the caller's people scope, and person names / phones
+    -- only for persons inside it too (persons keep their own scope when a project moves, sync.md
+    -- §5.3; the persons_select rule). A person outside it is listed as "?" with the role and is
+    -- never the manager_name / manager_phone.
     left join lateral (
       select
-        string_agg(q.nm || ' (' || q.role_label || ')', ' | ' order by q.role_rank, q.nm) as staff_list,
-        (array_agg(q.nm order by q.nm) filter (where q.role = 'manager'))[1] as manager_name,
-        (array_agg(q.phone order by q.nm) filter (where q.role = 'manager'))[1] as manager_phone,
+        string_agg(q.nm || ' (' || q.role_label || ')', ' | ' order by q.role_rank, q.nm, q.pid) as staff_list,
+        (array_agg(q.nm order by q.nm, q.pid) filter (where q.role = 'manager' and q.vis))[1] as manager_name,
+        (array_agg(q.phone order by q.nm, q.pid) filter (where q.role = 'manager' and q.vis))[1] as manager_phone,
         (select pr.full_name from public.profiles pr where pr.id = p.created_by) as entered_by
       from (
         select s.role,
-               coalesce(case when v_lang = 'ar' then coalesce(pe.name_ar, pe.name_latin)
+               pe.id as pid,
+               pv.ok as vis,
+               coalesce(case when not pv.ok then null
+                             when v_lang = 'ar' then coalesce(pe.name_ar, pe.name_latin)
                              else coalesce(pe.name_latin, pe.name_ar) end, '?') as nm,
-               pe.phone_e164 as phone,
+               case when pv.ok then pe.phone_e164 end as phone,
                coalesce(case v_lang when 'ar' then e.ar when 'sw' then e.sw else e.en end, s.role) as role_label,
                case s.role when 'manager' then 1 when 'imam' then 2 when 'teacher' then 3
                            when 'agent' then 4 when 'administrator' then 5 else 6 end as role_rank
         from public.project_staff s
         join public.persons pe on pe.id = s.person_id and pe.deleted_at is null
+        cross join lateral (
+          select coalesce(v_p_all or pe.country_id = any (v_p_countries)
+                          or pe.branch_id = any (v_p_branches), false) as ok
+        ) pv
         left join private.enum_labels e on e.enum_key = 'staff_role' and e.code = s.role
         where s.project_id = p.id and s.deleted_at is null
           and (s.end_date is null or s.end_date >= current_date)

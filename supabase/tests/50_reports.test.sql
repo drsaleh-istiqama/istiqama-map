@@ -3,7 +3,7 @@
 begin;
 set local search_path = public, extensions, tests;
 
-select plan(71);
+select plan(79);
 
 select tests.fixture_extra();
 
@@ -181,9 +181,22 @@ select tests.login_as(tests.id('u_col_ke'), 'aal1');
 select throws_ok(format('select public.report_project(%L)', tests.id('p_pemba_1')), 'PT404', null,
                  'report_project: a Kenya collector cannot read a Tanzania project');
 
--- report_donor: only projects inside the caller's scope
-select is((public.report_donor(tests.id('donor:p_pemba_1')) ->> 'projects_total')::int, 0,
-          'report_donor: projects outside the caller''s scope are not listed');
+-- report_donor: only donors the caller can see (donors_select rule, brief §14.5), with only the
+-- projects inside the caller's scope. A hidden donor answers exactly like an unknown id.
+select throws_ok(format('select public.report_donor(%L)', tests.id('donor:p_pemba_1')), 'PT404', 'donor not found',
+                 'report_donor: a Kenya collector cannot read a donor linked only to Tanzania projects');
+select throws_ok(format('select public.report_donor(%L)', tests.id('donor_unlinked')), 'PT404', 'donor not found',
+                 'report_donor: an unlinked donor entered by somebody else is not readable');
+select throws_ok(format('select public.report_donor(%L)', tests._uuid('rep:no_such_donor')), 'PT404', 'donor not found',
+                 'report_donor: an unknown donor gives the same answer');
+select is((public.report_donor(tests.id('donor:p_ke_1')) ->> 'projects_total')::int, 1,
+          'report_donor: a donor linked to a project in scope is readable with that project');
+select tests.logout();
+
+select tests.login_as(tests.id('u_col_pemba'), 'aal1');
+select ok((public.report_donor(tests.id('donor_unlinked')) #>> '{donor,id}')::uuid = tests.id('donor_unlinked')
+          and (public.report_donor(tests.id('donor_unlinked')) ->> 'projects_total')::int = 0,
+          'report_donor: the creator of an unlinked donor can read it');
 select tests.logout();
 
 select tests.login_as(tests.id('u_viewer_global'), 'aal1');
@@ -207,6 +220,32 @@ select tests.logout();
 select tests.login_as(tests.id('u_col_pemba'), 'aal1');
 select throws_ok(format('select public.report_country(%L)', tests.id('tz')), 'PT403', null,
                  'report_country: a branch user cannot read the country report');
+select tests.logout();
+
+-- report_project: person columns follow the PERSON's scope (persons_select). Persons keep their
+-- branch when a project moves (sync.md §5.3), so after p_pemba_2 moved to Tanga the Tanga
+-- collector gets the assignment but not the Pemba person's name, phone or other details.
+update public.projects set branch_id = tests.id('br_tanga') where id = tests.id('p_pemba_2');
+select tests.login_as(tests.id('u_col_tanga'), 'aal1');
+select is(tests.visible('persons', array[tests.id('person:p_pemba_2')]), '{}'::uuid[],
+          'moved project: the Pemba person is invisible to the Tanga collector (RLS)');
+select set_config('t.p', public.report_project(tests.id('p_pemba_2'))::text, true);
+select ok(jsonb_array_length(current_setting('t.p')::jsonb -> 'staff') = 1
+          and (current_setting('t.p')::jsonb #>> '{staff,0,person_id}')::uuid = tests.id('person:p_pemba_2')
+          and current_setting('t.p')::jsonb #>> '{staff,0,role}' = 'imam'
+          and current_setting('t.p')::jsonb #> '{staff,0,person_visible}' = 'false'::jsonb
+          and (current_setting('t.p')::jsonb ->> 'staff_count')::int = 1,
+          'report_project: the assignment of a person outside the people scope is listed (person_visible = false)');
+select is((select array_agg(k order by k) from jsonb_each(current_setting('t.p')::jsonb #> '{staff,0}') e(k, v)
+           where k in ('name_ar', 'name_latin', 'phone', 'gender', 'birth_year', 'education_level', 'graduated_from')
+             and v <> 'null'::jsonb),
+          null::text[], 'report_project: ... without any person column (name, phone, birth year, ...)');
+select tests.logout();
+select tests.login_as(tests.id('u_mgr_tz'));
+select ok(public.report_project(tests.id('p_pemba_2')) #> '{staff,0,person_visible}' = 'true'::jsonb
+          and public.report_project(tests.id('p_pemba_2')) #>> '{staff,0,phone}'
+              = (select pe.phone_e164 from public.persons pe where pe.id = tests.id('person:p_pemba_2')),
+          'report_project: a caller whose people scope covers the person gets the person columns');
 select tests.logout();
 
 -- Session gate: every report RPC refuses a revoked session with the sync error (the client signs out)

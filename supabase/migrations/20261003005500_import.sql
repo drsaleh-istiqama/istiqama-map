@@ -13,6 +13,9 @@
 --   * a row whose external_id already exists UPDATES that project: only the cells that are
 --     filled in the file are written, nothing else is touched (never a wholesale replace);
 --   * every updated row keeps a field-level pre-image (before / after) in import_rows.pre_image;
+--   * look-ups resolve only to rows the caller could read himself (projects by external_id,
+--     localities, donors — private.donor_visible): preview and errors never reveal another
+--     scope's records, and a commit never links a donor the caller cannot see;
 --   * staff, salaries and sensitive community data are NOT importable (people are never merged
 --     automatically, brief §2.4; restricted data never travels in spreadsheets).
 
@@ -581,6 +584,14 @@ declare
   v_w_all boolean := private.write_all();
   v_w_countries uuid[] := private.write_countries();
   v_w_branches uuid[] := private.write_branches();
+  -- Read scope: look-ups of scoped reference rows (existing projects by external_id, localities,
+  -- donors) only ever resolve to rows the caller could read himself. import_rows.parsed / errors
+  -- are returned by import_preview and readable by the owner, so a row that names something
+  -- outside that scope must look exactly as if it did not exist (brief §14.5).
+  v_r_all boolean := private.read_all();
+  v_r_countries uuid[] := private.read_countries();
+  v_r_branches uuid[] := private.read_branches();
+  v_loc_countries uuid[];   -- countries whose localities the caller may read (localities_select)
   v_default_country uuid;
   -- lookup maps (built once per batch)
   v_keymap jsonb;
@@ -712,6 +723,15 @@ begin
   cross join lateral (values (c.iso2::text), (c.iso3::text), (c.name_ar), (c.name_en), (c.name_sw)) v(label)
   where c.deleted_at is null and c.active and v.label is not null and private.norm(v.label) <> '';
 
+  -- localities_select: read countries + the countries of read branches
+  select coalesce(array_agg(distinct x.id), '{}'::uuid[]) into v_loc_countries
+  from (
+    select unnest(v_r_countries) as id
+    union all
+    select b.country_id from public.branches b where b.id = any (v_r_branches)
+  ) x
+  where x.id is not null;
+
   -- default country: the batch's, else the only country the caller can write to
   v_default_country := v_batch.country_id;
   if v_default_country is null and not v_w_all then
@@ -796,7 +816,14 @@ begin
           into v_t_id, v_t_country, v_t_branch, v_t_deleted
         from public.projects p where p.external_id = v_ext;
         if found then
-          if v_t_deleted is not null then
+          if not coalesce(v_r_all or v_t_country = any (v_r_countries)
+                          or v_t_branch = any (v_r_branches), false) then
+            -- A record outside the caller's read scope holds the key (the merge key is globally
+            -- unique, projects_external_id_key): one neutral answer whether it is live or deleted,
+            -- the same as for a readable record the caller may not update.
+            v_err := v_err || private.import_issue('external_id', 'no_write_access',
+              'a record with this external_id exists and you may not update it');
+          elsif v_t_deleted is not null then
             v_err := v_err || private.import_issue('external_id', 'external_id_deleted',
               'a deleted record already uses this external_id');
           elsif not private.import_can_update(v_t_id) then
@@ -1077,8 +1104,12 @@ begin
       end if;
     end if;
 
-    -- locality by name inside the country; unknown names become proposed localities on commit
-    if v_geo ? 'locality' and v_country is not null then
+    -- locality by name inside the country; unknown names become proposed localities on commit.
+    -- Only in a country whose localities the caller may read: elsewhere the answer ("found" with
+    -- its id vs "locality_new") would reveal another country's localities. Such a row is always
+    -- out_of_scope (write scope is inside read scope), so nothing is lost by skipping it.
+    if v_geo ? 'locality' and v_country is not null
+       and (v_r_all or v_country = any (v_loc_countries)) then
       v_n := private.norm(v_geo ->> 'locality');
       -- candidates with that name in the country (cached per name) ...
       v_ck := 'loc|' || v_country::text || '|' || v_n;
@@ -1135,11 +1166,16 @@ begin
       v_ck := 'donor|' || v_n;
       v_hit := v_cache -> v_ck;
       if v_hit is null then
+        -- Only a donor the caller can already see is reused (donors_select / sync_push rule,
+        -- private.donor_visible): a same-named donor known only in another scope is neither
+        -- revealed here nor linked on commit (that link would make it visible); the commit creates
+        -- a new donor instead, as sync_push would for this user.
         select jsonb_build_object('id', (
           select dn.id from public.donors dn
           where dn.deleted_at is null
             and dn.name_norm like '%' || private.like_escape(v_n) || '%'
             and (dn.name_norm = v_n or private.norm(dn.name_ar) = v_n or private.norm(dn.name_latin) = v_n)
+            and private.donor_visible(dn.id, dn.created_by, v_uid, v_r_all, v_r_countries, v_r_branches)
           order by dn.created_at, dn.id
           limit 1)) into v_hit;
         if v_cache_n < c_cache_max then v_cache := v_cache || jsonb_build_object(v_ck, v_hit); v_cache_n := v_cache_n + 1; end if;
@@ -1622,6 +1658,9 @@ declare
   v_w_all boolean;
   v_w_countries uuid[];
   v_w_branches uuid[];
+  v_r_all boolean;
+  v_r_countries uuid[];
+  v_r_branches uuid[];
   r record;
   v_row_no integer;
   v_prj jsonb;
@@ -1669,6 +1708,9 @@ begin
   v_w_all := private.write_all();
   v_w_countries := private.write_countries();
   v_w_branches := private.write_branches();
+  v_r_all := private.read_all();
+  v_r_countries := private.read_countries();
+  v_r_branches := private.read_branches();
 
   begin
     for r in
@@ -1813,11 +1855,21 @@ begin
       if r.parsed ? 'donor' then
         v_dn := r.parsed -> 'donor';
         v_donor_id := nullif(v_dn ->> 'donor_id', '')::uuid;
+        -- Only a donor the caller can see NOW is linked (rights may have changed since the
+        -- preview): linking a foreign donor to an own project would make it visible, which
+        -- sync_push refuses too (donor_not_available). Otherwise a new donor is created.
+        if v_donor_id is not null and not exists (
+             select 1 from public.donors dn
+             where dn.id = v_donor_id and dn.deleted_at is null
+               and private.donor_visible(dn.id, dn.created_by, v_uid, v_r_all, v_r_countries, v_r_branches)) then
+          v_donor_id := null;
+        end if;
         if v_donor_id is null then
           v_norm := private.norm(v_dn ->> 'name');
           select dn.id into v_donor_id
           from public.donors dn
           where dn.name_norm = v_norm and dn.deleted_at is null
+            and private.donor_visible(dn.id, dn.created_by, v_uid, v_r_all, v_r_countries, v_r_branches)
           order by dn.created_at, dn.id
           limit 1;
         end if;

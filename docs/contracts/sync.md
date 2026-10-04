@@ -167,13 +167,14 @@ counters is `report_device_status()` (see `people-admin.md` §7); `sync_push` st
 ```
 
 Optional result keys: `row_id` (the op was applied to a different, already existing row —
-see natural keys), `ignored_fields` (names in `fields` that are not columns).
+see natural keys; never for a blind write, §4.4), `ignored_fields` (names in `fields` that
+are not columns).
 
 ### 4.1 Status → what the client does
 
 | Status      | Meaning                                                                                                               | Client                                                                                                                                                                                                                       |
 | ----------- | --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `applied`   | written (or nothing to change)                                                                                        | drop the op; set the local row `version` to `version` unless a newer local edit is pending                                                                                                                                   |
+| `applied`   | written (or nothing to change); for a blind write on a restricted table always this, with `version: null` (§4.4)      | drop the op; set the local row `version` to `version` unless a newer local edit is pending                                                                                                                                   |
 | `merged`    | written although other devices changed other fields meanwhile                                                         | same as `applied`; the merged row arrives with the next pull                                                                                                                                                                 |
 | `conflict`  | the fields in `conflict_fields` were **not** written (same field changed elsewhere), the other fields were            | drop the op; overwrite the local copy of each conflicting field with `server_values[field]` (location: `{"geom": {"lon", "lat"}}`); the reviewer decides, the result arrives through pull                                    |
 | `duplicate` | this `op_id` was applied before                                                                                       | drop the op; treat like `original_status`                                                                                                                                                                                    |
@@ -219,24 +220,33 @@ Whole-call errors (HTTP error, nothing applied — retry the same batch later, i
      caller's single country scope). Otherwise send them. For `projects` the server then
      derives `country_id`/`admin_area_id` from the point; the stored row must still be in
      the caller's write scope (`out_of_scope`) and its branch must belong to its country
-     (`branch_country_mismatch`).
+     (`branch_country_mismatch`). A project's `locality_id` must name a locality of the
+     project's (stored, derived) country, on insert and whenever `locality_id` or the
+     location/country changes (`locality_country_mismatch`, PT422): the locality's names
+     are copied into `search_norm` and shown with the project.
    - `localities`: `country_id` defaults from the caller's single country.
    - children: the parent must exist (`parent_missing`) and be live (`parent_deleted`).
    - **`created_at`** (every table): an insert may carry the time at which the row was
      created on the device (ISO 8601 **with** offset or `Z`). It is stored as sent, so the
      offline entry time survives a late sync. A value more than 5 minutes ahead of the
      server clock is replaced by the server time; a missing, `null`, blank or infinite value
-     means "now"; anything that is not a timestamp rejects the op (`invalid_value`). There
-     is no lower bound: a device whose clock is in the past stores that past time. On
-     update (also when an insert is redirected to an existing row by a natural key)
-     `created_at` is ignored — it never changes after the insert.
+     means "now"; anything that is not a timestamp rejects the op (`invalid_value`) — also
+     when the insert is then redirected to an existing row by a natural key (the value is
+     checked before the lookup). There is no lower bound: a device whose clock is in the
+     past stores that past time. On update (also when an insert is redirected to an
+     existing row by a natural key) a valid `created_at` is ignored — it never changes
+     after the insert.
 5. **Natural keys.** For `project_land`, `project_facilities`, `community_profiles`,
    `community_sensitive` (one live row per `project_id`) and `staff_compensation` (one
    live row per `project_staff_id` + `effective_from`, send both): an insert whose key
    already has a live row is applied to that row as an update with `base_version` 0 and the
-   result carries `row_id` = id of the existing row. The client deletes its local row with
-   the op's `id`; the canonical row arrives through pull (never for restricted tables on a
-   collector's device).
+   result carries `row_id` = id of the existing row (not for a blind write, §4.4). The
+   client deletes its local row with the op's `id`; the canonical row arrives through pull
+   (never for restricted tables on a collector's device). A key column left out takes its
+   column default before the lookup (`staff_compensation.effective_from` = today), so the
+   insert finds the row it would otherwise collide with. A redirected insert is still an
+   insert: under a deleted parent it is refused with `parent_deleted`, exactly as when
+   the key has no live row.
 6. **Update** (row exists): role class of `update`; a row that is soft-deleted →
    `rejected/row_deleted`; `base_version` 0 for a row created by somebody else →
    `rejected/id_taken`; parent links (`project_id`, `project_staff_id`,
@@ -262,10 +272,10 @@ Whole-call errors (HTTP error, nothing applied — retry the same batch later, i
 
 **`projects.record_state`**
 
-| Caller                        | Allowed                                                                                                                                                                                                                                                                                                                                                    |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Caller                        | Allowed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | creator without review rights | insert as `draft` (default) or `submitted`; `draft → submitted`, `returned → submitted`, `approved → submitted`. Any edit of an `approved` record (or of its land, facilities, donors, staff, community profile) sets it back to `submitted`. `→ approved` / `→ returned` → `rejected/forbidden_transition`; anything else → `rejected/invalid_transition`. **Delete** only while the record is `draft` or `returned`; a `submitted` or `approved` record → `rejected/forbidden_transition` (a reviewer deletes it, or returns it first) |
-| reviewer in scope             | additionally `draft/submitted/returned → approved`, `submitted/approved → returned`; `reviewed_by`, `reviewed_at` are stamped by the server, `review_note` is stored; may delete in any state                                                                                                                                                             |
+| reviewer in scope             | additionally `draft/submitted/returned → approved`, `submitted/approved → returned`; `reviewed_by`, `reviewed_at` are stamped by the server, `review_note` is stored; may delete in any state                                                                                                                                                                                                                                                                                                                                            |
 
 A record cannot leave `draft` without a location (`check_violation`, constraint
 `projects_geom_required_ck`). Adding maintenance entries or photos never changes the state.
@@ -299,14 +309,41 @@ donor that exists (`parent_missing`), is not deleted and is visible to the calle
 
 ### 4.4 Restricted tables (`staff_compensation`, `community_sensitive`)
 
-Any writer with the parent project in scope may insert/update **blind**: results never
-contain stored values (`server_values` is omitted), conflicts are stored with both values
-but are visible (pull, `resolve_conflict`) only to users with restricted access to the
-project's country. Device rule (brief §3): a field collector keeps such a row only in
-`restricted_local` until the op returns `applied`, `merged`, `conflict` or `duplicate`, then
-deletes it. Because of the natural keys a collector can re-enter the data later with a new
-row id; if another device wrote different values meanwhile the op ends as `conflict` and a
-country manager decides.
+Any writer with the parent project in scope may insert/update. Results never contain
+stored values (`server_values` is omitted for everybody); conflicts are stored with both
+values but are visible (pull, `resolve_conflict`) only to users with restricted access to
+the project's country.
+
+**Blind writes.** A caller **without** restricted access to the project's country
+(field collector, branch supervisor; country manager / hq_admin are restricted readers
+only at `aal2`) writes blind: the answer must not depend on what is stored (brief §3: no
+salary, no restricted data of others; acceptance criterion 5). For such a caller:
+
+- **Constant answer.** Every accepted upsert or delete returns exactly
+  `{ "op_id": "…", "status": "applied", "version": null }` (plus `ignored_fields` when the
+  payload had unknown names) — no `row_id`, `conflict_ids`, `conflict_fields`, no `merged`.
+  Whether the values were written, were already equal, or were stored as open
+  `sync_conflicts` for a country manager (a value another device entered differently) is
+  not disclosed; `duplicate` replays return the same constant.
+- **Addressed by the natural key, never by the row id.** An upsert must name its parent
+  (`project_id` / `project_staff_id`; otherwise `parent_required`, also when the op's id
+  exists) and is applied to the live row of its natural key, or inserted. The op's id only
+  becomes the id of a newly inserted row (a new id is generated when it is already taken).
+  So a partial update by id is refused, and an op naming another row's id never touches
+  that row.
+- **Validated as an insert.** Before an existing row is touched the payload is checked as
+  the insert of a new row would be (NOT NULL columns, check constraints, types, foreign
+  keys, `created_at`); a redirected insert under a deleted parent is `parent_deleted`. A
+  rejection therefore never tells whether a row exists or which values it has, and an
+  invalid value never becomes a conflict.
+
+Device rule (brief §3): a device without restricted capability keeps such a row only in
+`restricted_local` until the op returns any non-rejected status, then deletes it. Because
+the result carries no `row_id`, a queued edit of such a row (made while its insert was in
+flight) must be sent as the **complete** row (natural key and all fields), never as a
+diff; the simplest way is to coalesce edits into the pending insert. Because of the natural
+keys a collector can re-enter the data later with a new row id; if another device wrote
+different values meanwhile, a country manager decides the open conflict.
 
 ### 4.5 Op-level error codes
 
@@ -314,7 +351,7 @@ country manager decides.
 `invalid_base_version`, `unknown_table`, `table_not_writable`, `operation_not_allowed`,
 `out_of_scope`, `not_owner`, `reviewer_required`, `parent_required`, `parent_missing`,
 `parent_deleted`, `row_deleted`, `id_taken`, `op_id_taken`, `immutable_field`,
-`invalid_coordinates`, `branch_country_mismatch`, `invalid_record_state`,
+`invalid_coordinates`, `branch_country_mismatch`, `locality_country_mismatch`, `invalid_record_state`,
 `forbidden_transition`, `invalid_transition`, `invalid_status`, `locality_locked`,
 `person_not_available`, `donor_not_available`; from table triggers: `photo_limit_exceeded`,
 `photo_project_immutable`, `invalid_option_value`, …; database constraints:
@@ -484,7 +521,8 @@ A location conflict has `field = "geom"` with `server_value` / `client_value` =
    pending fields on top of the pulled row instead.
 9. On a project tombstone or `gone`, delete the project's children locally.
 10. Restricted rows on a collector's device: purge after the server acknowledged the op
-    (§4.4).
+    (§4.4). Every upsert of such a row carries the complete row (natural key + all
+    fields): blind results carry no `row_id` / `version` to re-point queued edits to.
 11. On `scope_epoch` change or `reset: true`: wipe synced tables and pull from `null`
     (§5.2). On `PT403 session_revoked` or `register_device().revoked`: wipe everything and
     sign out.

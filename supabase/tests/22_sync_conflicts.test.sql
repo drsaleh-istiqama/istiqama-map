@@ -402,15 +402,26 @@ select 'x1', pg_temp.push(tests.id('u_col_pemba'), 'dev-a', jsonb_build_array(
   pg_temp.op(90, 'community_sensitive', pg_temp.nid(90), 0, jsonb_build_object(
     'project_id', tests.id('p_pemba_1'), 'ibadi_families', 99))));
 
-select is(pg_temp.st('x1'), array['conflict'], 'blind entry over an existing restricted value: conflict');
-select is(
-  (select array_agg(key order by key) from jsonb_object_keys(pg_temp.r('x1', 0)) as key),
-  array['conflict_fields', 'conflict_ids', 'op_id', 'row_id', 'status', 'version'],
-  'the push result does not reveal the stored restricted value (no server_values)');
+-- The collector writes blind: his answer is a constant (it does not even say
+-- that a conflict was recorded, sync.md §4.4); the conflict row is found here
+-- through the table.
+create function pg_temp.xcid() returns uuid language sql stable as
+$fn$
+  select c.id from public.sync_conflicts c
+  where c.table_name = 'community_sensitive' and c.row_id = tests.id('sens:p_pemba_1')
+    and c.field = 'ibadi_families' and c.client_value = '99'::jsonb
+$fn$;
 
-select ok(not (pg_temp.cid('x1') = any (pg_temp.pulled(tests.id('u_sup_pemba'), 'sync_conflicts'))),
+select is(pg_temp.r('x1', 0) - 'op_id', '{"status": "applied", "version": null}'::jsonb,
+  'blind entry over an existing restricted value: constant answer, nothing about the stored value');
+select is(
+  (select row(c.state, c.server_value, c.client_user_id)::text from public.sync_conflicts c where c.id = pg_temp.xcid()),
+  row('open'::text, '12'::jsonb, tests.id('u_col_pemba'))::text,
+  'the differing value is stored as an open conflict for those who may see restricted data');
+
+select ok(not (pg_temp.xcid() = any (pg_temp.pulled(tests.id('u_sup_pemba'), 'sync_conflicts'))),
   'a branch supervisor does not receive conflicts about restricted data');
-select ok(pg_temp.cid('x1') = any (pg_temp.pulled(tests.id('u_mgr_tz'), 'sync_conflicts', 'aal2')),
+select ok(pg_temp.xcid() = any (pg_temp.pulled(tests.id('u_mgr_tz'), 'sync_conflicts', 'aal2')),
   'the country manager receives the restricted conflict');
 select ok(
   exists (select 1 from public.restricted_access_log l
@@ -419,11 +430,11 @@ select ok(
   'pulling a restricted conflict is written to restricted_access_log');
 
 select throws_ok(
-  format($q$select pg_temp.resolve(%L::uuid, %L::uuid, 'client')$q$, tests.id('u_sup_pemba'), pg_temp.cid('x1')),
+  format($q$select pg_temp.resolve(%L::uuid, %L::uuid, 'client')$q$, tests.id('u_sup_pemba'), pg_temp.xcid()),
   'PT403', 'out_of_scope', 'a supervisor cannot resolve a conflict about restricted data');
 
 insert into res
-select 'x2', pg_temp.resolve(tests.id('u_mgr_tz'), pg_temp.cid('x1'), 'client', 'aal2');
+select 'x2', pg_temp.resolve(tests.id('u_mgr_tz'), pg_temp.xcid(), 'client', 'aal2');
 select is(
   (select s.ibadi_families from public.community_sensitive s where s.id = tests.id('sens:p_pemba_1')), 99,
   'the country manager applies the client value');

@@ -1,12 +1,13 @@
 -- =============================================================================
 -- 21  sync_push: idempotency, insert/update/delete, authorisation, workflow
---     (workflow rules also govern deletes: sections E, F, J)
+--     (workflow rules also govern deletes: sections E, F, J; blind restricted
+--     writes give a constant answer: section G; locality country: section N)
 --     (docs/contracts/sync.md; migration 0023)
 -- =============================================================================
 begin;
 set local search_path = public, extensions, tests;
 
-select plan(119);
+select plan(130);
 
 do $$ begin perform tests.fixture(); end $$;
 
@@ -665,7 +666,10 @@ select ok(
   'a reviewer may delete an approved locality');
 
 -- =============================================================================
--- G. Restricted tables: blind writes
+-- G. Restricted tables: blind writes (sync.md §4.4)
+--    A writer without restricted access to the row's country gets the same
+--    answer whatever is stored: it never tells him whether a row exists or
+--    which of his values the stored row already has (brief §3, criterion 5).
 -- =============================================================================
 -- the same device re-enters the sensitive row of the project with a NEW id
 insert into res
@@ -673,13 +677,14 @@ select 'g1', pg_temp.push(tests.id('u_col_pemba'), 'dev-a', jsonb_build_array(
   pg_temp.op(110, 'community_sensitive', pg_temp.nid(110), 0, jsonb_build_object(
     'project_id', pg_temp.nid(1), 'ibadi_families', 15))));
 
-select is(pg_temp.st('g1'), array['applied'], 'blind re-entry from the same device is applied');
-select is((pg_temp.r('g1', 0) ->> 'row_id')::uuid, pg_temp.nid(9),
-  'natural key: the operation was applied to the existing row and its id is returned');
+select is(pg_temp.r('g1', 0) - 'op_id', '{"status": "applied", "version": null}'::jsonb,
+  'blind re-entry: constant answer (no version, no row id)');
 select is(
-  (select row(count(*), max(s.ibadi_families))::text from public.community_sensitive s
+  (select row(count(*), max(s.ibadi_families), bool_and(s.id = pg_temp.nid(9)))::text
+   from public.community_sensitive s
    where s.project_id = pg_temp.nid(1) and s.deleted_at is null),
-  row(1::bigint, 15)::text, 'still one live sensitive row per project, with the new value');
+  row(1::bigint, 15, true)::text,
+  'natural key: applied to the existing row (still one live row per project, with the new value)');
 
 -- another device enters different values blind: nothing is overwritten silently
 insert into res
@@ -687,10 +692,13 @@ select 'g2', pg_temp.push(tests.id('u_col_pemba2'), 'dev-b', jsonb_build_array(
   pg_temp.op(111, 'community_sensitive', pg_temp.nid(111), 0, jsonb_build_object(
     'project_id', pg_temp.nid(1), 'ibadi_families', 20, 'omani_families', 2))));
 
-select is(pg_temp.st('g2'), array['conflict'], 'blind entry from another device over existing values: conflict');
-select ok(
-  not (pg_temp.r('g2', 0) ? 'server_values') and jsonb_array_length(pg_temp.r('g2', 0) -> 'conflict_ids') = 2,
-  'restricted conflict: two conflict ids, but stored values are never echoed');
+select is(pg_temp.r('g2', 0) - 'op_id', '{"status": "applied", "version": null}'::jsonb,
+  'blind entry from another device over different values: the same constant answer');
+select is(
+  (select count(*)::int from public.sync_conflicts c
+   where c.table_name = 'community_sensitive' and c.row_id = pg_temp.nid(9) and c.state = 'open'
+     and c.client_op_id = ('00000000-0000-7000-8000-' || lpad('111', 12, '0'))::uuid),
+  2, 'both differing fields are stored as open conflicts for a country manager');
 select is(
   (select row(s.ibadi_families, s.omani_families)::text from public.community_sensitive s where s.id = pg_temp.nid(9)),
   row(15, null::integer)::text, 'the stored restricted values are untouched until a manager decides');
@@ -714,6 +722,141 @@ select is(
   (select array_agg(sc.monthly_amount::int order by sc.effective_from) from public.staff_compensation sc
    where sc.project_staff_id = pg_temp.nid(5) and sc.deleted_at is null),
   array[300000, 320000], 'one live amount per assignment and effective date');
+
+-- The status is not an oracle (review finding "blind restricted writes"):
+-- stored comp:p_pemba_2 = 250000 TZS from 2024-01-01, sens:p_pemba_2 =
+-- ibadi 12 / omani 3. A colleague without restricted access guesses.
+insert into res
+select 'g4', pg_temp.push(tests.id('u_col_pemba2'), 'dev-b', jsonb_build_array(
+  pg_temp.op(300, 'staff_compensation', pg_temp.nid(300), 0, jsonb_build_object(        -- right guess
+    'project_staff_id', tests.id('staff:p_pemba_2'), 'effective_from', '2024-01-01',
+    'monthly_amount', 250000, 'currency', 'TZS')),
+  pg_temp.op(301, 'staff_compensation', pg_temp.nid(301), 0, jsonb_build_object(        -- wrong guess
+    'project_staff_id', tests.id('staff:p_pemba_2'), 'effective_from', '2024-01-01',
+    'monthly_amount', 300000, 'currency', 'TZS')),
+  pg_temp.op(302, 'staff_compensation', pg_temp.nid(302), 0, jsonb_build_object(        -- no such row
+    'project_staff_id', tests.id('staff:p_pemba_2'), 'effective_from', '2019-01-01',
+    'monthly_amount', 250000, 'currency', 'TZS')),
+  pg_temp.op(303, 'community_sensitive', pg_temp.nid(303), 0, jsonb_build_object(       -- one of two right
+    'project_id', tests.id('p_pemba_2'), 'ibadi_families', 12, 'omani_families', 4)),
+  pg_temp.op(304, 'community_sensitive', pg_temp.nid(304), 0, jsonb_build_object(       -- both right
+    'project_id', tests.id('p_pemba_2'), 'ibadi_families', 12, 'omani_families', 3))));
+
+select is(
+  (select array_agg(e.value - 'op_id' order by e.ord)
+   from res, jsonb_array_elements(res.v -> 'results') with ordinality as e(value, ord) where res.k = 'g4'),
+  array_fill('{"status": "applied", "version": null}'::jsonb, array[5]),
+  'blind writes: identical answers for a right guess, a wrong guess, a partly right guess and a missing row');
+select is(
+  (select array_agg(c.table_name || ':' || c.field || ':' || c.client_value::text order by c.table_name, c.field)
+   from public.sync_conflicts c
+   where c.client_user_id = tests.id('u_col_pemba2')
+     and c.row_id in (tests.id('comp:p_pemba_2'), tests.id('sens:p_pemba_2'))),
+  array['community_sensitive:omani_families:4', 'staff_compensation:monthly_amount:300000'],
+  'only the differing values became open conflicts (a manager sees every wrong guess); nothing was overwritten');
+select is(
+  (select row(sc.monthly_amount::int, sc.version)::text from public.staff_compensation sc
+   where sc.id = tests.id('comp:p_pemba_2')),
+  row(250000, 1)::text, 'the stored salary is untouched');
+
+-- Rejections do not depend on the stored row either: the payload is validated
+-- as an insert of a new row before an existing row is touched.
+insert into res
+select 'g5', pg_temp.push(tests.id('u_col_pemba2'), 'dev-b', jsonb_build_array(
+  pg_temp.op(305, 'staff_compensation', pg_temp.nid(305), 0, jsonb_build_object(        -- existing key
+    'project_staff_id', tests.id('staff:p_pemba_2'), 'effective_from', '2024-01-01', 'monthly_amount', 250000)),
+  pg_temp.op(306, 'staff_compensation', pg_temp.nid(306), 0, jsonb_build_object(        -- no row
+    'project_staff_id', tests.id('staff:p_pemba_2'), 'effective_from', '2018-01-01', 'monthly_amount', 250000)),
+  pg_temp.op(307, 'staff_compensation', pg_temp.nid(307), 0, jsonb_build_object(
+    'project_staff_id', tests.id('staff:p_pemba_2'), 'effective_from', '2024-01-01',
+    'monthly_amount', -5, 'currency', 'TZS')),
+  pg_temp.op(308, 'staff_compensation', pg_temp.nid(308), 0, jsonb_build_object(
+    'project_staff_id', tests.id('staff:p_pemba_2'), 'effective_from', '2018-01-01',
+    'monthly_amount', -5, 'currency', 'TZS')),
+  pg_temp.op(309, 'staff_compensation', pg_temp.nid(309), 0, jsonb_build_object(
+    'project_staff_id', tests.id('staff:p_pemba_2'), 'effective_from', '2024-01-01',
+    'monthly_amount', 250000, 'currency', 'TZS', 'created_at', 'not-a-time')),
+  pg_temp.op(310, 'staff_compensation', pg_temp.nid(310), 0, jsonb_build_object(
+    'project_staff_id', tests.id('staff:p_pemba_2'), 'effective_from', '2018-01-01',
+    'monthly_amount', 250000, 'currency', 'TZS', 'created_at', 'not-a-time'))));
+
+select is(
+  array[pg_temp.err('g5', 0), pg_temp.err('g5', 1), pg_temp.err('g5', 2), pg_temp.err('g5', 3),
+        pg_temp.err('g5', 4), pg_temp.err('g5', 5)],
+  array['not_null_violation', 'not_null_violation', 'check_violation', 'check_violation',
+        'invalid_value', 'invalid_value'],
+  'blind writes: missing column, check constraint and bad created_at are refused alike with and without a stored row');
+select ok(
+  (select count(*) = 2 from public.staff_compensation sc where sc.project_staff_id = tests.id('staff:p_pemba_2'))
+  and not exists (select 1 from public.sync_conflicts c
+                  where c.client_op_id = ('00000000-0000-7000-8000-' || lpad('307', 12, '0'))::uuid),
+  'the insert probe leaves no row behind, and an invalid value never becomes a conflict');
+
+-- The row id plays no part in a blind write: it is addressed by its natural
+-- key. nid(113) is the collector's own row (2026-01-01); nid(112) was
+-- redirected (it never existed); nid(10) holds 2025-01-01.
+insert into res
+select 'g6', pg_temp.push(tests.id('u_col_pemba'), 'dev-a', jsonb_build_array(
+  pg_temp.op(311, 'staff_compensation', pg_temp.nid(113), 1, jsonb_build_object('monthly_amount', 330000)),
+  pg_temp.op(312, 'staff_compensation', pg_temp.nid(112), 1, jsonb_build_object('monthly_amount', 330000)),
+  pg_temp.op(313, 'staff_compensation', pg_temp.nid(10), 1, jsonb_build_object(
+    'project_staff_id', pg_temp.nid(5), 'effective_from', '2027-01-01', 'monthly_amount', 340000, 'currency', 'TZS')),
+  pg_temp.op(314, 'staff_compensation', pg_temp.nid(113), 1, null, 'delete'),
+  pg_temp.op(315, 'staff_compensation', pg_temp.nid(112), 1, null, 'delete')));
+
+select ok(
+  pg_temp.err('g6', 0) = 'parent_required' and pg_temp.err('g6', 1) = 'parent_required'
+  and pg_temp.r('g6', 2) - 'op_id' = '{"status": "applied", "version": null}'::jsonb
+  and pg_temp.r('g6', 3) - 'op_id' = '{"status": "applied", "version": null}'::jsonb
+  and pg_temp.r('g6', 4) - 'op_id' = '{"status": "applied", "version": null}'::jsonb,
+  'blind writes: an existing and an unknown id get the same answer (partial update: parent_required; delete: constant)');
+select is(
+  (select array_agg(sc.effective_from::text || ':' || sc.monthly_amount::int || ':' || (sc.id = pg_temp.nid(10))
+                    order by sc.effective_from)
+   from public.staff_compensation sc where sc.project_staff_id = pg_temp.nid(5) and sc.deleted_at is null),
+  array['2025-01-01:300000:true', '2027-01-01:340000:false'],
+  'a blind write naming another row''s id creates its own row by natural key (the named row is untouched); the own row was deleted');
+
+-- a parent deleted on the server (p_pemba_1 was deleted by the reviewer in E;
+-- comp:p_pemba_1 is still live): refused alike with and without a stored row
+insert into res
+select 'g7', pg_temp.push(tests.id('u_col_pemba2'), 'dev-b', jsonb_build_array(
+  pg_temp.op(316, 'staff_compensation', pg_temp.nid(316), 0, jsonb_build_object(
+    'project_staff_id', tests.id('staff:p_pemba_1'), 'effective_from', '2024-01-01', 'monthly_amount', 1, 'currency', 'TZS')),
+  pg_temp.op(317, 'staff_compensation', pg_temp.nid(317), 0, jsonb_build_object(
+    'project_staff_id', tests.id('staff:p_pemba_1'), 'effective_from', '2017-01-01', 'monthly_amount', 1, 'currency', 'TZS'))));
+select is(array[pg_temp.err('g7', 0), pg_temp.err('g7', 1)], array['parent_deleted', 'parent_deleted'],
+  'a redirected insert under a deleted parent is refused like the insert itself');
+
+-- a natural-key column left out takes its default (effective_from = today) and
+-- the insert is redirected instead of colliding with the live row
+insert into res
+select 'g8', pg_temp.push(tests.id('u_col_pemba'), 'dev-a', jsonb_build_array(
+  pg_temp.op(318, 'staff_compensation', pg_temp.nid(318), 0, jsonb_build_object(
+    'project_staff_id', pg_temp.nid(5), 'monthly_amount', 1000, 'currency', 'TZS'))));
+insert into res
+select 'g9', pg_temp.push(tests.id('u_col_pemba2'), 'dev-b', jsonb_build_array(
+  pg_temp.op(319, 'staff_compensation', pg_temp.nid(319), 0, jsonb_build_object(
+    'project_staff_id', pg_temp.nid(5), 'monthly_amount', 2000, 'currency', 'TZS'))));
+select ok(
+  pg_temp.st('g8') = array['applied'] and pg_temp.st('g9') = array['applied']
+  and (select count(*) = 1 and min(sc.monthly_amount) = 1000 from public.staff_compensation sc
+       where sc.project_staff_id = pg_temp.nid(5) and sc.effective_from = current_date and sc.deleted_at is null),
+  'missing effective_from: today''s row is found by natural key (no unique_violation telling that it exists)');
+
+-- whoever may see restricted data of the country still gets the full answer
+-- (row_id, conflict fields) — but never stored values
+insert into res
+select 'g10', pg_temp.push(tests.id('u_mgr_tz'), 'dev-m', jsonb_build_array(
+  pg_temp.op(320, 'staff_compensation', pg_temp.nid(320), 0, jsonb_build_object(
+    'project_staff_id', tests.id('staff:p_pemba_2'), 'effective_from', '2024-01-01',
+    'monthly_amount', 260000, 'currency', 'TZS'))), 'aal2');
+select ok(
+  pg_temp.st('g10') = array['conflict']
+  and (pg_temp.r('g10', 0) ->> 'row_id')::uuid = tests.id('comp:p_pemba_2')
+  and pg_temp.r('g10', 0) -> 'conflict_fields' = '["monthly_amount"]'::jsonb
+  and not (pg_temp.r('g10', 0) ? 'server_values'),
+  'a country manager (aal2) gets status, row_id and conflict fields; stored values are still never echoed');
 
 -- =============================================================================
 -- H. Persons are never merged automatically
@@ -949,6 +1092,37 @@ select 'm4', pg_temp.push(tests.id('u_col_pemba'), 'dev-a', jsonb_build_array(
 select is(
   array[pg_temp.err('m4', 0), pg_temp.r('m4', 1) ->> 'status'], array['donor_not_available', 'applied'],
   'a link can be re-pointed only to a donor the caller can see');
+
+-- =============================================================================
+-- N. A project names a locality of its own country only (review finding:
+--    a foreign locality's names would show in projects_page / search_norm)
+-- =============================================================================
+insert into public.localities (id, created_by, country_id, admin_area_id, name_ar, name_latin, geom, status)
+values
+  (pg_temp.nid(190), tests.id('u_col_tanga'), tests.id('tz'), tests.id('tz_tanga'), 'قرية تنزانية', 'Tz village',
+   st_setsrid(st_makepoint(39.05, -5.10), 4326), 'approved'),
+  (pg_temp.nid(191), tests.id('u_col_ke'), tests.id('ke'), tests.id('ke_mombasa'), 'قرية كينية', 'Ke village',
+   st_setsrid(st_makepoint(39.65, -4.00), 4326), 'approved');
+
+insert into res
+select 'n1', pg_temp.push(tests.id('u_col_ke'), 'dev-k', jsonb_build_array(
+  pg_temp.op(190, 'projects', tests.id('p_ke_1'), pg_temp.ver('projects', tests.id('p_ke_1')),
+             jsonb_build_object('locality_id', pg_temp.nid(190))),
+  pg_temp.op(191, 'projects', pg_temp.nid(192), 0, jsonb_build_object(
+    'name_ar', 'مسجد جديد', 'type', 'mosque', 'lon', 39.66, 'lat', -4.06, 'locality_id', pg_temp.nid(190))),
+  pg_temp.op(192, 'projects', tests.id('p_ke_1'), pg_temp.ver('projects', tests.id('p_ke_1')),
+             jsonb_build_object('locality_id', pg_temp.nid(191)))));
+
+select is(
+  array[pg_temp.r('n1', 0) ->> 'status', pg_temp.err('n1', 0), pg_temp.r('n1', 1) ->> 'status', pg_temp.err('n1', 1),
+        pg_temp.r('n1', 2) ->> 'status'],
+  array['rejected', 'locality_country_mismatch', 'rejected', 'locality_country_mismatch', 'applied'],
+  'a locality of another country is refused on update and on insert; one of the own country is accepted');
+select ok(
+  (select p.locality_id = pg_temp.nid(191) and p.search_norm not like '%tz village%'
+   from public.projects p where p.id = tests.id('p_ke_1'))
+  and not exists (select 1 from public.projects p where p.id = pg_temp.nid(192)),
+  'nothing of the foreign locality reached the project (locality_id, search_norm)');
 
 -- =============================================================================
 -- K. Ledger ownership and revoked sessions

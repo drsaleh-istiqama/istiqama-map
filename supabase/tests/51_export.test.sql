@@ -3,7 +3,7 @@
 begin;
 set local search_path = public, extensions, tests;
 
-select plan(50);
+select plan(53);
 
 select tests.fixture_extra();
 
@@ -166,6 +166,42 @@ select is((select j.state from public.export_jobs j where j.id = current_setting
 select tests.login_as(tests.id('u_mgr_tz'));
 select is(public.export_cancel(current_setting('t.job_f')::uuid) ->> 'state', 'cancelled', 'export_cancel: the owner can cancel a running job');
 select tests.logout();
+
+-- People columns follow the PERSON's scope (persons_select): persons keep their branch when a
+-- project moves (sync.md §5.3). p_pemba_2 moves to Tanga; it keeps its Pemba imam and gets two
+-- managers: one from Pemba (alphabetically first, invisible in Tanga) and one from Tanga.
+insert into public.persons (id, name_ar, name_latin, phone_e164, country_id, branch_id)
+values (tests._uuid('exp:mgr_pemba'), 'أ مدير بيمبا', 'Aaa Pemba Manager', '+255711000001', tests.id('tz'), tests.id('br_pemba')),
+       (tests._uuid('exp:mgr_tanga'), 'ي مدير تانغا', 'Zzz Tanga Manager', '+255711000002', tests.id('tz'), tests.id('br_tanga'));
+insert into public.project_staff (id, project_id, person_id, role, start_date)
+values (tests._uuid('exp:staff_mgr_pemba'), tests.id('p_pemba_2'), tests._uuid('exp:mgr_pemba'), 'manager', date '2024-01-01'),
+       (tests._uuid('exp:staff_mgr_tanga'), tests.id('p_pemba_2'), tests._uuid('exp:mgr_tanga'), 'manager', date '2024-01-01');
+update public.projects set branch_id = tests.id('br_tanga') where id = tests.id('p_pemba_2');
+
+select tests.login_as(tests.id('u_col_tanga'), 'aal1');
+select set_config('t.job_t', public.export_request('csv', 'en',
+         jsonb_build_object('ids', jsonb_build_array(tests.id('p_pemba_2')))) ->> 'id', true);
+select set_config('t.rows_t', (public.export_rows(current_setting('t.job_t')::uuid, null, 10) #> '{rows,0}')::text, true);
+select tests.logout();
+select ok(current_setting('t.rows_t')::jsonb ->> 'staff_list' like '%Zzz Tanga Manager (Manager)%'
+          and current_setting('t.rows_t')::jsonb ->> 'staff_list' like '%? (Manager)%'
+          and current_setting('t.rows_t')::jsonb ->> 'staff_list' like '%? (Imam)%'
+          and current_setting('t.rows_t')::jsonb ->> 'staff_list' not like '%Pemba%'
+          and (current_setting('t.rows_t')::jsonb ->> 'staff_count')::int = 3,
+          'moved project: persons outside the people scope are listed as "?" with their role');
+select is(jsonb_build_object('n', current_setting('t.rows_t')::jsonb -> 'manager_name',
+                             'p', current_setting('t.rows_t')::jsonb -> 'manager_phone'),
+          '{"n": "Zzz Tanga Manager", "p": "+255711000002"}'::jsonb,
+          'moved project: manager name and phone come only from a person inside the people scope');
+
+select tests.login_as(tests.id('u_mgr_tz'));
+select set_config('t.job_t', public.export_request('csv', 'en',
+         jsonb_build_object('ids', jsonb_build_array(tests.id('p_pemba_2')))) ->> 'id', true);
+select set_config('t.rows_t', (public.export_rows(current_setting('t.job_t')::uuid, null, 10) #> '{rows,0}')::text, true);
+select tests.logout();
+select ok(current_setting('t.rows_t')::jsonb ->> 'staff_list' like '%Imam p_pemba_2 (Imam)%'
+          and current_setting('t.rows_t')::jsonb ->> 'manager_name' = 'Aaa Pemba Manager',
+          'moved project: a caller whose people scope covers every person gets every name');
 
 select * from finish();
 rollback;
