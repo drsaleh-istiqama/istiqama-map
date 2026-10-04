@@ -31,8 +31,10 @@ export interface AccessClaims {
 export type Claims = Record<string, unknown>;
 
 export function signJwt(payload: Record<string, unknown>, secret: string): string {
-  // iat/exp are set explicitly by the callers (GoTrue-style integer seconds).
-  return jwt.sign(payload, secret, { algorithm: 'HS256', noTimestamp: true });
+  // iat/exp are set explicitly by the callers (GoTrue-style integer seconds). jsonwebtoken keeps
+  // a provided `iat` (and adds one when missing); never pass `noTimestamp`, which DELETES it —
+  // private.session_ok() needs `iat` to honour profiles.sessions_revoked_at.
+  return jwt.sign(payload, secret, { algorithm: 'HS256' });
 }
 
 export type VerifyResult =

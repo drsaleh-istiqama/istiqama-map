@@ -31,6 +31,11 @@ export function createRestProxy(target: URL): RestProxy {
   const agent = new http.Agent({
     keepAlive: true,
     keepAliveMsecs: 10_000,
+    // Idle sockets are closed by us before PostgREST closes them (its idle timeout is longer):
+    // otherwise the first request after an idle minute reuses a dead socket and a POST (whose
+    // streamed body cannot be replayed) fails with "socket hang up". Node's Agent destroys only
+    // FREE sockets on this timeout, so long-running requests are not affected.
+    timeout: 4_000,
     maxSockets: 1024,
     maxFreeSockets: 256,
     scheduling: 'lifo',

@@ -15,6 +15,9 @@ describe('jwt', () => {
     const token = signJwt({ role: 'anon', iat: 1_700_000_000, exp: 4_000_000_000 }, SECRET);
     const header = JSON.parse(Buffer.from(token.split('.')[0]!, 'base64url').toString('utf8'));
     expect(header).toEqual({ alg: 'HS256', typ: 'JWT' });
+    // regression: the iat claim must survive signing (session revocation depends on it)
+    const payload = JSON.parse(Buffer.from(token.split('.')[1]!, 'base64url').toString('utf8'));
+    expect(payload.iat).toBe(1_700_000_000);
     const v = verifyJwt(token, SECRET);
     expect(v.ok).toBe(true);
     if (v.ok) expect(roleOf(v.claims)).toBe('anon');
