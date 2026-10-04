@@ -413,6 +413,42 @@ $$;
 comment on function private.sync_select_list(text, text) is
   'Select list of the wire shape of a syncable table: all columns except sync_xid and geometry, plus lon/lat for point tables.';
 
+-- Wire projection for READS by a given caller (sync_pull). Same as sync_select_list,
+-- except that people columns of public tables are blanked for callers without people
+-- scope on the row. Today this is project_land.owner_name (a private landowner is a
+-- person, and the viewer role sees no names of persons — brief §3, schema.md).
+-- Writes (sync_push, resolve_conflict) keep using sync_select_list: they need the
+-- stored value to merge, and their callers already passed people/write checks.
+create or replace function private.sync_wire_list(p_table text, p_alias text, p_ctx private.sync_ctx)
+returns text
+language plpgsql
+stable
+security definer
+set search_path = public, extensions, private, pg_temp
+as $$
+declare
+  v_list text := private.sync_select_list(p_table, p_alias);
+  v_expr text;
+begin
+  if p_table = 'project_land' and not coalesce(p_ctx.people_all, false) then
+    if cardinality(coalesce(p_ctx.people_c, '{}')) + cardinality(coalesce(p_ctx.people_b, '{}')) = 0 then
+      v_expr := 'null::text';
+    else
+      v_expr := format(
+        'case when exists (select 1 from public.projects pp where pp.id = %1$s.project_id'
+        || ' and (pp.country_id = any (%2$L::uuid[]) or pp.branch_id = any (%3$L::uuid[])))'
+        || ' then %1$s.owner_name end',
+        p_alias, coalesce(p_ctx.people_c, '{}'), coalesce(p_ctx.people_b, '{}'));
+    end if;
+    v_list := replace(v_list, format('%s.%I', p_alias, 'owner_name'), v_expr || ' as owner_name');
+  end if;
+  return v_list;
+end;
+$$;
+
+comment on function private.sync_wire_list(text, text, private.sync_ctx) is
+  'Read projection for sync_pull: sync_select_list with people columns of public tables (project_land.owner_name) blanked for callers without people scope on the row.';
+
 -- Columns a client may set through sync_push: no standard/server-managed
 -- columns, no generated columns, no geometry (points travel as lon/lat), none of
 -- the registry's protected_cols, and only writable_cols when the registry
@@ -661,6 +697,7 @@ revoke execute on function
   private.sync_can(private.sync_ctx, text, text, uuid, uuid),
   private.sync_scope_epoch(),
   private.sync_select_list(text, text),
+  private.sync_wire_list(text, text, private.sync_ctx),
   private.sync_writable_columns(text),
   private.sync_scope_pred(text, boolean, uuid[], uuid[], text, text),
   private.sync_has_index(regclass, text[]),

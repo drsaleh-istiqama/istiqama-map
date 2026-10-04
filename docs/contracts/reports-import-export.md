@@ -166,7 +166,7 @@ In `by_area` / `by_country` / `by_branch`, `maintenance` = projects whose **stat
   "admin_areas": [ { "id", "level", "code", "name_ar", "name_en", "name_sw" } ],     // level 1 first
   "locality": { "id", "name_ar", "name_latin", "status" } | null,
   "branch": { "id", "code", "name_ar", "name_en", "name_sw" } | null,
-  "land": { /* project_land row */ } | null,
+  "land": { /* project_land row; owner_name only for callers who may see people of the project */ } | null,
   "facilities": { /* project_facilities row */ } | null,
   "community": { /* community_profiles row */,
                  "lists": { "daawa_activities": { "options": [ { "id", "code", "name_ar", "name_en", "name_sw" } ], "other": "…|null" }, /* …7 lists… */ } } | null,

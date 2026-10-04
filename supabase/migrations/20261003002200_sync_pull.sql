@@ -424,7 +424,7 @@ begin
         || '        array_agg(rid) filter (where lg)'
         || ' from page',
         v_log,
-        private.sync_select_list(reg.table_name, 't'),
+        private.sync_wire_list(reg.table_name, 't', c),
         reg.table_name,
         v_join,
         v_keyset,

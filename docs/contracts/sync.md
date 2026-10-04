@@ -555,3 +555,13 @@ its own scope when its project moves to another branch; (3) localities/admin are
 change country are not reported as `gone`; (4) donors that leave the caller's visibility
 are not reported as `gone` (§5.5); (5) `created_at` sent by a device whose clock is in the
 past is stored as sent (only the future is clamped).
+
+### People columns of public tables (owner_name)
+
+`project_land` is a public child (every reader of the project receives it), but
+`owner_name` is people data: `sync_pull` builds its select list with
+`private.sync_wire_list(table, alias, ctx)`, which returns `owner_name = null` for callers
+without people scope on the row (viewers, and readers whose people scope does not cover the
+project). Writes (`sync_push`, `resolve_conflict`) keep the full projection because they merge
+against the stored value. Clients must treat a null `owner_name` from a viewer pull as
+"not visible", never as "cleared".

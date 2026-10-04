@@ -125,7 +125,7 @@ insert into private.export_column_defs (position, key, capability, kind, enum_ke
   (240, 'review_note', 'all', 'text', null, 'ملاحظة المراجعة', 'Maoni ya mapitio', 'Review note'),
   -- land
   (300, 'land_ownership', 'all', 'enum', 'land_ownership', 'ملكية الأرض', 'Umiliki wa ardhi', 'Land ownership'),
-  (310, 'land_owner_name', 'all', 'text', null, 'مالك الأرض', 'Mmiliki wa ardhi', 'Land owner'),
+  (310, 'land_owner_name', 'people', 'text', null, 'مالك الأرض', 'Mmiliki wa ardhi', 'Land owner'),
   (320, 'land_area_m2', 'all', 'number', null, 'مساحة الأرض (م²)', 'Eneo la ardhi (m²)', 'Land area (m²)'),
   (330, 'land_utilization_pct', 'all', 'number', null, 'نسبة استغلال الأرض (%)', 'Matumizi ya ardhi (%)', 'Land utilisation (%)'),
   (340, 'land_expandable', 'all', 'boolean', 'boolean', 'قابلية التوسع', 'Inaweza kupanuliwa', 'Expandable'),

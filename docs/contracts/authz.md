@@ -273,6 +273,11 @@ and, in production, an edge rule (see `local-gateway.md` "known gaps" item 2).
   `project_photos`, `donors`, `project_donors`, `persons`, `project_staff`,
   `person_merge_requests`, `community_profiles`, `sync_conflicts`, `notifications`,
   `export_jobs`, `import_batches`, `import_rows`, `audit_log`, `restricted_access_log`.
+- `project_land` is granted **column by column**: every column except `owner_name`. A private
+  landowner is a person and the name is people data (schema.md); RLS cannot hide one column per
+  caller, so the name reaches people-scoped callers only through `sync_pull`
+  (`private.sync_wire_list` blanks it for callers without people scope on the row),
+  `report_project` (key omitted) and export (column class `people`). Pinned by test 16.
 - nothing: `staff_compensation`, `community_sensitive`, `sync_applied_ops`, every sequence,
   everything in schema `private`.
 - `anon`: nothing. Migration 0011 also removes `anon` from the default privileges of schema

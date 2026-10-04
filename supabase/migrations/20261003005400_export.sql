@@ -391,7 +391,6 @@ begin
         'review_note', p.review_note)
       || jsonb_build_object(
         'land_ownership', pl.ownership,
-        'land_owner_name', pl.owner_name,
         'land_area_m2', pl.area_m2,
         'land_utilization_pct', pl.utilization_pct,
         'land_expandable', pl.expandable,
@@ -431,6 +430,10 @@ begin
         'created_at', p.created_at,
         'updated_at', p.updated_at)
       || case when v_people then jsonb_build_object(
+           -- a private landowner is a person: people data whatever ownership says
+           'land_owner_name', case when v_p_all or p.country_id = any (v_p_countries)
+                                        or p.branch_id = any (v_p_branches)
+                                   then pl.owner_name end,
            'manager_name', st.manager_name,
            'manager_phone', st.manager_phone,
            'staff_list', st.staff_list,

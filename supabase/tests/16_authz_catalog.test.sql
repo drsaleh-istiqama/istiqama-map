@@ -21,7 +21,7 @@
 begin;
 set local search_path = public, extensions, tests;
 
-select plan(84);
+select plan(92);
 
 -- Relations of schema public that do not belong to an extension.
 create temporary view _public_rels as
@@ -214,11 +214,23 @@ select set_eq(
      where relkind in ('r', 'p') and has_table_privilege('authenticated', oid, 'SELECT') $$,
   array['countries', 'admin_areas', 'branches', 'option_values', 'fx_rates', 'map_packs', 'app_settings',
         'profiles', 'user_roles', 'devices',
-        'localities', 'projects', 'project_land', 'project_facilities', 'project_maintenance',
+        'localities', 'projects', 'project_facilities', 'project_maintenance',
         'project_photos', 'donors', 'project_donors', 'persons', 'project_staff',
         'person_merge_requests', 'community_profiles', 'sync_conflicts', 'notifications',
         'export_jobs', 'import_batches', 'import_rows', 'audit_log', 'restricted_access_log'],
-  'authenticated holds SELECT on exactly the classified tables (restricted tables and the sync ledger are closed)');
+  'authenticated holds table-level SELECT on exactly the classified tables (restricted tables and the sync ledger are closed; project_land is column-level)');
+
+-- project_land.owner_name is people data (a private landowner is a person): direct SELECT
+-- covers every other column, never the owner's name.
+select ok(
+  not has_column_privilege('authenticated', 'public.project_land', 'owner_name', 'SELECT')
+  and has_column_privilege('authenticated', 'public.project_land', 'ownership', 'SELECT')
+  and has_column_privilege('authenticated', 'public.project_land', 'area_m2', 'SELECT')
+  and has_column_privilege('authenticated', 'public.project_land', 'project_id', 'SELECT')
+  and has_column_privilege('authenticated', 'public.project_land', 'deleted_at', 'SELECT'),
+  'authenticated may select every project_land column except owner_name');
+
+
 
 select is_empty(
   $$ select r.relname
@@ -479,6 +491,69 @@ select case
         where j.jobname in ('istiqama-sync-prune', 'istiqama-sync-rejections-cleanup')),
        'pg_cron: istiqama-sync-prune and istiqama-sync-rejections-cleanup are scheduled')
 end;
+
+-- the name still reaches people-scoped readers through sync_pull, never viewers.
+-- (Appended last: it swaps the transaction-id clock inside this test transaction the same
+-- way 23_sync_pull does: rows written by the test itself would otherwise be invisible to
+-- sync_pull, which is correct behaviour for uncommitted rows.)
+create or replace function private.current_xid() returns bigint language sql stable as
+$fn$ select current_setting('test.xid')::bigint $fn$;
+create or replace function private.safe_xid() returns bigint language sql stable as
+$fn$ select current_setting('test.safe')::bigint $fn$;
+do $$
+declare b bigint := pg_current_xact_id()::text::bigint + 1000000;
+begin
+  perform set_config('test.xid', (b + 100)::text, true);
+  perform set_config('test.safe', (b + 101)::text, true);
+  perform set_config('app.rate_limit', 'off', true);
+end $$;
+select tests.fixture_extra();
+update public.project_land set ownership = 'person', owner_name = 'Owner Person p_pemba_1'
+ where id = tests.id('land:p_pemba_1');
+
+select tests.login_as(tests.id('u_viewer_tz'));
+select throws_ok(
+  $$ select owner_name from public.project_land $$,
+  '42501', null,
+  'a viewer cannot select project_land.owner_name directly');
+select is(
+  (select jsonb_agg(jsonb_build_object('owner_name', r -> 'owner_name', 'area_m2', r -> 'area_m2'))
+     from jsonb_array_elements(public.sync_pull(null, 1000) -> 'changes') c,
+          jsonb_array_elements(c -> 'rows') r
+    where c ->> 'table' = 'project_land' and r ->> 'project_id' = tests.id('p_pemba_1')::text),
+  '[{"owner_name": null, "area_m2": 900}]'::jsonb,
+  'sync_pull sends the Pemba land row to a viewer with owner_name blanked');
+select is(
+  public.report_project(tests.id('p_pemba_1')) -> 'land' ? 'owner_name',
+  false,
+  'report_project omits owner_name for a viewer');
+select ok(
+  not exists (select 1 from jsonb_array_elements(public.export_columns('en') -> 'columns') c
+               where c ->> 'key' = 'land_owner_name'),
+  'export_columns does not list land_owner_name for a viewer');
+
+select tests.login_as(tests.id('u_sup_pemba'), 'aal1');
+select is(
+  (select r ->> 'owner_name'
+     from jsonb_array_elements(public.sync_pull(null, 1000) -> 'changes') c,
+          jsonb_array_elements(c -> 'rows') r
+    where c ->> 'table' = 'project_land' and r ->> 'project_id' = tests.id('p_pemba_1')::text),
+  'Owner Person p_pemba_1',
+  'sync_pull keeps owner_name for a supervisor of the branch');
+select is(
+  public.report_project(tests.id('p_pemba_1')) -> 'land' ->> 'owner_name',
+  'Owner Person p_pemba_1',
+  'report_project keeps owner_name for a supervisor of the branch');
+
+select tests.login_as(tests.id('u_col_tanga'), 'aal1');
+select is(
+  (select count(*)::int
+     from jsonb_array_elements(public.sync_pull(null, 1000) -> 'changes') c,
+          jsonb_array_elements(c -> 'rows') r
+    where c ->> 'table' = 'project_land' and r ->> 'project_id' = tests.id('p_pemba_1')::text),
+  0,
+  'a collector of another branch does not receive the Pemba land row at all');
+select tests.logout();
 
 select * from finish();
 rollback;

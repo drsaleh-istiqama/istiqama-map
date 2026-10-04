@@ -79,7 +79,6 @@ to authenticated;
 grant select on table
   public.localities,
   public.projects,
-  public.project_land,
   public.project_facilities,
   public.project_maintenance,
   public.project_photos,
@@ -91,6 +90,14 @@ grant select on table
   public.community_profiles,
   public.sync_conflicts,
   public.notifications
+to authenticated;
+
+-- project_land: every column except owner_name. A private landowner is a person and
+-- the name is people data (schema.md); RLS cannot hide one column per caller, so the
+-- name reaches people-scoped callers only through sync_pull / report_project / export.
+grant select (id, created_at, updated_at, created_by, updated_by, version, deleted_at, sync_xid,
+              project_id, ownership, area_m2, utilization_pct, expandable, notes)
+  on table public.project_land
 to authenticated;
 
 -- 4. Own jobs: read-only, written through RPC.

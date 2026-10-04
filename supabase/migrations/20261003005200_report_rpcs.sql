@@ -130,6 +130,10 @@ begin
 
   select private.report_strip(to_jsonb(l)) into v_land
   from public.project_land l where l.project_id = p_id and l.deleted_at is null limit 1;
+  -- a private landowner is a person: the name is people data (schema.md, brief §3)
+  if not v_people then
+    v_land := v_land - 'owner_name';
+  end if;
 
   select private.report_strip(to_jsonb(f)) into v_facilities
   from public.project_facilities f where f.project_id = p_id and f.deleted_at is null limit 1;
