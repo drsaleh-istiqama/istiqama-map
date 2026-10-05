@@ -1,0 +1,15 @@
+{
+  "name": "@istiqama/functions-server",
+  "version": "3.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Runtime dependencies of deploy/functions/server.ts (Edge Functions under Node on Railway)",
+  "scripts": {
+    "start": "node --import tsx deploy/functions/server.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.117.2",
+    "jsonwebtoken": "^9.0.3",
+    "tsx": "^4.23.15"
+  }
+}

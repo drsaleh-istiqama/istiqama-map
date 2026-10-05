@@ -4,6 +4,8 @@
  *
  *   npm run test:db                                   # all supabase/tests/*.sql on "istiqama"
  *   npm run test:db -- --db imap_x supabase/tests/00_helpers.test.sql supabase/tests/2*.sql
+ *   npm run test:db -- --url "$PGTAP_URL"              # any database by connection URL
+ *                                                     # (e.g. a throw-away db on Railway)
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -11,6 +13,9 @@ import { PG_ENV, ROOT, capture, config, parseArgs, pgBin, psqlArgs } from './lib
 
 const args = parseArgs(process.argv.slice(2), ['verbose']);
 const db = typeof args.db === 'string' ? args.db : config().dbName;
+// --url <postgres://…>: run against any database (password in the URL or PGPASSWORD); never logged.
+const url = typeof args.url === 'string' ? args.url : null;
+const connArgs = url ? [url, '-X'] : psqlArgs(db);
 const testsDir = path.join(ROOT, 'supabase', 'tests');
 
 const expand = (pattern: string): string[] => {
@@ -54,7 +59,7 @@ const t0 = Date.now();
 for (const f of files) {
   const res = capture(
     pgBin('psql'),
-    [...psqlArgs(db), '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=0', '-f', f],
+    [...connArgs, '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=0', '-f', f],
     {
       env: PG_ENV,
     },
