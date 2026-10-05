@@ -29,7 +29,8 @@
     "boundaries:import": "tsx scripts/import-boundaries/index.ts",
     "pmtiles:build": "tsx scripts/build-pmtiles/index.ts",
     "load:seed": "tsx scripts/generate-load-data/index.ts",
-    "load:test": "tsx load-tests/run.ts"
+    "load:test": "tsx load-tests/run.ts",
+    "deploy:railway-db": "tsx scripts/deploy/railway-db.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
