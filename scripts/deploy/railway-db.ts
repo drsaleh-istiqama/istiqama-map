@@ -21,10 +21,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT, pgBin } from '../local-stack/lib.ts';
 
-const url = process.env.DATABASE_URL ?? '';
+let url = (process.env.DATABASE_URL ?? '').trim();
+if (!url) {
+  // Ask for it interactively (owner pastes the Railway Postgres URL once; nothing is stored).
+  const { createInterface } = await import('node:readline/promises');
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  url = (await rl.question('الصق رابط قاعدة البيانات من Railway ثم اضغط Enter:\n> ')).trim();
+  rl.close();
+  console.clear();
+}
 if (!/^postgres(ql)?:\/\//.test(url)) {
   console.error(
-    'Set DATABASE_URL to the Railway Postgres public connection URL first (see the header of this file).',
+    'الرابط يجب أن يبدأ بـ postgresql:// — انسخ POSTGRES_URL من خدمة Postgres في Railway.',
   );
   process.exit(2);
 }
