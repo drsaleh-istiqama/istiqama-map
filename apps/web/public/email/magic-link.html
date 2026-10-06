@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<body style="margin:0;padding:24px;background:#f6f7f9;font-family:Tahoma,Arial,sans-serif;direction:rtl;text-align:right;color:#1b2433">
+  <div style="max-width:480px;margin:0 auto;background:#ffffff;border-radius:12px;padding:28px;border-top:6px solid #c8a24a">
+    <h2 style="margin:0 0 8px;color:#0f2545">خارطة مشاريع الاستقامة</h2>
+    <p style="margin:0 0 20px">رمز الدخول الخاص بك:</p>
+    <p style="font-size:32px;letter-spacing:8px;font-weight:bold;color:#0f2545;margin:0 0 20px;direction:ltr;text-align:center">{{ .Token }}</p>
+    <p style="margin:0 0 20px">أدخل الرمز في التطبيق خلال 10 دقائق، أو اضغط الزر للدخول مباشرة:</p>
+    <p style="text-align:center;margin:0 0 24px"><a href="{{ .ConfirmationURL }}" style="background:#0f2545;color:#ffffff;padding:12px 24px;border-radius:8px;text-decoration:none">الدخول إلى الخارطة</a></p>
+    <p style="font-size:13px;color:#667085;margin:0">إن لم تطلب هذا الرمز فتجاهل الرسالة. لا تشارك الرمز مع أحد.</p>
+    <hr style="border:none;border-top:1px solid #e4e7ec;margin:20px 0">
+    <p style="font-size:12px;color:#667085;margin:0;direction:ltr;text-align:left">Your sign-in code: <b>{{ .Token }}</b> · Nambari yako ya kuingia: <b>{{ .Token }}</b></p>
+  </div>
+</body>
+</html>
