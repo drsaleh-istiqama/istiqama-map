@@ -254,3 +254,10 @@ Railway:
    `POST /rest/v1/rpc/my_context` ⟵ `POST /functions/v1/sync_pull` يعيد الصفوف المرجعية ⟵
    `GET /functions/v1/tiles/4/9/8` (200/204) ⟵ Range على الخريطة = 206.
 3. احذف المستخدم المؤقت (`DELETE /auth/v1/admin/users/<id>`) وصفوفه (`profiles`، `user_roles`، `devices`).
+
+## 10. دروس التشغيل الأول (2026-10-07)
+
+- **PostgREST يجب أن يستمع على IPv6:** `PGRST_SERVER_HOST=*6`. القيمة الافتراضية كانت تربطه بـ `0.0.0.0` فقط، والشبكة الخاصة في Railway تصل عبر IPv6، فكانت Envoy تجيب `upstream connect error … remote connection failure` على كل `/rest/v1/*` وتظهر في التطبيق «تعذّر تحميل بيانات حسابك».
+- **روابط البريد:** `API_EXTERNAL_URL=https://<Envoy domain>/auth/v1` على Gotrue. ولا يوضع نطاق Envoy العام في `GOTRUE_MAILER_EXTERNAL_HOSTS`، وإلا بنى Gotrue الرابط من ترويسة المضيف بلا `/auth/v1` (Envoy تحذف البادئة) فيظهر 404.
+- **قالب البريد:** `GOTRUE_MAILER_TEMPLATES_MAGIC_LINK=https://map.istiqama.om/email/magic-link` (بلا `.html`، لأن Cloudflare Pages يعيد التوجيه). الملف في `apps/web/public/email/magic-link.html`، وموضوع الرسالة في `GOTRUE_MAILER_SUBJECTS_MAGIC_LINK`.
+- **البريد عبر Amazon SES:** `GOTRUE_SMTP_HOST=email-smtp.<region>.amazonaws.com`، المنفذ 587، والمستخدم وكلمة المرور من «SMTP credentials» في SES (لا مفاتيح IAM).
