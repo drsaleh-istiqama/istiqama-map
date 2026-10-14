@@ -16,6 +16,7 @@ vi.mock('../sync', async () => {
       lastError: null,
     }),
     syncNow: mocks.syncNow,
+    syncTrace: signal([{ at: 0, text: 'stored 500 rows [admin_areas]' }]),
   };
 });
 
@@ -149,6 +150,7 @@ describe('<SyncBadge>', () => {
     const tech = screen.getByTestId('sync-technical').textContent ?? '';
     expect(tech).toContain('DataError: Unable to store record');
     expect(tech).toContain('projects p-1: DataError: x');
+    expect(tech).toContain('stored 500 rows [admin_areas]');
     expect(screen.getByTestId('sync-toggle').getAttribute('aria-expanded')).toBe('true');
     fireEvent.click(screen.getByTestId('sync-toggle'));
     expect(screen.queryByTestId('sync-panel')).toBeNull();

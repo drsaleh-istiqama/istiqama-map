@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { fmt, hasTranslation, t } from '../i18n';
-import { syncNow, syncStatus } from '../sync';
+import { syncNow, syncStatus, syncTrace } from '../sync';
 import { IconAlert, IconOffline, IconOnline, IconPhoto, IconSync, IconUpload } from './icons';
 import { APP_VERSION } from '../version';
 import { Spinner } from './Spinner';
@@ -159,20 +159,20 @@ export function SyncBadge() {
           </p>
           {detail && state === 'error' && <p data-testid="sync-error-detail">{detail}</p>}
           {skipped.length > 0 && <p>{t('ui.syncSkipped', { count: skipped.length })}</p>}
-          {(technical || skipped.length > 0) && (
-            <>
-              <p class="sync__panel-label">{t('ui.syncTechnical')}</p>
-              <pre class="sync__tech" dir="ltr" data-testid="sync-technical">
-                {[
-                  technical,
-                  ...skipped.map((r) => `${r.table} ${r.id}: ${r.reason}`),
-                  `v${APP_VERSION} · ${navigator.userAgent}`,
-                ]
-                  .filter(Boolean)
-                  .join('\n')}
-              </pre>
-            </>
-          )}
+          <p class="sync__panel-label">{t('ui.syncTechnical')}</p>
+          <pre class="sync__tech" dir="ltr" data-testid="sync-technical">
+            {[
+              technical,
+              ...skipped.map((r) => `${r.table} ${r.id}: ${r.reason}`),
+              `v${APP_VERSION} · ${navigator.userAgent}`,
+              ...syncTrace.value
+                .slice(-15)
+                .reverse()
+                .map((e) => `${new Date(e.at).toLocaleTimeString('en-GB')} ${e.text}`),
+            ]
+              .filter(Boolean)
+              .join('\n')}
+          </pre>
           <button type="button" class="btn" onClick={() => setOpen(false)}>
             {t('ui.syncClose')}
           </button>

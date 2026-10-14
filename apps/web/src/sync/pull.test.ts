@@ -338,6 +338,27 @@ describe('pullChanges', () => {
       expect(server.calls.pull.at(-1)!.limit).toBe(62);
     });
 
+    it('raises a lowered ceiling again after many quick pages', async () => {
+      seedProjects(3000);
+      const tuning = { ceiling: 50 as number | null };
+      await pullChanges(deps(), { tuning, maxPages: 100 });
+      // Every 10 quick pages double it: 50 → 100 → 200 (3000 rows), up to the full page.
+      expect(tuning.ceiling).toBe(200);
+      expect(server.calls.pull.at(-1)!.limit).toBeGreaterThan(50);
+    });
+
+    it('does not shrink pages when the database itself is broken (the engine repairs it)', async () => {
+      seedProjects(300);
+      const tuning = { ceiling: null as number | null };
+      const broken = (): Error =>
+        Object.assign(new Error('Unable to open cursor'), { name: 'UnknownError' });
+      await expect(pullChanges(deps(limitedDb(0, broken)), { tuning })).rejects.toThrow(
+        /Unable to open cursor/,
+      );
+      expect(server.calls.pull).toHaveLength(1);
+      expect(tuning.ceiling).toBeNull();
+    });
+
     it('is reported when even a small page cannot be stored, and the cursor stays', async () => {
       seedProjects(100);
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);

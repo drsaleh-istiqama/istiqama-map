@@ -13,6 +13,7 @@ import { CYCLE_BACKOFF, backoffDelay } from './backoff';
 import { type Clock, elapsedSince, systemClock } from './clock';
 import { registerDevice, reportDeviceStatus, revocationOf } from './device';
 import { errorKey, isBrokenStorage, technicalDetail, toSyncError } from './errors';
+import { trace } from './trace';
 import { type PhotoQueue, type PhotoRunOptions, createPhotoQueue } from './photoQueue';
 import type {
   AppInfo,
@@ -367,6 +368,8 @@ export function createSyncEngine(deps: EngineDeps, options: EngineOptions = {}):
       try {
         const done = await db.repairStorage(storageRepairs === 2);
         console.warn(`sync: local database repaired (${done})`);
+        trace(`local database repaired: ${done}`);
+        pullTuning.ceiling = null; // the refusals were the broken database, not the page size
         nextDelay = continueDelayMs;
         return;
       } catch (repairError) {
@@ -399,6 +402,7 @@ export function createSyncEngine(deps: EngineDeps, options: EngineOptions = {}):
       lastError: errorKey(err),
       lastErrorDetail: `${err.kind}: ${technicalDetail(err)}`,
     });
+    trace(`cycle failed: ${err.kind}: ${technicalDetail(err)}`);
     // Not a network/server condition: a defect worth a trace (Sentry picks console.error up).
     if (err.kind === 'unknown') console.error('sync: cycle failed', err.cause ?? err);
     if (err.kind === 'unauthenticated' && !authProblemNotified) {

@@ -38,6 +38,7 @@ export type { SessionProblem } from './ports';
 export type { PhotoUploadEntry } from './photoQueue';
 export { SyncError, type SyncErrorKind, errorKey, isSyncError, toSyncError } from './errors';
 export { WIFI_ONLY_PREF_KEY } from './network';
+export { syncTrace, type TraceEntry } from './trace';
 export {
   type PersistenceState,
   type StorageInfo,

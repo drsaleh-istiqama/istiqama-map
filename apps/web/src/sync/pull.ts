@@ -13,7 +13,8 @@
  */
 import { REQUEST_BACKOFF, backoffDelay } from './backoff';
 import { type Clock, paceWait, sleep, throwIfAborted, yieldToUi } from './clock';
-import { SyncError, technicalDetail, toSyncError } from './errors';
+import { SyncError, isBrokenStorage, technicalDetail, toSyncError } from './errors';
+import { trace } from './trace';
 import type { DbPort } from './ports';
 import type { PullChange, PullPage, Transport } from './types';
 
@@ -89,6 +90,8 @@ const MIN_PAGE_SIZE = 50;
 const MIN_APPLY_PAGE_SIZE = 20;
 /** Give up on storing smaller pages after this many refusals in one call. */
 const MAX_APPLY_RETRIES = 8;
+/** Quick pages in a row after which a lowered ceiling is raised again (doubled). */
+const CEILING_RECOVERY_PAGES = 10;
 
 function countRows(page: PullPage): number {
   let n = 0;
@@ -130,7 +133,9 @@ async function isolateRows(db: DbPort, page: PullPage): Promise<SkippedRow[] | n
   for (const change of page.changes) {
     const single: PullChange[] = [
       ...(change.rows ?? []).map((row) => ({ table: change.table, rows: [row] }) as PullChange),
-      ...(change.gone ?? []).map((id) => ({ table: change.table, rows: [], gone: [id] }) as PullChange),
+      ...(change.gone ?? []).map(
+        (id) => ({ table: change.table, rows: [], gone: [id] }) as PullChange,
+      ),
     ];
     for (const one of single) {
       try {
@@ -177,6 +182,7 @@ export async function pullChanges(deps: PullDeps, options: PullOptions = {}): Pr
   let lastCallAt = Number.NEGATIVE_INFINITY;
   let recoveredCursor = false;
   let applyRetries = 0;
+  let quickPages = 0;
 
   async function fetchPage(): Promise<PullPage> {
     for (let attempt = 0; ; attempt++) {
@@ -229,6 +235,7 @@ export async function pullChanges(deps: PullDeps, options: PullOptions = {}): Pr
     const epochChanged = pageEpoch !== null && epoch !== null && pageEpoch !== epoch;
     if (page.reset === true || epochChanged) {
       const requestedFrom = cursor;
+      trace(`reset (server ${page.reset === true ? 'reset' : 'scope changed'})`);
       await resetSyncedData(db, pageEpoch ?? epoch);
       outcome.reset = true;
       complete = false;
@@ -261,6 +268,9 @@ export async function pullChanges(deps: PullDeps, options: PullOptions = {}): Pr
       // device or a cancelled cycle is reported; anything else may be the size of the
       // transaction: ask for the same position again in smaller pages.
       if (err.kind === 'storage_full' || err.kind === 'aborted' || signal?.aborted) throw err;
+      trace(`apply refused (${size} rows, limit ${limit}): ${technicalDetail(err)}`);
+      // The database itself is broken (not the size of the page): the engine repairs it.
+      if (isBrokenStorage(err)) throw err;
       if (size <= minApplyPage || applyRetries >= MAX_APPLY_RETRIES) {
         // Small enough: find out whether one row is the problem. A row the device cannot store
         // must not block every row after it (a device that shows nothing at all).
@@ -276,6 +286,7 @@ export async function pullChanges(deps: PullDeps, options: PullOptions = {}): Pr
           ],
         });
         console.error('sync: rows set aside (could not be stored on this device)', bad);
+        trace(`set aside ${bad.length} of ${size} rows: ${bad[0]?.table} ${bad[0]?.reason}`);
         outcome.skipped.push(...bad);
         applyRetries = 0;
         complete = nextComplete;
@@ -307,6 +318,13 @@ export async function pullChanges(deps: PullDeps, options: PullOptions = {}): Pr
     cursor = page.cursor;
     outcome.pages++;
     outcome.rows += countRows(page);
+    const took = clock.now() - startedAt;
+    trace(
+      `stored ${countRows(page)} rows [${page.changes
+        .filter((c) => (c.rows?.length ?? 0) + (c.gone?.length ?? 0) > 0)
+        .map((c) => c.table)
+        .join(',')}] in ${took} ms (limit ${limit})${page.done ? ' — done' : ''}`,
+    );
 
     if (page.done) {
       outcome.done = true;
@@ -317,9 +335,17 @@ export async function pullChanges(deps: PullDeps, options: PullOptions = {}): Pr
     }
 
     // Keep the phone responsive: shrink pages that take long to store, recover slowly.
-    const took = clock.now() - startedAt;
-    if (took > slowApplyMs) limit = Math.max(Math.min(MIN_PAGE_SIZE, limit), Math.floor(limit / 2));
-    else if (took < slowApplyMs / 4) limit = Math.min(ceiling(), limit * 2);
+    if (took > slowApplyMs) {
+      quickPages = 0;
+      limit = Math.max(Math.min(MIN_PAGE_SIZE, limit), Math.floor(limit / 2));
+    } else if (took < slowApplyMs / 4) {
+      // A ceiling lowered after a refusal is not for ever: many quick pages in a row raise it.
+      if (tuning && tuning.ceiling !== null && ++quickPages >= CEILING_RECOVERY_PAGES) {
+        quickPages = 0;
+        tuning.ceiling = tuning.ceiling * 2 >= fullPage ? null : tuning.ceiling * 2;
+      }
+      limit = Math.min(ceiling(), limit * 2);
+    }
     await yieldToUi(clock, signal);
   }
   return outcome;
