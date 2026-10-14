@@ -27,5 +27,9 @@
   "syncPendingPhotos_few": "{count} صور بانتظار الرفع",
   "syncPendingPhotos_many": "{count} صورة بانتظار الرفع",
   "syncPendingPhotos_other": "{count} صورة بانتظار الرفع",
-  "syncFailedOps": "عمليات تحتاج إلى معالجة: {count}"
+  "syncFailedOps": "عمليات تحتاج إلى معالجة: {count}",
+  "syncDetails": "تفاصيل المزامنة",
+  "syncTechnical": "التفاصيل الفنية (أرسلها للدعم الفني)",
+  "syncSkipped": "سجلات تعذّر حفظها على هذا الجهاز: {count}",
+  "syncClose": "إغلاق"
 }

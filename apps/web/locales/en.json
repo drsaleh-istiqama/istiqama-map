@@ -2266,6 +2266,8 @@
   "ui.other": "Other",
   "ui.otherPlaceholder": "Type a short addition",
   "ui.required": "required",
+  "ui.syncClose": "Close",
+  "ui.syncDetails": "Sync details",
   "ui.syncError": "Sync failed",
   "ui.syncFailedOps": "Need attention: {count}",
   "ui.syncLast": "Last sync: {time}",
@@ -2286,5 +2288,7 @@
   "ui.syncPendingPhotos_two": "{count} photos waiting to upload",
   "ui.syncPendingPhotos_zero": "No photos waiting to upload",
   "ui.syncPulling": "Fetching updates…",
-  "ui.syncPushing": "Uploading data…"
+  "ui.syncPushing": "Uploading data…",
+  "ui.syncSkipped": "Records this device could not store: {count}",
+  "ui.syncTechnical": "Technical details (send to support)"
 }

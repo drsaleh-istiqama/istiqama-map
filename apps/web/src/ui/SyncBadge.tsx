@@ -2,6 +2,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { fmt, hasTranslation, t } from '../i18n';
 import { syncNow, syncStatus } from '../sync';
 import { IconAlert, IconOffline, IconOnline, IconPhoto, IconSync, IconUpload } from './icons';
+import { APP_VERSION } from '../version';
 import { Spinner } from './Spinner';
 
 export type SyncBadgeState = 'offline' | 'syncing' | 'error' | 'ok';
@@ -59,12 +60,20 @@ export function SyncBadge() {
       ? t('ui.syncNever')
       : t('ui.syncLast', { time: fmt.relative(new Date(status.lastSyncAt)) });
   const detail = errorDetail(status);
+  const [open, setOpen] = useState(false);
+  const skipped = status.skipped ?? [];
+  const technical = state === 'error' ? (status.lastErrorDetail ?? null) : null;
 
   return (
     <div class={`sync sync--${state}`} data-testid="sync-badge" data-state={state}>
-      <span
+      <button
+        type="button"
         class="sync__state"
+        data-testid="sync-toggle"
+        aria-expanded={open}
+        aria-controls="sync-panel"
         title={detail && state === 'error' ? `${detail}\n${lastSync}` : lastSync}
+        onClick={() => setOpen((v) => !v)}
       >
         {state === 'offline' ? (
           <IconOffline size={20} />
@@ -83,7 +92,7 @@ export function SyncBadge() {
         <span class="sync__detail" data-testid="sync-last" data-at={status.lastSyncAt ?? ''}>
           {lastSync}
         </span>
-      </span>
+      </button>
 
       <span class="sync__count" title={t('ui.syncPendingOps', { count: status.pendingOps })}>
         <IconUpload size={18} />
@@ -100,6 +109,19 @@ export function SyncBadge() {
         </span>
         <span class="sr-only">{t('ui.syncPendingPhotos', { count: status.pendingPhotos })}</span>
       </span>
+
+      {skipped.length > 0 && (
+        <span
+          class="sync__count sync__count--failed"
+          title={t('ui.syncSkipped', { count: skipped.length })}
+        >
+          <IconAlert size={18} />
+          <span data-testid="sync-skipped" aria-hidden="true">
+            {skipped.length}
+          </span>
+          <span class="sr-only">{t('ui.syncSkipped', { count: skipped.length })}</span>
+        </span>
+      )}
 
       {status.failedOps > 0 && (
         <span
@@ -128,6 +150,34 @@ export function SyncBadge() {
       >
         <IconSync size={20} />
       </button>
+
+      {open && (
+        <div class="sync__panel" id="sync-panel" role="dialog" data-testid="sync-panel">
+          <strong>{t('ui.syncDetails')}</strong>
+          <p>
+            {stateLabel(status, state)} · {lastSync}
+          </p>
+          {detail && state === 'error' && <p data-testid="sync-error-detail">{detail}</p>}
+          {skipped.length > 0 && <p>{t('ui.syncSkipped', { count: skipped.length })}</p>}
+          {(technical || skipped.length > 0) && (
+            <>
+              <p class="sync__panel-label">{t('ui.syncTechnical')}</p>
+              <pre class="sync__tech" dir="ltr" data-testid="sync-technical">
+                {[
+                  technical,
+                  ...skipped.map((r) => `${r.table} ${r.id}: ${r.reason}`),
+                  `v${APP_VERSION} · ${navigator.userAgent}`,
+                ]
+                  .filter(Boolean)
+                  .join('\n')}
+              </pre>
+            </>
+          )}
+          <button type="button" class="btn" onClick={() => setOpen(false)}>
+            {t('ui.syncClose')}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

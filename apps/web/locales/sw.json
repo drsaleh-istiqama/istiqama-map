@@ -2266,6 +2266,8 @@
   "ui.other": "Nyingine",
   "ui.otherPlaceholder": "Andika nyongeza fupi",
   "ui.required": "lazima",
+  "ui.syncClose": "Funga",
+  "ui.syncDetails": "Maelezo ya usawazishaji",
   "ui.syncError": "Usawazishaji umeshindikana",
   "ui.syncFailedOps": "Yanayohitaji kushughulikiwa: {count}",
   "ui.syncLast": "Usawazishaji wa mwisho: {time}",
@@ -2286,5 +2288,7 @@
   "ui.syncPendingPhotos_two": "Picha {count} zinasubiri kupakiwa",
   "ui.syncPendingPhotos_zero": "Hakuna picha zinazosubiri kupakiwa",
   "ui.syncPulling": "Inapokea masasisho…",
-  "ui.syncPushing": "Inatuma data…"
+  "ui.syncPushing": "Inatuma data…",
+  "ui.syncSkipped": "Rekodi ambazo kifaa hiki hakikuweza kuhifadhi: {count}",
+  "ui.syncTechnical": "Maelezo ya kiufundi (tuma kwa msaada)"
 }

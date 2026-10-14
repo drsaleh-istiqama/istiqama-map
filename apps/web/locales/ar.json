@@ -2266,6 +2266,8 @@
   "ui.other": "أخرى",
   "ui.otherPlaceholder": "اكتب إضافة قصيرة",
   "ui.required": "مطلوب",
+  "ui.syncClose": "إغلاق",
+  "ui.syncDetails": "تفاصيل المزامنة",
   "ui.syncError": "تعذّرت المزامنة",
   "ui.syncFailedOps": "عمليات تحتاج إلى معالجة: {count}",
   "ui.syncLast": "آخر مزامنة: {time}",
@@ -2286,5 +2288,7 @@
   "ui.syncPendingPhotos_two": "صورتان بانتظار الرفع",
   "ui.syncPendingPhotos_zero": "لا صور بانتظار الرفع",
   "ui.syncPulling": "جارٍ جلب التحديثات…",
-  "ui.syncPushing": "جارٍ رفع البيانات…"
+  "ui.syncPushing": "جارٍ رفع البيانات…",
+  "ui.syncSkipped": "سجلات تعذّر حفظها على هذا الجهاز: {count}",
+  "ui.syncTechnical": "التفاصيل الفنية (أرسلها للدعم الفني)"
 }

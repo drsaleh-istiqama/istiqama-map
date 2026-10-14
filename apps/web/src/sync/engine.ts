@@ -12,7 +12,7 @@ import type { Signal } from '@preact/signals';
 import { CYCLE_BACKOFF, backoffDelay } from './backoff';
 import { type Clock, elapsedSince, systemClock } from './clock';
 import { registerDevice, reportDeviceStatus, revocationOf } from './device';
-import { errorKey, toSyncError } from './errors';
+import { errorKey, technicalDetail, toSyncError } from './errors';
 import { type PhotoQueue, type PhotoRunOptions, createPhotoQueue } from './photoQueue';
 import type {
   AppInfo,
@@ -272,6 +272,13 @@ export function createSyncEngine(deps: EngineDeps, options: EngineOptions = {}):
       { ...options.pull, signal, tuning: pullTuning },
     );
 
+    if (pulled.skipped.length > 0) {
+      const known = status.peek().skipped ?? [];
+      const fresh = pulled.skipped.filter(
+        (r) => !known.some((k) => k.table === r.table && k.id === r.id),
+      );
+      if (fresh.length > 0) patchStatus(status, { skipped: [...known, ...fresh].slice(-50) });
+    }
     patchStatus(status, { state: 'pushing' });
     const uploaded = await photos.run({ ...options.photos, signal });
     // The rows that just became `uploaded` go out in the same cycle.
@@ -287,7 +294,7 @@ export function createSyncEngine(deps: EngineDeps, options: EngineOptions = {}):
       failures = 0;
       authRetried = false;
       authProblemNotified = false;
-      patchStatus(status, { state: 'idle', lastError: null, lastSyncAt: now });
+      patchStatus(status, { state: 'idle', lastError: null, lastErrorDetail: null, lastSyncAt: now });
     }
     if (more) {
       patchStatus(status, { state: pulled.done ? 'pushing' : 'pulling' });
@@ -350,7 +357,11 @@ export function createSyncEngine(deps: EngineDeps, options: EngineOptions = {}):
       const token = await auth.accessToken().catch(() => null);
       if (token) {
         nextDelay = continueDelayMs;
-        patchStatus(status, { state: 'error', lastError: errorKey(err) });
+        patchStatus(status, {
+      state: 'error',
+      lastError: errorKey(err),
+      lastErrorDetail: `${err.kind}: ${technicalDetail(err)}`,
+    });
         return;
       }
     }
@@ -361,7 +372,11 @@ export function createSyncEngine(deps: EngineDeps, options: EngineOptions = {}):
       () => clock.random(),
       err.retryAfterMs ?? 0,
     );
-    patchStatus(status, { state: 'error', lastError: errorKey(err) });
+    patchStatus(status, {
+      state: 'error',
+      lastError: errorKey(err),
+      lastErrorDetail: `${err.kind}: ${technicalDetail(err)}`,
+    });
     // Not a network/server condition: a defect worth a trace (Sentry picks console.error up).
     if (err.kind === 'unknown') console.error('sync: cycle failed', err.cause ?? err);
     if (err.kind === 'unauthenticated' && !authProblemNotified) {

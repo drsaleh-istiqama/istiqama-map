@@ -135,6 +135,25 @@ describe('<SyncBadge>', () => {
     expect(screen.getByTestId('sync-badge').textContent).toContain('5 minutes ago');
   });
 
+  it('tapping the state opens the details: message, technical text and set-aside rows', () => {
+    setStatus({
+      state: 'error',
+      lastError: 'sync.error_unknown',
+      lastErrorDetail: 'unknown: DataError: Unable to store record',
+      skipped: [{ table: 'projects', id: 'p-1', reason: 'DataError: x' }],
+    });
+    render(<SyncBadge />);
+    expect(screen.queryByTestId('sync-panel')).toBeNull();
+    expect(screen.getByTestId('sync-skipped').textContent).toBe('1');
+    fireEvent.click(screen.getByTestId('sync-toggle'));
+    const tech = screen.getByTestId('sync-technical').textContent ?? '';
+    expect(tech).toContain('DataError: Unable to store record');
+    expect(tech).toContain('projects p-1: DataError: x');
+    expect(screen.getByTestId('sync-toggle').getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(screen.getByTestId('sync-toggle'));
+    expect(screen.queryByTestId('sync-panel')).toBeNull();
+  });
+
   it('shows operations that need attention', () => {
     setStatus({ failedOps: 2 });
     render(<SyncBadge />);

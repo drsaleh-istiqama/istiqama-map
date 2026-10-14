@@ -136,6 +136,7 @@ describe('sync engine — cycles', () => {
       failedOps: 0,
       lastSyncAt: expect.any(Number),
       lastError: null,
+      lastErrorDetail: null,
     });
     expect(clock.now() - (engine.status.value.lastSyncAt as number)).toBeLessThan(1000);
     expect(await store.getMeta(META_LAST_SYNC)).toBe(engine.status.value.lastSyncAt);

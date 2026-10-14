@@ -417,6 +417,7 @@
 
 /* ---------- Sync badge ---------- */
 .sync {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: var(--sp-2);
@@ -432,6 +433,12 @@
   display: inline-flex;
   align-items: center;
   gap: var(--sp-1);
+  min-block-size: var(--tap);
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
   font-weight: var(--fw-bold);
   color: var(--c-active-ink);
 }
@@ -458,6 +465,41 @@
 .sync__count--failed {
   color: var(--c-danger);
   font-weight: var(--fw-bold);
+}
+.sync__panel {
+  position: absolute;
+  inset-block-start: calc(100% + var(--sp-1));
+  inset-inline-end: 0;
+  z-index: 50;
+  inline-size: min(22rem, calc(100vw - 2rem));
+  padding: var(--sp-3);
+  border: 1px solid var(--c-line);
+  border-radius: var(--radius-lg);
+  background: var(--c-surface);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+  white-space: normal;
+  text-align: start;
+}
+.sync__panel p {
+  margin-block: var(--sp-2);
+}
+.sync__panel-label {
+  color: var(--c-muted);
+}
+.sync__tech {
+  max-block-size: 12rem;
+  overflow: auto;
+  margin: 0 0 var(--sp-2);
+  padding: var(--sp-2);
+  border-radius: 6px;
+  background: var(--c-line);
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+  text-align: left;
+  unicode-bidi: isolate;
+  user-select: text;
+  -webkit-user-select: text;
 }
 .sync__now {
   border-radius: 50%;

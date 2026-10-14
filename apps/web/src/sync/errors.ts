@@ -117,6 +117,30 @@ export function toSyncError(e: unknown): SyncError {
   return new SyncError('unknown', message || 'unknown error', { cause: e });
 }
 
+/**
+ * Short technical description for support ("QuotaExceededError: …" / "DataError: …"): the
+ * names and messages along the cause chain. No row content, only what the browser said.
+ */
+export function technicalDetail(e: unknown): string {
+  const parts: string[] = [];
+  let cur: unknown = e;
+  for (let depth = 0; depth < 5 && cur !== null && cur !== undefined; depth++) {
+    const name = errorName(cur);
+    const message =
+      typeof cur === 'object' && 'message' in (cur as object)
+        ? String((cur as { message: unknown }).message)
+        : String(cur);
+    const part = [name === 'Error' ? '' : name, message].filter(Boolean).join(': ');
+    if (part && !parts.includes(part)) parts.push(part);
+    const inner =
+      (cur as { inner?: unknown; cause?: unknown }).inner ?? (cur as { cause?: unknown }).cause;
+    if (inner === cur) break;
+    cur = inner;
+  }
+  const text = parts.join(' <- ') || 'unknown';
+  return text.length > 400 ? `${text.slice(0, 400)}…` : text;
+}
+
 /** Locale key (namespace `sync`) describing a failure to the user. */
 export function errorKey(e: unknown): string {
   const kind = toSyncError(e).kind;

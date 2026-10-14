@@ -9,7 +9,7 @@
  * Browsers are not downloaded: the installed Google Chrome is used (`channel: 'chrome'`).
  */
 import { fileURLToPath } from 'node:url';
-import { defineConfig } from '@playwright/test';
+import { defineConfig, devices } from '@playwright/test';
 import { loadEnv } from 'vite';
 
 const baseURL = 'http://127.0.0.1:4173';
@@ -31,14 +31,20 @@ export default defineConfig({
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : [['list']],
   use: {
     baseURL,
-    channel: 'chrome',
     headless: true,
     locale: 'en-US',
     serviceWorkers: 'allow',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
-  projects: [{ name: 'chrome', use: { channel: 'chrome' } }],
+  projects: [
+    { name: 'chrome', use: { channel: 'chrome' } },
+    // iPhone/iPad (every iOS browser runs on WebKit). Requires `npx playwright install webkit`;
+    // opt-in locally with E2E_WEBKIT=1, always on in CI.
+    ...(process.env.E2E_WEBKIT || process.env.CI
+      ? [{ name: 'webkit', use: { ...devices['iPhone 14'] } }]
+      : []),
+  ],
   webServer: {
     // Build first so the service worker and the CSP match the current sources and .env.local.
     command: 'npm run build && npm run preview',

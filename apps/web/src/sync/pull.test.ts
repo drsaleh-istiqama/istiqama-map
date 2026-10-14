@@ -45,7 +45,7 @@ describe('pullChanges', () => {
     server.write('countries', uid(), { iso2: 'TZ', name_ar: 'تنزانيا' });
     const ids = seedProjects(1234);
     const outcome = await pullChanges(deps());
-    expect(outcome).toEqual({ pages: 3, rows: 1235, done: true, reset: false });
+    expect(outcome).toEqual({ pages: 3, rows: 1235, done: true, reset: false, skipped: [] });
     expect(server.calls.pull.map((c) => c.limit)).toEqual([500, 500, 500]);
     expect(server.calls.pull[0]!.cursor).toBeNull();
     expect(await store.allRows('projects')).toHaveLength(1234);
@@ -108,7 +108,6 @@ describe('pullChanges', () => {
     const flaky: DbPort = Object.assign(Object.create(store) as DbPort, {
       applyPage: async (page: PageToApply) => {
         if (crash) {
-          crash = false;
           await store.applyPage({ changes: page.changes, meta: [] }); // rows only…
           throw new Error('killed before the cursor was stored');
         }
@@ -119,11 +118,31 @@ describe('pullChanges', () => {
     await expect(pullChanges(deps(flaky), { minApplyPageSize: 1000 })).rejects.toThrow();
     expect(await store.allRows('projects')).toHaveLength(500);
     expect(await store.getMeta(META_PULL_STATE)).toBeUndefined();
+    crash = false;
 
     const outcome = await pullChanges(deps(flaky));
     expect(server.calls.pull[1]!.cursor).toBeNull(); // the same page again
     expect(outcome).toMatchObject({ pages: 2, done: true });
     expect(await store.allRows('projects')).toHaveLength(700);
+  });
+
+  it('sets aside a row the device cannot store and keeps the rest of the page', async () => {
+    const ids = seedProjects(30);
+    const poison = ids[7]!;
+    const picky: DbPort = Object.assign(Object.create(store) as DbPort, {
+      applyPage: async (page: PageToApply) => {
+        const bad = page.changes.some((c) => (c.rows ?? []).some((r) => r.id === poison));
+        if (bad) throw Object.assign(new Error('Unable to store record'), { name: 'DataError' });
+        await store.applyPage(page);
+      },
+    });
+    const outcome = await pullChanges(deps(picky), { minApplyPageSize: 50 });
+    expect(outcome.done).toBe(true);
+    expect(outcome.skipped).toEqual([
+      { table: 'projects', id: poison, reason: 'DataError: Unable to store record' },
+    ]);
+    expect(await store.allRows('projects')).toHaveLength(29);
+    expect(await store.getMeta<PullState>(META_PULL_STATE)).toMatchObject({ complete: true });
   });
 
   it('does not overwrite a row with pending local edits: pending fields stay on top', async () => {
@@ -207,7 +226,7 @@ describe('pullChanges', () => {
   it('caps the pages per cycle and continues where it stopped', async () => {
     seedProjects(450);
     const first = await pullChanges(deps(), { pageSize: 100, maxPages: 2 });
-    expect(first).toEqual({ pages: 2, rows: 200, done: false, reset: false });
+    expect(first).toEqual({ pages: 2, rows: 200, done: false, reset: false, skipped: [] });
     expect(await store.getMeta<PullState>(META_PULL_STATE)).toMatchObject({ complete: false });
     const second = await pullChanges(deps(), { pageSize: 100, maxPages: 10 });
     expect(second).toMatchObject({ pages: 3, rows: 250, done: true });

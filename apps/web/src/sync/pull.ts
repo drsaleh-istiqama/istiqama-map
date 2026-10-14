@@ -13,9 +13,9 @@
  */
 import { REQUEST_BACKOFF, backoffDelay } from './backoff';
 import { type Clock, paceWait, sleep, throwIfAborted, yieldToUi } from './clock';
-import { SyncError, toSyncError } from './errors';
+import { SyncError, technicalDetail, toSyncError } from './errors';
 import type { DbPort } from './ports';
-import type { PullPage, Transport } from './types';
+import type { PullChange, PullPage, Transport } from './types';
 
 /** Meta key of the pull position. */
 export const META_PULL_STATE = 'sync.pull';
@@ -73,6 +73,15 @@ export interface PullOutcome {
   done: boolean;
   /** True when the synced tables were discarded during this run. */
   reset: boolean;
+  /** Rows the device refused to store and that were set aside (see `isolateRows`). */
+  skipped: SkippedRow[];
+}
+
+/** A server row this device could not store; the rest of its page was kept. */
+export interface SkippedRow {
+  table: string;
+  id: string;
+  reason: string;
 }
 
 const MIN_PAGE_SIZE = 50;
@@ -111,6 +120,35 @@ export async function resetSyncedData(db: DbPort, epoch: string | null = null): 
 
 let warnedApplyRetry = false;
 
+/**
+ * Stores the rows of a refused page one by one. Returns the rows that still fail, or null
+ * when the device refuses everything (then the failure is not about the data).
+ */
+async function isolateRows(db: DbPort, page: PullPage): Promise<SkippedRow[] | null> {
+  const bad: SkippedRow[] = [];
+  let ok = 0;
+  for (const change of page.changes) {
+    const single: PullChange[] = [
+      ...(change.rows ?? []).map((row) => ({ table: change.table, rows: [row] }) as PullChange),
+      ...(change.gone ?? []).map((id) => ({ table: change.table, rows: [], gone: [id] }) as PullChange),
+    ];
+    for (const one of single) {
+      try {
+        await db.applyPage({ changes: [one], meta: [] });
+        ok++;
+      } catch (e) {
+        const row = one.rows?.[0] as { id?: unknown } | undefined;
+        bad.push({
+          table: change.table,
+          id: String(row?.id ?? one.gone?.[0] ?? '?'),
+          reason: technicalDetail(e),
+        });
+      }
+    }
+  }
+  return ok === 0 ? null : bad;
+}
+
 export async function pullChanges(deps: PullDeps, options: PullOptions = {}): Promise<PullOutcome> {
   const { db, transport, clock } = deps;
   const signal = options.signal;
@@ -125,7 +163,7 @@ export async function pullChanges(deps: PullDeps, options: PullOptions = {}): Pr
   const ceiling = (): number => Math.min(fullPage, tuning?.ceiling ?? fullPage);
   let limit = ceiling();
 
-  const outcome: PullOutcome = { pages: 0, rows: 0, done: false, reset: false };
+  const outcome: PullOutcome = { pages: 0, rows: 0, done: false, reset: false, skipped: [] };
   let stored = await db.getMeta<PullState>(META_PULL_STATE);
   if (stored?.wipePending === true) {
     // A previous reset was interrupted: finish it before anything is pulled on top.
@@ -223,7 +261,36 @@ export async function pullChanges(deps: PullDeps, options: PullOptions = {}): Pr
       // device or a cancelled cycle is reported; anything else may be the size of the
       // transaction: ask for the same position again in smaller pages.
       if (err.kind === 'storage_full' || err.kind === 'aborted' || signal?.aborted) throw err;
-      if (size <= minApplyPage || applyRetries >= MAX_APPLY_RETRIES) throw err;
+      if (size <= minApplyPage || applyRetries >= MAX_APPLY_RETRIES) {
+        // Small enough: find out whether one row is the problem. A row the device cannot store
+        // must not block every row after it (a device that shows nothing at all).
+        const bad = await isolateRows(db, page);
+        if (bad === null || bad.length >= size) throw err;
+        await db.applyPage({
+          changes: [],
+          meta: [
+            {
+              key: META_PULL_STATE,
+              value: { cursor: page.cursor, epoch, complete: nextComplete } satisfies PullState,
+            },
+          ],
+        });
+        console.error('sync: rows set aside (could not be stored on this device)', bad);
+        outcome.skipped.push(...bad);
+        applyRetries = 0;
+        complete = nextComplete;
+        cursor = page.cursor;
+        outcome.pages++;
+        outcome.rows += size - bad.length;
+        if (page.done) {
+          outcome.done = true;
+          return outcome;
+        }
+        if (page.cursor === null || page.cursor === undefined) {
+          throw new SyncError('bad_response', 'sync_pull: missing cursor on an unfinished round');
+        }
+        continue;
+      }
       applyRetries++;
       limit = Math.max(minApplyPage, Math.floor(Math.min(limit, size) / 2));
       if (tuning) tuning.ceiling = limit;

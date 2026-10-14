@@ -27,5 +27,9 @@
   "syncPendingPhotos_few": "{count} photos waiting to upload",
   "syncPendingPhotos_many": "{count} photos waiting to upload",
   "syncPendingPhotos_other": "{count} photos waiting to upload",
-  "syncFailedOps": "Need attention: {count}"
+  "syncFailedOps": "Need attention: {count}",
+  "syncDetails": "Sync details",
+  "syncTechnical": "Technical details (send to support)",
+  "syncSkipped": "Records this device could not store: {count}",
+  "syncClose": "Close"
 }

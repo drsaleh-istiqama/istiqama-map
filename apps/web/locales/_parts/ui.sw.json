@@ -27,5 +27,9 @@
   "syncPendingPhotos_few": "Picha {count} zinasubiri kupakiwa",
   "syncPendingPhotos_many": "Picha {count} zinasubiri kupakiwa",
   "syncPendingPhotos_other": "Picha {count} zinasubiri kupakiwa",
-  "syncFailedOps": "Yanayohitaji kushughulikiwa: {count}"
+  "syncFailedOps": "Yanayohitaji kushughulikiwa: {count}",
+  "syncDetails": "Maelezo ya usawazishaji",
+  "syncTechnical": "Maelezo ya kiufundi (tuma kwa msaada)",
+  "syncSkipped": "Rekodi ambazo kifaa hiki hakikuweza kuhifadhi: {count}",
+  "syncClose": "Funga"
 }

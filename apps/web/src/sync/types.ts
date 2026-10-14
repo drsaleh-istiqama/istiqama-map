@@ -94,6 +94,10 @@ export interface SyncStatus {
   lastSyncAt: number | null;
   /** Translation key (`sync.error_*`) of the last failure, null when healthy. */
   lastError: string | null;
+  /** Technical text of the last failure (browser / server message), for support. */
+  lastErrorDetail?: string | null;
+  /** Rows set aside since the page was loaded because this device could not store them. */
+  skipped?: Array<{ table: string; id: string; reason: string }>;
 }
 
 /** Answer of `register_device` / `report_device_status`. */
