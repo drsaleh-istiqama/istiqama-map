@@ -400,3 +400,39 @@ export async function wipeAllLocalData(): Promise<void> {
   invalidateDeriveCaches();
   resetMetaCaches();
 }
+
+/**
+ * The browser's database stopped answering (iOS WebKit: "Unable to open cursor" after the
+ * app was in the background). First reopen the connection; on request, delete and recreate
+ * the database — only when it holds nothing unsent (queues, rejected ops, photos, drafts,
+ * restricted rows). The session lives in another database and is not touched.
+ */
+export async function repairLocalStore(
+  rebuild: boolean,
+): Promise<'reconnected' | 'rebuilt' | 'kept'> {
+  let unsent = -1;
+  if (rebuild) {
+    try {
+      const n = await Promise.all([
+        db.outbox.count(),
+        db.failed_ops.count(),
+        db.photo_blobs.count(),
+        db.drafts.count(),
+        db.restricted_local.count(),
+      ]);
+      unsent = n.reduce((a, b) => a + b, 0);
+    } catch {
+      unsent = -1; // unreadable: never delete what cannot be checked
+    }
+  }
+  invalidateDeriveCaches();
+  resetMetaCaches();
+  if (rebuild && unsent === 0) {
+    await db.delete({ disableAutoOpen: false });
+    await db.open();
+    return 'rebuilt';
+  }
+  db.close({ disableAutoOpen: false });
+  await db.open();
+  return rebuild ? 'kept' : 'reconnected';
+}

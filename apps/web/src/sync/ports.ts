@@ -91,6 +91,13 @@ export interface DbPort {
   resetScopedData(): Promise<void>;
   /** Remove every local store (revoked session / device). */
   wipeAll(): Promise<void>;
+  /**
+   * The browser's database stopped answering (iOS WebKit after the app was in the background:
+   * "Unable to open cursor", "Connection to Indexed Database server lost"). `rebuild = false`
+   * reopens the connection; `rebuild = true` deletes and recreates the local database, but
+   * only when nothing unsent is in it. Returns what was done.
+   */
+  repairStorage?(rebuild: boolean): Promise<'reconnected' | 'rebuilt' | 'kept'>;
 
   // -- meta (key/value) -----------------------------------------------------------------
   getMeta<T>(key: string): Promise<T | undefined>;

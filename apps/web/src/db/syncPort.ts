@@ -13,7 +13,13 @@ import {
   requeueInflight,
   type QueueCounts,
 } from './ack';
-import { applyPage, resetScopedData, wipeAllLocalData, type PullPageInput } from './apply';
+import {
+  applyPage,
+  repairLocalStore,
+  resetScopedData,
+  wipeAllLocalData,
+  type PullPageInput,
+} from './apply';
 import { dropPhotoBlob, photoBlob } from './blobs';
 import { publicRow } from './bundle';
 import { db, type OutboxOp, type PhotoBlobKind } from './dexie';
@@ -120,6 +126,8 @@ export const syncPort = {
   wipeAll(): Promise<void> {
     return wipeAllLocalData();
   },
+
+  repairStorage: repairLocalStore,
 
   getMeta,
   setMeta,

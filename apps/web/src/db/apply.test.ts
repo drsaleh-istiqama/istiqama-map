@@ -4,7 +4,13 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { ackOp, listFailedOps, markInflight, pendingOps } from './ack';
-import { applyPage, applyServerRows, resetScopedData, wipeAllLocalData } from './apply';
+import {
+  applyPage,
+  applyServerRows,
+  repairLocalStore,
+  resetScopedData,
+  wipeAllLocalData,
+} from './apply';
 import { photoBlob, putPhotoBlob } from './blobs';
 import { db } from './dexie';
 import { drafts, getMeta, setMeta } from './meta';
@@ -288,5 +294,29 @@ describe('wipeAllLocalData', () => {
     await wipeAllLocalData();
     for (const t of db.tables) expect(await t.count()).toBe(0);
     expect(await photoBlob('nope', 'thumb')).toBeUndefined();
+  });
+});
+
+describe('repairLocalStore', () => {
+  it('reconnects without losing anything', async () => {
+    await applyServerRows('donors', [serverRow('donors', { name_ar: 'x' })]);
+    expect(await repairLocalStore(false)).toBe('reconnected');
+    expect(await db.donors.count()).toBe(1);
+  });
+
+  it('rebuilds an empty-of-unsent database from scratch', async () => {
+    await applyServerRows('donors', [serverRow('donors', { name_ar: 'x' })]);
+    await setMeta('sync.pull', { cursor: 'c1', epoch: 'e', complete: true });
+    expect(await repairLocalStore(true)).toBe('rebuilt');
+    expect(await db.donors.count()).toBe(0);
+    expect(await getMeta('sync.pull')).toBeUndefined(); // next pull starts over
+  });
+
+  it('never deletes a database that holds unsent work', async () => {
+    const mine = newRow('donors', { name_ar: 'mine' });
+    await mutate('donors', mine.id, mine, { insert: true });
+    expect((await outbox()).length).toBeGreaterThan(0);
+    expect(await repairLocalStore(true)).toBe('kept');
+    expect((await outbox()).length).toBeGreaterThan(0);
   });
 });

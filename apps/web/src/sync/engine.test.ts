@@ -8,6 +8,7 @@ import {
   createSyncEngine,
 } from './engine';
 import { SyncError } from './errors';
+import type { DbPort } from './ports';
 import { META_PULL_STATE, type PullState } from './pull';
 import { FakeAuth, FakeLock, FakeNetwork, FakePrefs, FakeUploader, fakeApp } from './testing/fakes';
 import { FakeServer } from './testing/fakeServer';
@@ -438,6 +439,28 @@ describe('sync engine — failures', () => {
     store.applyPage = original;
     await engine.syncNow();
     expect(await store.allRows('donors')).toHaveLength(1);
+  });
+
+  it('repairs a broken browser database (iOS "Unable to open cursor") and carries on', async () => {
+    server.write('donors', uid(), { name_ar: 'x' });
+    build();
+    const broken = Object.assign(new Error('Unable to open cursor'), { name: 'UnknownError' });
+    const original = store.applyPage.bind(store);
+    store.applyPage = async () => {
+      throw broken;
+    };
+    const repairs: boolean[] = [];
+    const port = store as LocalStore & { repairStorage?: DbPort['repairStorage'] };
+    port.repairStorage = async (rebuild: boolean) => {
+      repairs.push(rebuild);
+      if (rebuild) store.applyPage = original; // a fresh database works again
+      return rebuild ? 'rebuilt' : 'reconnected';
+    };
+    engine.start();
+    await statusReaches((s) => s.state === 'idle' && s.lastSyncAt !== null);
+    expect(repairs).toEqual([false, true]); // reconnect first, rebuild only if still broken
+    expect(await store.allRows('donors')).toHaveLength(1);
+    delete port.repairStorage;
   });
 
   it('refreshes the token once on 401 and carries on', async () => {

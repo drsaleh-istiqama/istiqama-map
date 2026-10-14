@@ -12,7 +12,7 @@ import type { Signal } from '@preact/signals';
 import { CYCLE_BACKOFF, backoffDelay } from './backoff';
 import { type Clock, elapsedSince, systemClock } from './clock';
 import { registerDevice, reportDeviceStatus, revocationOf } from './device';
-import { errorKey, technicalDetail, toSyncError } from './errors';
+import { errorKey, isBrokenStorage, technicalDetail, toSyncError } from './errors';
 import { type PhotoQueue, type PhotoRunOptions, createPhotoQueue } from './photoQueue';
 import type {
   AppInfo,
@@ -122,6 +122,8 @@ export function createSyncEngine(deps: EngineDeps, options: EngineOptions = {}):
   let again = false;
   let abort: AbortController | null = null;
   let failures = 0;
+  // Repairs of a broken local database since the last good cycle (see `fail`).
+  let storageRepairs = 0;
   let registered = false;
   let authRetried = false;
   let authProblemNotified = false;
@@ -292,9 +294,15 @@ export function createSyncEngine(deps: EngineDeps, options: EngineOptions = {}):
       const now = clock.now();
       await db.setMeta(META_LAST_SYNC, now);
       failures = 0;
+      storageRepairs = 0;
       authRetried = false;
       authProblemNotified = false;
-      patchStatus(status, { state: 'idle', lastError: null, lastErrorDetail: null, lastSyncAt: now });
+      patchStatus(status, {
+        state: 'idle',
+        lastError: null,
+        lastErrorDetail: null,
+        lastSyncAt: now,
+      });
     }
     if (more) {
       patchStatus(status, { state: pulled.done ? 'pushing' : 'pulling' });
@@ -351,6 +359,20 @@ export function createSyncEngine(deps: EngineDeps, options: EngineOptions = {}):
       return;
     }
     if (err.kind === 'session_revoked') return revoked('session_revoked');
+    if (isBrokenStorage(err) && db.repairStorage && storageRepairs < 2) {
+      // iOS WebKit loses its IndexedDB connection while the app is in the background; every
+      // read then fails. Reopen it; if that is not enough, rebuild the local copy (only when
+      // nothing unsent is in it) and pull again.
+      storageRepairs++;
+      try {
+        const done = await db.repairStorage(storageRepairs === 2);
+        console.warn(`sync: local database repaired (${done})`);
+        nextDelay = continueDelayMs;
+        return;
+      } catch (repairError) {
+        console.error('sync: local database repair failed', repairError);
+      }
+    }
     if (err.kind === 'unauthenticated' && !authRetried) {
       // The access token may simply have expired while the phone slept: refresh once.
       authRetried = true;
@@ -358,10 +380,10 @@ export function createSyncEngine(deps: EngineDeps, options: EngineOptions = {}):
       if (token) {
         nextDelay = continueDelayMs;
         patchStatus(status, {
-      state: 'error',
-      lastError: errorKey(err),
-      lastErrorDetail: `${err.kind}: ${technicalDetail(err)}`,
-    });
+          state: 'error',
+          lastError: errorKey(err),
+          lastErrorDetail: `${err.kind}: ${technicalDetail(err)}`,
+        });
         return;
       }
     }

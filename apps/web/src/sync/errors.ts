@@ -118,6 +118,18 @@ export function toSyncError(e: unknown): SyncError {
 }
 
 /**
+ * The browser's database itself stopped working (not the data): iOS WebKit after the app was
+ * suspended ("Unable to open cursor", "Connection to Indexed Database server lost"), or a
+ * connection Dexie already considers closed.
+ */
+export function isBrokenStorage(e: unknown): boolean {
+  if (isQuotaError(e)) return false;
+  return /Unable to open cursor|Indexed ?Database server lost|DatabaseClosedError|Database has been closed|UnknownError/i.test(
+    technicalDetail(e),
+  );
+}
+
+/**
  * Short technical description for support ("QuotaExceededError: …" / "DataError: …"): the
  * names and messages along the cause chain. No row content, only what the browser said.
  */
