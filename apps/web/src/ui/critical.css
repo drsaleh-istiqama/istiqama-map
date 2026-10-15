@@ -88,6 +88,20 @@ body {
     transform: translateX(-250%);
   }
 }
+.splash__fail p {
+  margin: 1.25rem 0 0.75rem;
+  color: #b42318;
+}
+.splash__retry {
+  min-block-size: 48px;
+  padding: 0 1.25rem;
+  border: 0;
+  border-radius: 8px;
+  background: #0f2545;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
 .splash__sr {
   position: absolute;
   inline-size: 1px;

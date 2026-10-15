@@ -403,8 +403,8 @@ export async function wipeAllLocalData(): Promise<void> {
 
 /**
  * The browser's database stopped answering (iOS WebKit: "Unable to open cursor" after the
- * app was in the background). First reopen the connection; on request, delete and recreate
- * the database — only when it holds nothing unsent (queues, rejected ops, photos, drafts,
+ * app was in the background). First reopen the connection; on request, empty
+ * the local copy — only when it holds nothing unsent (queues, rejected ops, photos, drafts,
  * restricted rows). The session lives in another database and is not touched.
  */
 export async function repairLocalStore(
@@ -427,12 +427,18 @@ export async function repairLocalStore(
   }
   invalidateDeriveCaches();
   resetMetaCaches();
-  if (rebuild && unsent === 0) {
-    await db.delete({ disableAutoOpen: false });
-    await db.open();
-    return 'rebuilt';
-  }
+  // Never db.delete(): another tab holding a connection would leave the delete request pending,
+  // and a pending delete blocks every later open of the database (the app would hang).
   db.close({ disableAutoOpen: false });
   await db.open();
+  if (rebuild && unsent === 0) {
+    // clear() needs no cursor; the next pull starts from scratch (the cursor is in `meta`).
+    await db.transaction('rw', db.tables, async () => {
+      for (const table of db.tables) await table.clear();
+    });
+    invalidateDeriveCaches();
+    resetMetaCaches();
+    return 'rebuilt';
+  }
   return rebuild ? 'kept' : 'reconnected';
 }
