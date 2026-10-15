@@ -291,6 +291,8 @@ export function createSyncEngine(deps: EngineDeps, options: EngineOptions = {}):
     const more = !pulled.done || uploaded.more;
     await heartbeat(more, signal);
 
+    // Progress was made: a later broken-database failure may be repaired again.
+    if (pulled.rows > 0) storageRepairs = 0;
     if (pulled.done) {
       const now = clock.now();
       await db.setMeta(META_LAST_SYNC, now);

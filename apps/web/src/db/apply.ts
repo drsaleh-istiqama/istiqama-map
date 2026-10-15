@@ -77,6 +77,9 @@ async function operationsByRow(
 
 /** Projects that have any queued or rejected work (their completeness is estimated locally). */
 async function busyProjectIds(): Promise<Set<string>> {
+  // Counting the queues opens no index cursor; an empty queue (every first sync) needs none.
+  const [queued, failed] = await Promise.all([db.outbox.count(), db.failed_ops.count()]);
+  if (queued === 0 && failed === 0) return new Set();
   const [a, b] = await Promise.all([
     db.outbox.orderBy('project_id').uniqueKeys(),
     db.failed_ops.orderBy('project_id').uniqueKeys(),
@@ -107,17 +110,15 @@ async function applyChunk(
 
   // Existing copies are needed for projects (child-derived state), localities (a rename
   // changes the search tokens of their projects) and for conflict flags.
+  // Read by primary key, never through an index cursor: on iOS WebKit an index cursor opened
+  // here failed for ever ("UnknownError: Unable to open cursor") once a store held a few
+  // thousand rows, and the whole first sync stopped. Plain gets do not open cursors.
   const existing = new Map<string, AnyRecord>();
   if (liveIds.length > 0) {
-    let wanted: string[] = [];
-    if (isProjects || isLocalities) wanted = liveIds;
-    else {
-      const flagged = new Set((await store.where('_conflict').equals(1).primaryKeys()) as string[]);
-      if (flagged.size > 0) wanted = liveIds.filter((id) => flagged.has(id));
-    }
-    if (wanted.length > 0) {
-      const found = (await store.bulkGet(wanted)) as Array<AnyRecord | undefined>;
-      for (const r of found) if (r) existing.set(String(r.id), r);
+    const found = (await store.bulkGet(liveIds)) as Array<AnyRecord | undefined>;
+    for (const r of found) {
+      if (!r) continue;
+      if (isProjects || isLocalities || r._conflict === 1) existing.set(String(r.id), r);
     }
   }
 
