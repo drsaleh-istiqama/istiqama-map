@@ -285,5 +285,16 @@
   "staffRows_few": "{count} صفوف كادر",
   "staffRows_many": "{count} صفًّا للكادر",
   "staffRows_other": "{count} صف كادر",
-  "fallbackStaffOmitted": "ولم تُضمَّن ورقة الكادر؛ صدّر «الكادر» في ملف مستقل."
+  "fallbackStaffOmitted": "ولم تُضمَّن ورقة الكادر؛ صدّر «الكادر» في ملف مستقل.",
+  "exportPdf": "PDF",
+  "exportPdfHint": "تقرير مهيأ للطباعة لنطاق التقرير الحالي؛ اختر «حفظ بصيغة PDF» من نافذة الطباعة",
+  "printSummaryReport": "تقرير المشاريع",
+  "share": "مشاركة",
+  "shareBusy": "جارٍ تجهيز ملف PDF…",
+  "shareMessage": "{title} — من خارطة مشاريع الاستقامة (الملف مرفق).",
+  "shareDownloadedTitle": "نُزّل ملف PDF",
+  "shareDownloadedBody": "حُفظ الملف «{file}» في مجلد التنزيلات. اختر وسيلة الإرسال، ثم أرفق الملف في الرسالة.",
+  "shareWhatsapp": "واتساب",
+  "shareEmail": "البريد الإلكتروني",
+  "shareFailed": "تعذّر تجهيز ملف PDF للمشاركة. جرّب «طباعة / حفظ PDF»."
 }

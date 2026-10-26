@@ -41,6 +41,30 @@ export async function updateMeta<T>(
   });
 }
 
+/**
+ * Rows that got a conflict flag (`_conflict`) on this device, as `table:id`. The pull reads
+ * these rows back by primary key before overwriting them, so that the flag survives; asking
+ * the `_conflict` index instead needs a cursor, which iOS WebKit refused for good on a full
+ * store ("Unable to open cursor"), and reading every pulled row back is far too slow there.
+ * Stale entries only cost one extra lookup.
+ */
+export const META_FLAGGED = 'sync.flagged';
+const MAX_FLAGGED = 2000;
+
+export async function markFlagged(table: string, id: string): Promise<void> {
+  const list = (await getMeta<string[]>(META_FLAGGED)) ?? [];
+  const key = `${table}:${id}`;
+  if (list.includes(key)) return;
+  await setMeta(META_FLAGGED, [...list, key].slice(-MAX_FLAGGED));
+}
+
+/** Ids of `table` that may carry a conflict flag. */
+export async function flaggedIds(table: string): Promise<Set<string>> {
+  const prefix = `${table}:`;
+  const list = (await getMeta<string[]>(META_FLAGGED)) ?? [];
+  return new Set(list.filter((k) => k.startsWith(prefix)).map((k) => k.slice(prefix.length)));
+}
+
 // ---------------------------------------------------------------------------------------
 // drafts (web.md §3.4): autosaved forms; never touched by sync, scope resets or sign-out of
 // the same user.

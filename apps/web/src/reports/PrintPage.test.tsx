@@ -216,6 +216,19 @@ describe('donor and country reports', () => {
     fireEvent.click(screen.getByTestId('print-show-salaries'));
     await waitFor(() => expect(within(doc).getByTestId('dash-payroll')).toBeTruthy());
   });
+
+  it('summary (PDF of the reports page): dashboard() of the scope, no branch table', async () => {
+    useRole('hq_admin');
+    navigate(printPath('summary', 'global'));
+    render(<PrintPage />);
+    const doc = await screen.findByTestId('print-doc');
+    expect(api.dashboard).toHaveBeenCalledWith({ type: 'global', id: null });
+    expect(api.report).not.toHaveBeenCalled();
+    expect(doc.getAttribute('data-kind')).toBe('summary');
+    expect(within(doc).getByTestId('print-section-dashboard')).toBeTruthy();
+    expect(within(doc).queryByTestId('print-branches')).toBeNull();
+    expect(doc.textContent).toContain('تقرير المشاريع');
+  });
 });
 
 describe('states', () => {

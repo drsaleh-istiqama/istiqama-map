@@ -285,5 +285,16 @@
   "staffRows_few": "Safu {count} za wafanyakazi",
   "staffRows_many": "Safu {count} za wafanyakazi",
   "staffRows_other": "Safu {count} za wafanyakazi",
-  "fallbackStaffOmitted": "Karatasi ya Wafanyakazi haikujumuishwa; toa Wafanyakazi katika faili tofauti."
+  "fallbackStaffOmitted": "Karatasi ya Wafanyakazi haikujumuishwa; toa Wafanyakazi katika faili tofauti.",
+  "exportPdf": "PDF",
+  "exportPdfHint": "Ripoti iliyoandaliwa kuchapishwa kwa wigo wa sasa; chagua «Hifadhi kama PDF» kwenye dirisha la kuchapisha",
+  "printSummaryReport": "Ripoti ya miradi",
+  "share": "Shiriki",
+  "shareBusy": "Inaandaa PDF…",
+  "shareMessage": "{title} — kutoka Ramani ya Miradi ya Istiqama (faili limeambatishwa).",
+  "shareDownloadedTitle": "PDF imepakuliwa",
+  "shareDownloadedBody": "“{file}” limehifadhiwa kwenye vipakuliwa. Chagua njia ya kutuma, kisha ambatisha faili kwenye ujumbe.",
+  "shareWhatsapp": "WhatsApp",
+  "shareEmail": "Barua pepe",
+  "shareFailed": "Imeshindikana kuandaa PDF ya kushiriki. Jaribu «Chapisha / hifadhi PDF»."
 }

@@ -470,3 +470,14 @@
     text-decoration: none;
   }
 }
+
+/* Share dialog: WhatsApp / e-mail after the PDF was downloaded (never printed). */
+.pshare {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-block-start: var(--sp-3);
+}
+.pshare .btn {
+  text-decoration: none;
+}

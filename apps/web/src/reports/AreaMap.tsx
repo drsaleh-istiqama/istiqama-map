@@ -180,20 +180,39 @@ export function AreaMap({ countryId, areas, lon, lat }: AreaMapProps) {
         role="img"
         aria-label={t('reports.mapLabel', { area: label || t('reports.unassigned') })}
         class="pmap__svg"
+        // Colours repeated as attributes for the share-as-PDF rasteriser (CSS wins elsewhere).
       >
-        <rect x="0" y="0" width={W} height={H} class="pmap__bg" />
+        <rect x="0" y="0" width={W} height={H} class="pmap__bg" fill="#f2f5f9" />
         {shape && (
           <path
             d={pathOf(shape, proj)}
             class="pmap__area"
+            fill="rgba(15, 37, 69, 0.12)"
+            stroke="#0f2545"
+            stroke-width="1.2"
+            stroke-linejoin="round"
             fill-rule="evenodd"
             data-testid="print-map-area"
           />
         )}
         {point && (
           <g data-testid="print-map-point">
-            <circle cx={proj.x(point.lon)} cy={proj.y(point.lat)} r="9" class="pmap__halo" />
-            <circle cx={proj.x(point.lon)} cy={proj.y(point.lat)} r="5" class="pmap__dot" />
+            <circle
+              cx={proj.x(point.lon)}
+              cy={proj.y(point.lat)}
+              r="9"
+              class="pmap__halo"
+              fill="rgba(200, 162, 74, 0.35)"
+            />
+            <circle
+              cx={proj.x(point.lon)}
+              cy={proj.y(point.lat)}
+              r="5"
+              class="pmap__dot"
+              fill="#c8a24a"
+              stroke="#0f2545"
+              stroke-width="2"
+            />
           </g>
         )}
       </svg>

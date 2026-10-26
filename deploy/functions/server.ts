@@ -23,6 +23,8 @@
  *   FUNCTIONS_NO_VERIFY_JWT comma list, default "otp-hook" (Auth hook: signed, no JWT)
  *   PURGE_PHOTOS_UTC        "HH:MM" daily in-process run of purge-photos with the service key;
  *                           "off" disables it. Default "01:30".
+ *   STORAGE_WATCHDOG_*, RAILWAY_PROJECT_TOKEN, RAILWAY_STORAGE_SERVICE_ID — storage watchdog,
+ *                           see deploy/functions/storageWatchdog.ts.
  */
 import crypto from 'node:crypto';
 import http from 'node:http';
@@ -35,6 +37,7 @@ import {
   writeFetchResponse,
 } from '../../scripts/local-stack/gateway/functions.ts';
 import type { GatewayConfig } from '../../scripts/local-stack/gateway/config.ts';
+import { createWatchdog, probeStorage, railwayRedeploy } from './storageWatchdog.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PORT = Number(process.env.PORT ?? 9000);
@@ -242,6 +245,45 @@ function schedulePurge(): void {
   log('info', 'purge_scheduled', { utc: at });
 }
 
+// ---------------------------------------------------------------------------------------------
+// Storage watchdog: probe Storage, redeploy it when its S3 keys went stale
+// ---------------------------------------------------------------------------------------------
+
+function scheduleStorageWatchdog(): void {
+  const every = process.env.STORAGE_WATCHDOG_MINUTES ?? '5';
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const minutes = Number(every);
+  if (every === 'off' || !url || !key || !(minutes > 0)) {
+    log('warn', 'storage_watchdog_disabled', { reason: every === 'off' ? 'off' : 'config' });
+    return;
+  }
+  const token = process.env.RAILWAY_PROJECT_TOKEN;
+  const serviceId = process.env.RAILWAY_STORAGE_SERVICE_ID;
+  const environmentId = process.env.RAILWAY_ENVIRONMENT_ID;
+  const canHeal = Boolean(token && serviceId && environmentId);
+  const watchdog = createWatchdog({
+    probe: () =>
+      probeStorage(
+        url,
+        key,
+        process.env.STORAGE_WATCHDOG_PROBE ?? 'tiles/basemap/east-africa.pmtiles',
+      ),
+    redeploy: async () =>
+      canHeal
+        ? railwayRedeploy(token as string, serviceId as string, environmentId as string)
+        : false,
+    log,
+    now: () => Date.now(),
+  });
+  const run = (): void => {
+    watchdog.tick().catch(() => undefined);
+  };
+  setTimeout(run, 60_000);
+  setInterval(run, minutes * 60_000).unref();
+  log('info', 'storage_watchdog_scheduled', { minutes, self_heal: canHeal });
+}
+
 const server = http.createServer((req, res) => {
   handle(req, res).catch((e: unknown) => {
     log('error', 'unhandled', { error: e instanceof Error ? e.message : String(e) });
@@ -253,4 +295,5 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, '::', () => {
   log('info', 'functions_server_listening', { port: PORT, dir: FUNCTIONS_DIR });
   schedulePurge();
+  scheduleStorageWatchdog();
 });

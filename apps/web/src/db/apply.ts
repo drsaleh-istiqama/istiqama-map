@@ -18,7 +18,7 @@ import {
   type StoredProject,
 } from './derive';
 import { db, type FailedOp, type OutboxOp } from './dexie';
-import { resetMetaCaches } from './meta';
+import { flaggedIds, resetMetaCaches } from './meta';
 import { COMPLETENESS_CHILD_TABLES, SYNC_TABLES, isTableName, tableDef } from './tables';
 import type { PullChange, RestrictedTableName, Row, TableName } from './types';
 import { findLocal, putLocal, removeLocalRow } from './write';
@@ -112,13 +112,18 @@ async function applyChunk(
   // changes the search tokens of their projects) and for conflict flags.
   // Read by primary key, never through an index cursor: on iOS WebKit an index cursor opened
   // here failed for ever ("UnknownError: Unable to open cursor") once a store held a few
-  // thousand rows, and the whole first sync stopped. Plain gets do not open cursors.
+  // thousand rows. And only the rows that need it — one get per row is slow on WebKit
+  // (≈30 ms each): projects / localities always, other tables only rows flagged in conflict.
   const existing = new Map<string, AnyRecord>();
   if (liveIds.length > 0) {
-    const found = (await store.bulkGet(liveIds)) as Array<AnyRecord | undefined>;
-    for (const r of found) {
-      if (!r) continue;
-      if (isProjects || isLocalities || r._conflict === 1) existing.set(String(r.id), r);
+    let wanted: string[] = liveIds;
+    if (!isProjects && !isLocalities) {
+      const flagged = await flaggedIds(table);
+      wanted = flagged.size > 0 ? liveIds.filter((id) => flagged.has(id)) : [];
+    }
+    if (wanted.length > 0) {
+      const found = (await store.bulkGet(wanted)) as Array<AnyRecord | undefined>;
+      for (const r of found) if (r) existing.set(String(r.id), r);
     }
   }
 

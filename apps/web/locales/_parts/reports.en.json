@@ -285,5 +285,16 @@
   "staffRows_few": "{count} staff rows",
   "staffRows_many": "{count} staff rows",
   "staffRows_other": "{count} staff rows",
-  "fallbackStaffOmitted": "The Staff sheet was left out; export Staff as a separate file."
+  "fallbackStaffOmitted": "The Staff sheet was left out; export Staff as a separate file.",
+  "exportPdf": "PDF",
+  "exportPdfHint": "A print-ready report of the current scope; choose “Save as PDF” in the print dialog",
+  "printSummaryReport": "Projects report",
+  "share": "Share",
+  "shareBusy": "Preparing the PDF…",
+  "shareMessage": "{title} — from the Istiqama Projects Map (file attached).",
+  "shareDownloadedTitle": "PDF downloaded",
+  "shareDownloadedBody": "“{file}” was saved to your downloads. Choose how to send it, then attach the file to the message.",
+  "shareWhatsapp": "WhatsApp",
+  "shareEmail": "E-mail",
+  "shareFailed": "The PDF could not be prepared for sharing. Try “Print / save PDF”."
 }

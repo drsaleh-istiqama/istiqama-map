@@ -2,7 +2,8 @@
 import { setPref } from '../lib/prefs';
 import { navigate } from '../routes';
 
-export type PrintKind = 'project' | 'donor' | 'country';
+/** `summary` takes a scope key (`global`, `country:<id>`, `branch:<id>`) instead of an id. */
+export type PrintKind = 'project' | 'donor' | 'country' | 'summary';
 
 /** Path of a print view, e.g. `printPath('project', id)` for the project details page. */
 export function printPath(kind: PrintKind, id: string): string {

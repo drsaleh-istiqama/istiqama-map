@@ -57,3 +57,13 @@ export const IconFlame = (p: Props) => (
     <path d="M12 21a6 6 0 0 0 6-6c0-4-3-6-4-10-2 2-3 4-3 6-1-1-2-2-2-3-2 2-3 4-3 7a6 6 0 0 0 6 6Z" />
   </Svg>
 );
+
+/** Share: three connected nodes. */
+export const IconShare = ({ size }: Props) => (
+  <Svg size={size}>
+    <circle cx="18" cy="5" r="3" />
+    <circle cx="6" cy="12" r="3" />
+    <circle cx="18" cy="19" r="3" />
+    <path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4" />
+  </Svg>
+);

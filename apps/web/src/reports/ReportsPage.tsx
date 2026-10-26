@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { can, me } from '../auth';
 import { fmt, locale, pickName, t } from '../i18n';
-import { useViewFilters } from '../routes';
+import { navigate, useViewFilters } from '../routes';
 import { Button, EmptyState, IconDownload, IconOffline, Spinner } from '../ui';
 import { isOnline, reportsApi } from './api';
 import { readCachedDashboard, writeCachedDashboard } from './cache';
@@ -24,7 +24,8 @@ import {
   type ExportChoices,
 } from './ExportPanel';
 import { useFxPlaceholder, useOnline } from './hooks';
-import { IconRefresh } from './icons';
+import { IconPrint, IconRefresh } from './icons';
+import { printPath } from './paths';
 import { PrintLinks } from './PrintLinks';
 import {
   loadScopeOptions,
@@ -222,6 +223,15 @@ export default function ReportsPage() {
               testId="reports-refresh"
             >
               {t('reports.refresh')}
+            </Button>
+            <Button
+              icon={<IconPrint />}
+              title={t('reports.exportPdfHint')}
+              disabled={!online || !selectedKey}
+              onClick={() => selectedKey && navigate(printPath('summary', selectedKey))}
+              testId="reports-pdf"
+            >
+              {t('reports.exportPdf')}
             </Button>
             <Button
               variant="gold"

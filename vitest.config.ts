@@ -15,6 +15,7 @@ export default defineConfig({
             'scripts/**/*.test.ts',
             'supabase/functions/**/*.test.ts',
             'load-tests/**/*.test.ts',
+            'deploy/**/*.test.ts',
           ],
         },
       },

@@ -27,6 +27,7 @@
 import { completenessScore } from '../lib/completeness';
 import { completenessChildren, type StoredProject } from './derive';
 import { db, type DeleteSnapshot, type FailedOp, type OutboxOp } from './dexie';
+import { markFlagged } from './meta';
 import {
   DbError,
   afterChildChange,
@@ -433,6 +434,7 @@ export async function ackOp(
       row._conflict = 1;
       row._conflict_fields = result.conflict_fields ?? touched;
       row._conflict_version = version ?? localVersion;
+      await markFlagged(table, rowId);
     }
 
     await refreshDirtyFlags(row, table, rowId);

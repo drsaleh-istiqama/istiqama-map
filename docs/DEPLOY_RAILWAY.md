@@ -261,3 +261,19 @@ Railway:
 - **روابط البريد:** `API_EXTERNAL_URL=https://<Envoy domain>/auth/v1` على Gotrue. ولا يوضع نطاق Envoy العام في `GOTRUE_MAILER_EXTERNAL_HOSTS`، وإلا بنى Gotrue الرابط من ترويسة المضيف بلا `/auth/v1` (Envoy تحذف البادئة) فيظهر 404.
 - **قالب البريد:** `GOTRUE_MAILER_TEMPLATES_MAGIC_LINK=https://map.istiqama.om/email/magic-link` (بلا `.html`، لأن Cloudflare Pages يعيد التوجيه). الملف في `apps/web/public/email/magic-link.html`، وموضوع الرسالة في `GOTRUE_MAILER_SUBJECTS_MAGIC_LINK`.
 - **البريد عبر Amazon SES:** `GOTRUE_SMTP_HOST=email-smtp.<region>.amazonaws.com`، المنفذ 587، والمستخدم وكلمة المرور من «SMTP credentials» في SES (لا مفاتيح IAM).
+
+## 11. حارس التخزين — منع تكرار عطل الصور (2026-10-26)
+
+**الحادثة:** من 2026-10-24 إلى 26 فشلت قراءة الصور والخريطة الأساسية ورفع الصور والتصدير (`SignatureDoesNotMatch` من الحاوية). السبب: تغيّرت مفاتيح حاوية Railway، وتبعتها متغيرات خدمة `Supabase Storage` لأنها مراجع، لكن الحاوية الجارية بقيت بالمفاتيح القديمة حتى أُعيد نشرها.
+
+**الحارس:** خدمة `functions` تقرأ كل 5 دقائق أول 16 بايتًا من `tiles/basemap/east-africa.pmtiles` عبر Storage بمفتاح الخدمة. بعد فشلين متتاليين تطلب من Railway إعادة نشر `Supabase Storage` (مرة كل 30 دقيقة على الأكثر). السجلات: `storage_watchdog_*` في خدمة `functions`.
+
+**متغيرات خدمة `functions`:**
+
+| المتغير | القيمة |
+|---|---|
+| `RAILWAY_PROJECT_TOKEN` | رمز مشروع من Project → Settings → Tokens (يُدخله المالك بنفسه؛ لا يُكتب في المستودع) |
+| `RAILWAY_STORAGE_SERVICE_ID` | `${{Supabase Storage.RAILWAY_SERVICE_ID}}` |
+| `STORAGE_WATCHDOG_MINUTES` | اختياري، الافتراضي 5؛ `off` يعطّله |
+
+دون الرمز يعمل الحارس مراقبًا فقط (يسجّل الفشل ولا يصلح).
