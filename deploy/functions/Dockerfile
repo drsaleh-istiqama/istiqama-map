@@ -20,7 +20,7 @@ COPY supabase/functions ./supabase/functions
 COPY scripts/local-stack/gateway/functions.ts scripts/local-stack/gateway/http.ts \
      scripts/local-stack/gateway/jwt.ts scripts/local-stack/gateway/log.ts \
      scripts/local-stack/gateway/config.ts ./scripts/local-stack/gateway/
-COPY deploy/functions/server.ts ./deploy/functions/server.ts
+COPY deploy/functions/server.ts deploy/functions/storageWatchdog.ts ./deploy/functions/
 
 COPY --from=secrets --chmod=755 /out/supabase-secrets /usr/local/bin/supabase-secrets
 
